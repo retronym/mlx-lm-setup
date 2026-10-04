@@ -88,7 +88,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
     async def chat(message: str | None = None, messages: list[dict[str, str]] | None = None, model: str | None = None,
                    system: str | None = None, max_tokens: int = 1024, temperature: float = 0.7) -> dict:
         """Ask a local LLM. Pass either `message` (a single user prompt) or `messages` (a list of {role, content}); optional
-        `system` prompt. Returns the reply text with token usage and timing. Starts the model if needed (cold start: seconds)."""
+        `system` prompt. Returns the reply text with token usage and timing, plus `reasoning` (the chain of thought) when thinking is on. Starts the model if needed (cold start: seconds)."""
         if (message is None) == (messages is None):
             raise ToolError("invalid_arguments: pass exactly one of `message` or `messages`")
         msgs = [{"role": "user", "content": message}] if message is not None else list(messages or [])
@@ -102,9 +102,13 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
             "model": spec.options.get("model", spec.name), "messages": msgs, "max_tokens": max_tokens,
             "temperature": temperature, "stream": False}, profile_for(model, "llm"))
         choice = (data.get("choices") or [{}])[0]
-        return {"text": (choice.get("message") or {}).get("content", ""), "model": meta["backend"],
-                "finish_reason": choice.get("finish_reason"), "usage": data.get("usage"),
-                "secs": round(time.monotonic() - t0, 2), "cold_start_s": meta["cold_start_s"]}
+        msg = choice.get("message") or {}
+        out = {"text": msg.get("content", ""), "model": meta["backend"],
+               "finish_reason": choice.get("finish_reason"), "usage": data.get("usage"),
+               "secs": round(time.monotonic() - t0, 2), "cold_start_s": meta["cold_start_s"]}
+        if msg.get("reasoning"):                           # only when thinking is on (e.g. a *-think profile)
+            out["reasoning"] = msg["reasoning"]
+        return out
 
     @mcp.tool()
     async def iterate(gates: list[dict], message: str | None = None, messages: list[dict[str, str]] | None = None,

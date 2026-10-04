@@ -56,6 +56,9 @@
   .msg.error { border-color: var(--bad); color: var(--bad); }
   .meta { font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
   .wait { color: var(--warn); font-size: 13px; }
+  details.think { margin-bottom: 8px; border-left: 2px solid var(--line); padding-left: 10px; color: var(--muted); font-size: 13px; }
+  details.think summary { cursor: pointer; font-size: 12px; user-select: none; }
+  details.think .tbody { white-space: pre-wrap; margin-top: 4px; max-height: 40vh; overflow-y: auto; }
   .msg p { margin: 0 0 .6em; } .msg p:last-child { margin-bottom: 0; } .msg.assistant p.raw { white-space: pre-wrap; }
   .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
   .md h1, .md h2, .md h3, .md h4 { margin: 1em 0 .4em; line-height: 1.25; } .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3, .md h4 { font-size: 1.05em; }
@@ -234,6 +237,9 @@ document.addEventListener("click", e => {
   navigator.clipboard.writeText(b.parentElement.querySelector("pre").textContent);
   b.textContent = "copied"; setTimeout(() => b.textContent = "copy", 1200);
 });
+function thinkBlock(text, open) {                          // the model's reasoning, shown while it streams and collapsed once the answer starts
+  return text ? `<details class="think"${open ? " open" : ""}><summary>${open ? "Thinking…" : "Thought"} (${text.length} chars)</summary><div class="tbody">${esc(text)}</div></details>` : "";
+}
 function addMsg(role, html, cls = "") {
   $("empty")?.remove();
   const d = document.createElement("div"); d.className = `msg ${role} ${cls}`; d.innerHTML = html;
@@ -254,9 +260,9 @@ async function send() {
   const cold = current()?.state !== "ready";
   const t0 = performance.now();
   const ticker = setInterval(() => {                       // headers only arrive once the model is up, so this is the load time
-    if (!out) el.innerHTML = `<p class="wait">${cold ? "Starting " + esc(model) + " (first message after idle)" : "Thinking"}… ${((performance.now() - t0) / 1000).toFixed(0)}s</p>`;
+    if (!out && !reasoning) el.innerHTML = `<p class="wait">${cold ? "Starting " + esc(model) + " (first message after idle)" : "Thinking"}… ${((performance.now() - t0) / 1000).toFixed(0)}s</p>`;
   }, 250);
-  let tFirst = null, out = "", chunks = 0, usage = null, coldSecs = null;
+  let tFirst = null, out = "", reasoning = "", chunks = 0, usage = null, coldSecs = null;
   try {
     const r = await fetch("/v1/chat/completions", {
       method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
@@ -281,8 +287,12 @@ async function send() {
         const data = line.slice(5).trim(); if (data === "[DONE]") continue;
         let j; try { j = JSON.parse(data); } catch { continue; }
         if (j.usage) usage = j.usage;
-        const delta = j.choices?.[0]?.delta?.content;
-        if (delta) { if (tFirst === null) tFirst = performance.now(); out += delta; chunks++; el.innerHTML = render(out); $("scroll").scrollTop = $("scroll").scrollHeight; }
+        const d = j.choices?.[0]?.delta || {};
+        if (d.reasoning || d.content) {
+          if (tFirst === null) tFirst = performance.now();
+          reasoning += d.reasoning || ""; out += d.content || ""; chunks++;
+          el.innerHTML = thinkBlock(reasoning, !out) + (out ? render(out) : ""); $("scroll").scrollTop = $("scroll").scrollHeight;
+        }
       }
     }
     history.push({ role: "assistant", content: out });
