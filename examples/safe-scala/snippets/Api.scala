@@ -12,6 +12,7 @@ import caps.*
   def write(content: String): Unit
 
 @assumeSafe abstract class FileSystem extends SharedCapability
+@assumeSafe abstract class Network extends SharedCapability
 @assumeSafe class IOCapability extends SharedCapability
 
 @assumeSafe given IOCapability = IOCapability()     // TACIT's REPL preamble provides this given
@@ -20,3 +21,5 @@ import caps.*
   def requestFileSystem[T](root: String)(op: FileSystem^ ?=> T)(using IOCapability): T = ???
   def access(path: String)(using fs: FileSystem): FileEntry^{fs} = ???
   def readClassified(path: String)(using FileSystem): Classified[String] = ???
+  def requestNetwork[T](hosts: Set[String])(op: Network^ ?=> T)(using IOCapability): T = ???
+  def httpPost(url: String, body: String)(using net: Network): String = ???

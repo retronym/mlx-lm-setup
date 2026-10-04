@@ -24,6 +24,7 @@ EXPECT = {
     "leak": "Reference `fs` is not included in the allowed capture set {any.rd}",
     "cast": "Cannot use asInstanceOf in safe mode",
     "bypass": "Cannot refer to method writeString in object Files from safe code",
+    "post": "Reference `net` is not included in the allowed capture set {any.rd}",
 }
 
 
