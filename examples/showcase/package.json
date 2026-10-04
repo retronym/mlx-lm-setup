@@ -1,0 +1,23 @@
+{
+  "name": "mlx-lm-setup-showcase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio --public-dir ../../data/showcase",
+    "render": "remotion render Showcase ../../data/showcase/showcase.mp4 --public-dir ../../data/showcase",
+    "still": "remotion still --public-dir ../../data/showcase"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.532",
+    "@remotion/google-fonts": "4.0.532",
+    "@remotion/media-utils": "4.0.532",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.532"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "playwright": "^1.63.0",
+    "typescript": "5.8.3"
+  }
+}

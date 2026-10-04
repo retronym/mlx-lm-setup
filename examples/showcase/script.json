@@ -1,0 +1,25 @@
+{
+  "title": "A private AI back end for one Mac",
+  "scenes": [
+    {"id": "cold", "lead": 0.8, "tail": 0.6,
+     "narration": "One evening in October, this Mac ran out of room. [[dup]] Two copies of the same thirty billion parameter model, [[nli]] a fact checking model, [[browsers]] and a few browser tabs. [[swap]] Six gigabytes of swap, and a machine that could barely move."},
+    {"id": "title", "lead": 0.6, "tail": 1.4,
+     "narration": "This is the fix. [[title]] A private AI back end, for one Mac."},
+    {"id": "memory", "lead": 0.3, "tail": 0.6,
+     "narration": "The binding constraint is not speed. [[speed]] These models generate about a hundred tokens a second. [[memory]] It's memory. [[overflow]] Together, they need several times what the budget allows. [[budget]] So they cannot all be resident. Something has to decide who is, and when."},
+    {"id": "door", "lead": 0.3, "tail": 0.6,
+     "narration": "Before, every model was its own script, its own port, [[copy]] sometimes its own private copy of a model. [[merge]] Now there is one front door. [[claude]] Claude Code speaks M C P to it, [[browser]] the browser gets a chat site and an admin page, [[openai]] and anything that speaks the Open A I API just works."},
+    {"id": "stage", "lead": 0.3, "tail": 0.6,
+     "narration": "The gateway works like a stage manager. A model waits in the wings until a request needs it. [[start]] Then it's called on, in about two seconds. [[idle]] When it has been idle long enough, it leaves the stage, and its memory goes back. [[single]] Three requests for a cold model share one start. [[evict]] And when a newcomer won't fit, the one that has been idle longest makes room. [[diagram]] Passivation means the process exits, because on Metal, that's the only reliable way to give memory back."},
+    {"id": "decide", "lead": 0.3, "tail": 0.8,
+     "narration": "The most useful lesson here is to decide, instead of generate. [[pulse]] Give a model a closed list of options, and a decision model scores every one of them in a single forward pass, with probabilities. [[alice]] Here's a phrase from Alice in Wonderland. [[state]] The context is read once. [[questions]] Then each question adds only its own options, [[slots]] and each option's score is how much more the model leans yes than no. [[result]] Emoji, colour, mood and sentiment, for the price of one pass. [[cost]] It's fast, it's deterministic, and nothing has to be parsed."},
+    {"id": "pipelines", "lead": 0.3, "tail": 0.6,
+     "narration": "So the pipelines are ordinary code, with a scorer inside. [[book]] Alice, phrase by phrase, each with its emoji and colour. [[prs]] Three hundred Scala pull requests, triaged against six questions. [[roc]] Good at ranking. [[calib]] Less good at knowing where to draw the line."},
+    {"id": "gates", "lead": 0.3, "tail": 0.6,
+     "narration": "Local models are wrong in confident ways. [[wrong]] This one invented a bug, [[nli]] and the fact checker agreed with it. [[gate]] So local work goes through gates. A candidate is retried until it passes checks a machine can verify. [[split]] Claude keeps design and judgment, and hands the cheap, checkable work down to the Mac."},
+    {"id": "voice", "lead": 0.3, "tail": 0.6,
+     "narration": "Which brings us to this voice. [[design]] It was designed from a single sentence of description, [[clone]] then cloned, so every scene sounds the same. [[words]] Whisper listened back, and timed every word you've seen on screen. [[made]] The script, the voice, the captions, and this film, were all made on this Mac."},
+    {"id": "end", "lead": 0.6, "tail": 3.0,
+     "narration": "And while it rendered, [[zero]] the swap did not grow."}
+  ]
+}
