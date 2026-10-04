@@ -230,3 +230,31 @@ async def run_look(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient,
     if not 1 <= int(kw.get("max_attempts", 2)) <= 6:
         raise ApiError(400, "invalid_arguments", "max_attempts must be 1..6")
     return {**await look(chat, iterate, **kw), "model": spec.name}
+
+
+# ---- translate (HTTP API and MCP tool) ----------------------------------------------------------------------------------------
+async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, **kw) -> dict:
+    """kw as for translate.translate: text | image, mode, model, max_attempts."""
+    from .gates import parse_gates
+    from .iterate import run_iterate
+    from .translate import translate
+
+    async def iterate(name: str, gates: list[dict], msgs: list[dict], max_attempts: int) -> dict:
+        spec = catalog.backends[name]
+        cold = [0.0]
+
+        async def chat(_override, convo: list[dict]) -> tuple[str, dict]:
+            body = {"messages": convo, "max_tokens": 4096, "temperature": 0.0}
+            if spec.kind == "llm":
+                body["model"] = spec.options.get("model", spec.name)          # mlx_lm.server may try to load a different model id
+            r, meta = await post_json(sup, client, spec, "/v1/chat/completions", body)
+            cold[0] += meta["cold_start_s"]
+            if r.status_code != 200:
+                raise ApiError(400 if 400 <= r.status_code < 500 else 502, "backend_error", f"{spec.name} returned {r.status_code}: {r.text[:300]}")
+            d = r.json()
+            return (d["choices"][0]["message"].get("content") or ""), {"model": spec.name, "secs": (d.get("x_timing") or {}).get("secs")}
+
+        res = await run_iterate(chat, None, parse_gates(gates), msgs, max_attempts)
+        return {**res, "cold_start_s": round(cold[0], 2)}
+
+    return await translate(iterate, catalog, sup.snapshot(), **kw)

@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_look, run_narrate, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_look, run_narrate, run_translate, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -281,6 +281,15 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(400, "invalid_arguments", "`images` must be a list")
         return JSONResponse(await run_look(catalog, sup(), client(), **body))
 
+    async def translate(request: Request):
+        """{"text"} | {"image": path | data URI}, "mode"? (auto | ocr | vision), "model"?, "max_attempts"? -> {source_language,
+        translation, summary, markdown, route (text | ocr | vision), model, ...}. Screenshots go through macOS OCR first."""
+        body = await read_json(request)
+        known = {"text", "image", "mode", "model", "max_attempts"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        return JSONResponse(await run_translate(catalog, sup(), client(), **body))
+
     async def look_expand(request: Request):
         """{"images": [...]} -> the same list with directories replaced by their image files, so a client can send one request per
         image and show progress. Nothing is read beyond the directory listing."""
@@ -434,6 +443,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/voices", handler(voices), methods=["GET"]),
         Route("/api/narrate", handler(narrate), methods=["POST"]),
         Route("/api/look", handler(look), methods=["POST"]),
+        Route("/api/translate", handler(translate), methods=["POST"]),
         Route("/api/look/expand", handler(look_expand), methods=["POST"]),
         Route("/api/vision/presets", handler(vision_presets), methods=["GET"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
