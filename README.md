@@ -115,13 +115,7 @@ Alice in Wonderland annotated phrase by phrase: a decision model and an LLM scor
 brew install mlx-lm                  # one-time
 mise run service-install             # the gateway as a launchd login service (also service-status, -logs, -restart, -uninstall, wrapping service/service.sh); or run it by hand:
 .venv/bin/python -m gateway &        # chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
-open http://127.0.0.1:8090/chat      # chat site: streaming, tok/s, shows "starting model..." on a cold start
-open http://127.0.0.1:8090/jev       # decision-model site: prompt + question + options; ✨ asks a local LLM (Gemma) to propose the options
-open http://127.0.0.1:8090/speech    # speech site: voices, timings, word-level transcript
-open http://127.0.0.1:8090/vision    # vision: paste or drop images, layout check, storyboard, tables
-open http://127.0.0.1:8090/translate # translate: text or a pasted screenshot, Polish → English by default
-open http://127.0.0.1:8090/search    # search: Scala sources and issues, hybrid + rerank
-open http://127.0.0.1:8090/          # home: one panel per section, live model state and memory
+open http://127.0.0.1:8090/          # home: a panel per page, live model state and memory
 python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
 ./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
