@@ -1,6 +1,6 @@
 # Safe Scala explainer: storyboard
 
-Status: **draft for review.** Nothing is built yet.
+Status: **built** (see [README.md](README.md)). The film follows this storyboard, with the deviations listed under "As built" at the end.
 
 ## Intent
 
@@ -84,7 +84,7 @@ The heart of the film.
 
 Same structure as [../showcase](../showcase): `script.json` (scenes, narration with cues, lead/tail padding), `narrate.py` (calls the `narrate` tool / `/api/narrate`, copies wavs, computes peaks, writes `data.json`), `capture.mjs` (Playwright captures), Remotion project with one component per scene and one composition per scene for stills, generated assets in `data/safe-scala/`.
 
-- **Voice:** call `voices` first; then `speak(model="qwen3-tts-design", instruct=…, save_as_voice="odersky-inspired")` once, with a description along the lines of *a mature, warm male voice, light Swiss-German accent, unhurried academic pacing, precise consonants, gently amused*; then narrate every scene with that saved reference.
+- **Voice:** call `voices` first; then `speak(model="qwen3-tts-design", instruct=…, save_as_voice="odersky-inspired")` once, with a description along the lines of *a mature male professor, native German speaker with a light German accent, calm and unhurried, precise consonants, gently amused*; then narrate every scene with that saved reference.
 - **Data sources at build time:**
   - `paper.json`: Tables 1 and 2 and the utility figures, transcribed with the arXiv URL and retrieval date. A check step fetches the arXiv HTML and asserts that each number appears in it, so a transcription error fails the build.
   - `compile.py`: runs `scala-cli compile --server=false` on `Leak.scala` (and the scope-escape snippet) with `scala 3.nightly`, records stdout, exit code and compiler version into `data.json`. The film renders that text. If a snippet unexpectedly compiles, the build fails.
@@ -95,4 +95,16 @@ Same structure as [../showcase](../showcase): `script.json` (scenes, narration w
 1. **Scope of "safe-scala".** I framed it as capture checking + safe mode, with TACIT as the worked example and the paper as the evidence. Is there a broader initiative framing (e.g. the EPFL/VirtusLab agent project) you want named?
 2. **A trusted-local-model beat?** TACIT's `chat(Classified[String])` sends secrets only to a trusted local LLM, and this repo's gateway is exactly such an OpenAI-compatible endpoint. A real 15-second demo (TACIT pointed at `127.0.0.1:8090/v1`, summary stays `Classified(***)` to the agent) would tie the film to this Mac, but pushes it to 2:20 or costs scene 5's slope chart. I'd leave it out.
 3. **"Stock":** I read it as the stock look from the showcase (same theme, no music, no stock footage). Correct?
-4. **The voice:** designed from a description evoking a Swiss-German academic, with the "synthetic voice" credit. Fine, or should the description stay more generic?
+4. **The voice:** designed from a description evoking a German academic (light accent), with the "synthetic voice" credit.
+
+## As built
+
+- **Length and defaults:** 1:59.7 (3590 frames at 1080p30), defaults taken on all open questions: no trusted-local-model scene, the showcase's look, no music.
+- **Voice:** designed once with `qwen3-tts-design` from a description of a German professor with a light German accent (Swiss in the first draft; corrected), saved as `odersky-inspired`, and every scene narrated with the clone model. Whisper heard every scene as written apart from number formatting ("131", "8 of 11"), so nothing in `transcript_differs` needed attention.
+- **Snippets, not TACIT itself.** Building TACIT from source was blocked in this session, so the film compiles self-contained snippets against stubs that copy TACIT's signatures (see README). The film labels each panel with its snippet name rather than claiming it ran in TACIT.
+- **`{any.rd}`, not `{}`.** TACIT's real `Classified.map` takes `T ->{any.rd} B` (may read, holds no capability), not the pure `T -> B` the README describes. The purity scene shows the real signature and the compiler's real message ("Reference `fs` is not included in the allowed capture set {any.rd}"), and the narration says "functions that hold no capabilities" instead of "capture nothing". The closing empty braces are a pure function's capture set (`snippets/pure`, which compiles).
+- **Bookend made literal.** The final scene's program (`snippets/post`) does exactly what the injected README line asks: read `.ssh/id_rsa` and post it to `paste.example`. It is rejected with "Reference `net` is not included in the allowed capture set {any.rd}".
+- **Scope scene** adds two more real rejections: an `asInstanceOf` ("Cannot use asInstanceOf in safe mode") and a direct `java.nio.file.Files.writeString` ("Cannot refer to method writeString in object Files from safe code…"), narrated as "no reaching around the library".
+- **Measured on this Mac:** every snippet compiled or rejected in 2 to 3.5 s of wall time (including JVM start-up) with `3.10.1-RC1-bin-20261004-2d41fe6-NIGHTLY`. The panels show each snippet's measured time, and the end card shows the version and date.
+- **Evidence and limits:** the leak headline reads "8 of 11 leaked", with injections on a separate line, because the combined count (11) read like "11 of 11". The slope chart colours the one drop (MiniMax on SWE-bench Lite, 43.3% to 41.7%) differently, matching "almost nothing" in the narration.
+- **TACIT README capture** appears for the first beat of the code scene, then gives way to the literal pipeline diagram.
