@@ -144,7 +144,7 @@ sequenceDiagram
 | 4 | MCP tools (table above); register in Claude Code with HTTP transport; retire `mlx-mcp-server` | TODO |
 | 4b | `iterate` with restricted gates (schema, regex, contains, length) and an NLI faithfulness gate; no shell gate | TODO |
 | 5 | Admin site and chat site served by the gateway; SSE events; token for mutating calls | TODO |
-| 6 | Memory budget, LRU eviction, optional swap-pressure eviction | TODO |
+| 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
 | 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | TODO |
 
@@ -196,6 +196,17 @@ Not catalog concerns: agent-harness token overhead, and model quality ranking (b
 - **Live run with the real models** (`python -m gateway`): Qwen3-Coder cold start 6.7 s, first streamed token 9.3 s after the request, warm requests carry no cold header; Jev-Style cold start 3.5 s; OpenJev 15.4 s (it was 11 s on an idle machine, see below).
 - **Bug found only by the live test:** after SIGTERM the gateway exited but left every backend running. Cause: uvicorn >= 0.29 re-raises a captured signal as soon as `serve()` returns, killing the process before our cleanup ran. The gateway now owns signal handling (first signal graceful, second forces) so the cleanup always runs. `test_main.py` runs the real `python -m gateway` as a subprocess and asserts it exits 0 and that the backend, its child and the pidfiles are gone; I confirmed the test fails (exit -15) without the fix. The supervisor's orphan reaper was also validated for real: it cleaned up the three backends the buggy shutdown had left.
 - **Evidence for phase 6:** with all three backends resident (30 GB of the 28 GB budget, which is not enforced yet) free memory fell to 41% and swap reached 12.5 of 13.3 GB, and the OpenJev cold start slowed from 11 s to 15 s. The gateway makes it easy to start everything, so enforcing the budget should come before the MCP and web phases.
+
+## Phase 6 findings
+
+`gateway/memory.py` (system probe), admission control and the pressure monitor in `gateway/supervisor.py`, new `[gateway]` settings in the catalog, HTTP mapping in `gateway/app.py`; 54 tests in total (14 new ones in `test_memory_budget.py`, plus catalog, memory-probe and HTTP cases), stable over repeated runs.
+
+- **Admission control.** Before a backend is spawned it must fit the budget (sum of `est_mem_gb` of everything that holds memory). If it does not, idle backends are evicted least-recently-used first. Rules, all tested: busy backends (a request pending or in flight) and pinned backends are never evicted; a PASSIVATING backend still counts against the budget until its process has actually exited (so a SIGTERM-ignoring backend cannot cause an overcommit); the check-and-reserve step is serialized, so two concurrent starts cannot claim the same free memory; if nothing can be evicted the start waits up to `room_timeout_s`, then fails with `InsufficientMemory`, which is deliberately not a backend fault (no FAILED state, no retry backoff) and surfaces as HTTP 503 `insufficient_memory` with `Retry-After` and a message naming who holds the memory (`x (pinned)`, `a (busy)`).
+- **Pressure monitor.** Every `pressure_interval_s` it reads `kern.memorystatus_level` and `vm.swapusage` (about 3 ms). If free memory is below `min_free_pct`, or swap grew by `swap_growth_gb` within `pressure_window_s`, it evicts the LRU idle backend, with a cooldown so memory can settle; busy and pinned backends are never touched. It can be turned off.
+- **Catalog validation:** the pinned backends together must fit the budget.
+- **Observability.** `/api/backends` reports `memory_budget_gb`, `resident_est_gb`, `free_est_gb` and the live `system` reading (free percentage, swap); each backend shows `holds_memory`; events include `waiting_for_memory`, `rejected`, `pressure` and eviction reasons.
+- **Live run with the real models, same sequence that thrashed the machine before.** Qwen (17.5) and OpenJev (9.5) are 27 of 28 GB by estimate, so the budget alone allowed both, but while OpenJev loaded swap grew 3.1 GB in 10 s and the monitor evicted the idle Qwen (`pressure: swap grew 3.1 GB in 10s`). Then Jev-Style started (12.5 of 28 GB). Asking for Qwen again (30 > 28) evicted the least recently used backend, OpenJev, via the budget path, and Qwen was back in 2.3 s. Net effect on the machine: swap rose about 3 GB over the whole sequence and free memory recovered (43%, 61%, 74%), versus the unprotected run where swap hit 12.5 of 13.3 GB and free memory fell to 41%.
+- **What this says about the numbers.** The budget alone is optimistic: 27 GB of estimates were enough to push swap up on this machine with a browser, IntelliJ and about 6 GB of leftover swap in play. The pressure monitor is what made it safe. If the pressure monitor fires often, lower `memory_budget_gb` (24 would keep Qwen and OpenJev from being resident together).
 
 ## Risks
 

@@ -158,13 +158,13 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
 | `docs/FINDINGS.md` | long-form log of what was tried |
 | `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
-| `gateway.toml`, `gateway/` | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-3 done: catalog, supervisor, HTTP front door) |
+| `gateway.toml`, `gateway/` | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-3 and 6 done: catalog, supervisor, HTTP front door, memory budget) |
 
 Environments: `.venv` (MCP bridge, `mcp<2`), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
 
 ## Gateway (in progress)
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-3 are built (catalog, supervisor, HTTP proxy); MCP tools, the admin and chat sites, memory-budget eviction and launchd come next (see [PLAN.md](PLAN.md)). **Memory is not yet enforced**: do not start all three heavy backends at once.
+A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-3 and 6 are built (catalog, supervisor, HTTP proxy, memory budget); MCP tools, the admin and chat sites and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 .venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM
