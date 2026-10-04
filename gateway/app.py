@@ -341,6 +341,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/events", events, methods=["GET"]),
         Route("/", page("chat.html"), methods=["GET"]),
         Route("/chat", page("chat.html"), methods=["GET"]),
+        Route("/jev", page("jev.html"), methods=["GET"]),
         Route("/admin", page("admin.html"), methods=["GET"]),
         Route("/vendor/{name}", vendor, methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),

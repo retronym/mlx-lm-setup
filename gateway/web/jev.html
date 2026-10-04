@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Jev</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #c2410c; --bar: #fed7aa; --bad: #dc2626; --warn: #d97706; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fb923c; --bar: #7c2d12; --bad: #f87171; --warn: #fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  h2 .sp { flex: 1; }
+  textarea, input[type=text] { width: 100%; }
+  textarea { resize: vertical; min-height: 64px; }
+  #options { min-height: 150px; font: 13px/1.5 ui-monospace, Menlo, monospace; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  small, .hint { color: var(--muted); font-size: 12px; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  .res { display: grid; grid-template-columns: minmax(80px, 30%) 1fr 56px; gap: 4px 10px; align-items: center; font-size: 14px; }
+  .res .name { overflow-wrap: anywhere; } .res .name.top { font-weight: 650; }
+  .res .bar { background: var(--line); border-radius: 4px; height: 14px; overflow: hidden; } .res .bar i { display: block; height: 100%; background: var(--accent); }
+  .res .p { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .answer { font-size: 18px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local Models · Jev</h1>
+  <a href="/">Chat</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <section>
+    <h2>Prompt</h2>
+    <textarea id="state" placeholder="The text to decide about: a message, a code diff, a review, anything…"></textarea>
+    <div class="row"><input type="text" id="question" placeholder="Question (e.g. “Which emoji fits best?”)"></div>
+  </section>
+
+  <section>
+    <h2>Options <span class="sp"></span>
+      <button id="magic" title="Ask a local LLM to propose options for this prompt">✨ Suggest options</button></h2>
+    <textarea id="options" spellcheck="false" placeholder="One option per line. Optionally “name: description”."></textarea>
+    <div class="row">
+      <label>kind <select id="qtype">
+        <option value="choice">choice: pick the best option</option>
+        <option value="score">score: ordered levels, lowest to highest</option>
+      </select></label>
+      <label title="Used by the ✨ button">LLM <select id="llm"></select></label>
+      <label>suggest <input id="count" type="number" min="2" max="40" value="8" style="width:60px"> options</label>
+    </div>
+    <div class="row"><small id="magicstat" class="status"></small></div>
+  </section>
+
+  <section>
+    <div class="row" style="margin:0 0 10px"><button id="run" class="primary">Decide</button><span class="status" id="runstat"></span></div>
+    <div id="out"><span class="hint">Scores every option in one forward pass of the Jev-Style decision model. Nothing is generated.</span></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+for (const id of ["state", "question", "options", "qtype", "count"]) {
+  $(id).value = store.get("gwjev." + id, $(id).value);
+  $(id).addEventListener("change", () => store.set("gwjev." + id, $(id).value));
+}
+
+// One option per line; "name: description" becomes {name: description}. Returns a list when no line has a description.
+function parseOptions(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const pairs = lines.map(l => { const i = l.indexOf(": "); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 2).trim()] : [l, null]; });
+  return pairs.some(p => p[1]) ? Object.fromEntries(pairs) : pairs.map(p => p[0]);
+}
+
+async function api(path, body, signal) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error?.message || `HTTP ${r.status}`) + (j.error?.type ? `  [${j.error.type}]` : ""));
+  return j;
+}
+function busy(btn, stat, msg) {
+  const t0 = performance.now();
+  const tick = () => { stat.className = "status wait"; stat.textContent = `${msg}… ${((performance.now() - t0) / 1000).toFixed(0)}s`; };
+  btn.disabled = true; tick(); const h = setInterval(tick, 500);
+  return () => { clearInterval(h); btn.disabled = false; stat.className = "status"; stat.textContent = ""; };
+}
+
+async function loadLlms() {
+  try {
+    const list = (await (await fetch("/api/models", { cache: "no-store" })).json()).models;
+    const keep = store.get("gwjev.llm", "");
+    $("llm").innerHTML = list.map(m => `<option value="${esc(m.id)}">${esc(m.id)}</option>`).join("");
+    const gemma = list.find(m => m.id === keep) || list.find(m => /gemma/i.test(m.id) && m.type !== "profile" && !/think/i.test(m.id)) || list.find(m => /gemma/i.test(m.id));
+    if (gemma) $("llm").value = gemma.id;
+  } catch { $("llm").innerHTML = `<option value="gemma">gemma</option>`; }
+}
+$("llm").addEventListener("change", () => store.set("gwjev.llm", $("llm").value));
+
+// The ✨ button: a local LLM proposes the option list for the prompt (and question, if given).
+function extractList(text) {
+  const m = text.match(/\[[\s\S]*\]/);
+  if (m) { try { const a = JSON.parse(m[0]); if (Array.isArray(a)) return a.map(x => typeof x === "string" ? x : x?.name ? (x.description ? `${x.name}: ${x.description}` : x.name) : "").filter(Boolean); } catch {} }
+  return text.split("\n").map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()).filter(Boolean);       // fall back to a bulleted/numbered list
+}
+$("magic").addEventListener("click", async () => {
+  const state = $("state").value.trim(), question = $("question").value.trim(), n = parseInt($("count").value, 10) || 8;
+  if (!state && !question) { $("magicstat").className = "status err"; $("magicstat").textContent = "Enter a prompt or a question first."; return; }
+  const score = $("qtype").value === "score";
+  const sys = "You write the answer options for a classifier that will score each option against a text. Reply with ONLY a JSON array of strings, no prose, no code fence."
+    + (score ? " The options are ordered scale levels from lowest to highest, each a short self-contained description." : " The options are distinct, mutually exclusive, short labels (1-4 words).");
+  const user = `Text:\n${state || "(none)"}\n\nQuestion: ${question || "(none: choose sensible categories for this text)"}\n\nGive exactly ${n} options as a JSON array of strings.`;
+  const done = busy($("magic"), $("magicstat"), "Asking " + $("llm").value);
+  try {
+    const j = await api("/v1/chat/completions", { model: $("llm").value, stream: false, temperature: 0.4, max_tokens: 1024,
+                                                   messages: [{ role: "system", content: sys }, { role: "user", content: user }] });
+    const items = extractList(j.choices?.[0]?.message?.content || "");
+    if (!items.length) throw new Error("the model returned no options; try again");
+    $("options").value = items.join("\n"); store.set("gwjev.options", $("options").value);
+    done(); $("magicstat").textContent = `${items.length} options from ${$("llm").value}. Edit freely.`;
+  } catch (e) { done(); $("magicstat").className = "status err"; $("magicstat").textContent = String(e.message || e); }
+});
+
+$("run").addEventListener("click", async () => {
+  const state = $("state").value.trim(), question = $("question").value.trim(), options = parseOptions($("options").value);
+  const count = Array.isArray(options) ? options.length : Object.keys(options).length;
+  if (!state || !question || count < 2) { $("runstat").className = "status err"; $("runstat").textContent = "Needs a prompt, a question and at least two options."; return; }
+  const done = busy($("run"), $("runstat"), "Scoring");
+  try {
+    const r = await api("/api/decide", { state, question, options, qtype: $("qtype").value });
+    done();
+    const probs = Object.entries(r.probabilities || {}).sort((a, b) => b[1] - a[1]), max = probs[0]?.[1] || 1;
+    $("out").innerHTML = `<div class="answer">→ <b>${esc(r.answer ?? probs[0]?.[0] ?? "?")}</b></div><div class="res">`
+      + probs.map(([k, v], i) => `<span class="name ${i ? "" : "top"}">${esc(k)}</span><span class="bar"><i style="width:${(100 * v / max).toFixed(1)}%"></i></span><span class="p">${(100 * v).toFixed(1)}%</span>`).join("") + `</div>`;
+  } catch (e) { done(); $("runstat").className = "status err"; $("runstat").textContent = String(e.message || e); }
+});
+loadLlms();
+</script>
+</body>
+</html>

@@ -121,6 +121,7 @@ python3 dashboard_server.py &                      # http://127.0.0.1:8766/
 brew install mlx-lm                  # one-time
 .venv/bin/python -m gateway &        # the gateway: chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
 open http://127.0.0.1:8090/          # chat site: streaming, tok/s, shows "starting model..." on a cold start
+open http://127.0.0.1:8090/jev       # decision-model site: prompt + question + options; ✨ asks a local LLM (Gemma) to propose the options
 python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
 ./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
