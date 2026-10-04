@@ -34,22 +34,22 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 ## Screenshots
 
 ### Home
-![img_9.png](img_9.png)
+![home](docs/img/home.png)
 ### Chat
-![img_1.png](img_1.png)
+![chat](docs/img/chat.png)
 ### Decide
-![img_2.png](img_2.png)
+![decide](docs/img/decide.png)
 ### Speech
-![img_3.png](img_3.png)
+![speech](docs/img/speech.png)
 ### Vision
-![img_4.png](img_4.png)
+![vision](docs/img/vision.png)
 ### Translate
 Image or Text to Text
-![img_6.png](img_6.png)
+![translate](docs/img/translate.png)
 ### Admin
-![img_5.png](img_5.png)
+![admin](docs/img/admin.png)
 ### Semantic Search
-![img_7.png](img_7.png)
+![search](docs/img/search.png)
 
 ## The models
 

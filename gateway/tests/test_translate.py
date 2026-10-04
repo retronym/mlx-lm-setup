@@ -10,7 +10,6 @@ from gateway.supervisor import Supervisor
 from gateway.tests.test_app import free_port
 from gateway.tests.test_supervisor import catalog
 
-ROOT = Path(__file__).resolve().parents[2]
 BLANK_PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32                    # not decodable: OCR finds nothing, so the vision model is used
 
 
@@ -79,7 +78,7 @@ class Paragraphs(unittest.TestCase):
 @unittest.skipUnless(ocr.available(), "macOS Vision (pyobjc-framework-Vision) not installed")
 class Ocr(unittest.TestCase):
     def test_reads_a_real_screenshot(self):
-        r = ocr.recognize((ROOT / "img.png").read_bytes())
+        r = ocr.recognize((Path(__file__).parent / "fixtures" / "translate_sample.png").read_bytes())
         self.assertIn("Local Models", r["text"])
         self.assertGreater(r["confidence"], 0.8)
 
@@ -130,7 +129,7 @@ class Routes(unittest.IsolatedAsyncioTestCase):
 
     @unittest.skipUnless(ocr.available(), "macOS Vision not installed")
     async def test_screenshot_is_read_by_ocr_and_no_model_reads_the_image(self):
-        code, d = await self.post(image=str(ROOT / "img.png"))
+        code, d = await self.post(image=str(Path(__file__).parent / "fixtures" / "translate_sample.png"))
         self.assertEqual((code, d["route"]), (200, "ocr"), d)
         self.assertIn("Local Models", d["source_text"])
         self.assertTrue(d["translation"].startswith("EN[Local Models"))
@@ -141,7 +140,7 @@ class Routes(unittest.IsolatedAsyncioTestCase):
         for image in (str(self.d / "blank.png"), uri):
             code, d = await self.post(image=image)
             self.assertEqual((code, d["route"], d["model"], d["translation"]), (200, "vision", "eyes", "EN[IMAGE]"), d)
-        code, d = await self.post(image=str(ROOT / "img.png"), mode="vision")
+        code, d = await self.post(image=str(Path(__file__).parent / "fixtures" / "translate_sample.png"), mode="vision")
         self.assertEqual(d["route"], "vision")
         self.assertEqual(self.sup.rt["gemma-text"].starts, 0)
 
