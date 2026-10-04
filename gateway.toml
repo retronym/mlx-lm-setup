@@ -164,3 +164,16 @@ est_mem_gb = 4.5
 ttl_s = 600
 max_chars = 220
 aliases = ["clone"]
+
+# --- continuation scoring (phase 7) ---------------------------------------------------------------------------------------
+# log P(candidate | prompt) for a closed list of candidates, no generation (POST /api/score). The emoji book's LLM worker uses
+# it instead of loading its own copy of the model. Same weights as qwen3-coder but a separate process (mlx_lm.server cannot
+# score continuations), so both count against the budget and an idle one is evicted to make room for the other.
+
+[backends.qwen3-coder-score]
+adapter = "mlx_lm_score"
+description = "Qwen3-Coder as a scorer: log-probability of each candidate continuation after a prompt, in one batched pass. Not a chat model."
+python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
+model = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
+est_mem_gb = 18
+ttl_s = 300

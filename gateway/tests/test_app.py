@@ -23,6 +23,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             "llm": {"kind": "llm", "aliases": ["org/some-model"], "flags": ["--ready-delay", "0.3"]},
             "dec": {"kind": "decision"},
             "nli": {"kind": "nli"},
+            "lms": {"kind": "score"},
             "voice": {"kind": "tts"},
             "ears": {"kind": "stt"},
             "bad": {"kind": "llm", "flags": ["--die-on-start"]},
@@ -157,6 +158,12 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         r = await self.http.post("/api/entail", json={"model": "llm", "premise": "p", "hypotheses": ["a"]})
         self.assertEqual(r.status_code, 400)                                          # llm is not an nli backend
 
+    async def test_score_routes_to_the_score_backend(self):
+        r = await self.http.post("/api/score", json={"prompt": "p", "candidates": [" a", " bb"]})
+        self.assertEqual((r.status_code, r.json()["logprobs"], r.headers["x-gateway-backend"]), (200, [-2.0, -3.0], "lms"))
+        r = await self.http.post("/api/score", json={"model": "dec", "prompt": "p", "candidates": [" a"]})
+        self.assertEqual(r.status_code, 400)                                          # dec is not a score backend
+
     async def test_host_and_origin_policy(self):
         r = await self.http.get("/healthz", headers={"Host": "evil.example"})
         self.assertEqual(r.status_code, 421)
@@ -180,7 +187,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_backends_status(self):
         r = await self.http.get("/api/backends")
         j = r.json()
-        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "voice", "ears", "bad"])
+        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "lms", "voice", "ears", "bad"])
         self.assertEqual((j["gateway"]["memory_budget_gb"], j["gateway"]["resident_est_gb"], j["gateway"]["default_llm"]), (100, 0, "llm"))
         await self.http.post("/v1/chat/completions", json=self.chat())
         j = (await self.http.get("/api/backends")).json()

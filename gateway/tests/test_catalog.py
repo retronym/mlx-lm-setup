@@ -133,6 +133,13 @@ class SpeechAdapterTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--voice") + 1], "af_heart")
         self.assertEqual(s.options["voices"], ["af_heart", "bm_george"])
 
+    def test_mlx_lm_score_adapter(self):
+        s = parse({"backends": {"s": {"adapter": "mlx_lm_score", "python": "py", "model": "org/llm", "est_mem_gb": 17}}}, Path("/base")).backends["s"]
+        self.assertEqual(s.kind, "score")
+        cmd = s.command()
+        self.assertTrue(cmd[1].endswith("lmscore_server.py"))
+        self.assertEqual(cmd[cmd.index("--model") + 1], "org/llm")
+
     def test_stt_and_validation(self):
         s = parse({"backends": {"w": {"adapter": "mlx_audio_stt", "python": "py", "model": "org/stt", "est_mem_gb": 3}}}, Path("/base")).backends["w"]
         self.assertEqual(s.kind, "stt")

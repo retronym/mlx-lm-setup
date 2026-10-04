@@ -28,6 +28,7 @@ ALLOWED: dict[str, dict[str, tuple[type, ...]]] = {
             "stop": (str, list), "chat_template_kwargs": (dict,)},
     "decision": {"temperature": _NUM},
     "nli": {},
+    "score": {},
 }
 
 

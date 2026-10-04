@@ -206,6 +206,12 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         body = apply_defaults(body, prof)
         return await forward(spec, "/entail", body)
 
+    async def score(request: Request):
+        """Continuation scoring: {"prompt", "candidates": [str], "model"?} -> {"logprobs": [...]}, log P(candidate | prompt)."""
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "score")
+        return await forward(spec, "/score", apply_defaults(body, prof))
+
     async def speech(request: Request):
         """OpenAI-compatible text to speech: {"model"?, "input", "voice"?, "speed"?} -> audio/wav."""
         body = await read_json(request)
@@ -368,6 +374,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/narrate", handler(narrate), methods=["POST"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
+        Route("/api/score", handler(score), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),
         Route("/api/models", handler(models_rich), methods=["GET"]),
         Route("/api/models/discovered", handler(models_discovered), methods=["GET"]),

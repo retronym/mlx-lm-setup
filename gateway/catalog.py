@@ -39,7 +39,7 @@ class GatewaySettings:
 class BackendSpec:
     name: str
     adapter: str
-    kind: str                      # llm | decision | nli | tts | stt | custom
+    kind: str                      # llm | decision | nli | score | tts | stt | custom
     python: str | None
     est_mem_gb: float
     ttl_s: int
@@ -132,6 +132,10 @@ def _openjev_nli(s: BackendSpec) -> list[str]:
             "--subfolder", s.options["subfolder"], "--port", str(s.port)]
 
 
+def _mlx_lm_score(s: BackendSpec) -> list[str]:
+    return [s.python, str(BACKENDS_DIR / "lmscore_server.py"), "--model", s.options["model"], "--port", str(s.port)]
+
+
 def _mlx_audio_tts(s: BackendSpec) -> list[str]:
     o = s.options
     cmd = [s.python, str(BACKENDS_DIR / "tts_server.py"), "--model", o["model"], "--port", str(s.port),
@@ -155,6 +159,7 @@ def _command(s: BackendSpec) -> list[str]:
 ADAPTERS: dict[str, Adapter] = {
     "mlx_lm": Adapter("llm", ("python", "model"), ("args",), "/v1/models", _mlx_lm),
     "jevstyle": Adapter("decision", ("python", "model_dir"), ("precision",), "/health", _jevstyle, ("model_dir",)),
+    "mlx_lm_score": Adapter("score", ("python", "model"), (), "/health", _mlx_lm_score),
     "openjev_nli": Adapter("nli", ("python", "root", "subfolder"), (), "/health", _openjev_nli, ("root",)),
     "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "ref_audio", "output_dir", "refs_dir"), "/health",
                              _mlx_audio_tts, ("output_dir", "refs_dir")),

@@ -68,6 +68,8 @@ class H(BaseHTTPRequestHandler):
             return self._json([one(q) for q in req["questions"]])
         if self.path == "/entail":
             return self._json({"labels": ["contradiction", "entailment", "neutral"], "probs": [[0, 1, 0] for _ in req["hypotheses"]]})
+        if self.path == "/score":
+            return self._json({"logprobs": [-float(len(c)) for c in req["candidates"]], "echo": req})
         if self.path == "/speak":
             if not req.get("text"):
                 return self._err(400, {"error": "ValueError: text is empty"})
