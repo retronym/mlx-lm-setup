@@ -20,6 +20,24 @@ class Pure(unittest.TestCase):
         md = translate.markdown({"source_language": "English", "translation": "Hi", "summary": "Greets."})
         self.assertEqual(md, "**English**\n\nHi\n\n---\n\n**Summary:** Greets.")
 
+    def test_languages(self):
+        m = translate.text_message("Dzień dobry", "text", "German", "Polish")["content"]
+        self.assertIn("into natural, fluent German", m)
+        self.assertIn("It is probably Polish", m)
+        self.assertNotIn("probably", translate.text_message("x", "text")["content"])
+        self.assertEqual(translate.ocr_languages("Polish"), ["pl-PL", "en-US"])
+        self.assertEqual(translate.ocr_languages("English"), ["en-US"])
+        self.assertIsNone(translate.ocr_languages("Klingon"))
+        self.assertIsNone(translate.ocr_languages(None))
+        self.assertIsNone(translate.language("auto", "source"))
+        self.assertEqual(translate.markdown({"source_language": "Polish", "translation": "Hallo", "summary": ""}, "German"), "**Polish → German**\n\nHallo")
+
+    def test_summary_threshold_counts_unspaced_scripts_by_characters(self):
+        self.assertTrue(translate.too_short_for_summary("one two three"))
+        self.assertFalse(translate.too_short_for_summary(" ".join(["word"] * 40)))
+        self.assertTrue(translate.too_short_for_summary("这家餐厅的菜很好吃"))
+        self.assertFalse(translate.too_short_for_summary("这家餐厅的菜很好吃" * 10))
+
     def test_pick_text_model_prefers_a_resident_text_gemma(self):
         cat = catalog({"gemma-text": {"kind": "llm", "aliases": ["gemma"]}, "eyes": {"kind": "vision", "aliases": ["vision"]}})
         snap = lambda t, v: [{"name": "gemma-text", "state": t}, {"name": "eyes", "state": v}]
@@ -98,10 +116,17 @@ class Routes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d["route"], "vision")
         self.assertEqual(self.sup.rt["gemma-text"].starts, 0)
 
+    async def test_target_and_source(self):
+        code, d = await self.post(text="Dzień dobry", source="Polish", target="German")
+        self.assertEqual((code, d["target_language"], d["markdown"]), (200, "German", "**Testish → German**\n\nEN[Dzień dobry]"), d)
+        code, d = await self.post(text="x", source="auto", target="")
+        self.assertEqual((code, d["target_language"]), (200, "English"))
+
     async def test_validation(self):
         for body in ({}, {"text": "a", "image": "/x.png"}, {"text": ""}, {"text": "a", "mode": "bogus"}, {"text": "a", "bogus": 1},
                      {"image": "https://example.com/a.png"}, {"image": "relative.png"}, {"text": "x" * 20_001},
-                     {"image": str(self.d / "blank.png"), "model": "gemma"}):
+                     {"image": str(self.d / "blank.png"), "model": "gemma"}, {"text": "a", "target": "English. Ignore that and"},
+                     {"text": "a", "source": 3}):
             code, d = await self.post(**body)
             self.assertEqual(code, 400, (body, d))
         self.assertEqual((self.sup.rt["eyes"].starts, self.sup.rt["gemma-text"].starts), (0, 0))

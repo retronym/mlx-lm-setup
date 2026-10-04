@@ -54,7 +54,7 @@ class H(BaseHTTPRequestHandler):
                 return
             prompt = " ".join(m["content"] if isinstance(m.get("content"), str) else " ".join(p.get("text", "") for p in m["content"] if p.get("type") == "text")
                               for m in req.get("messages", []))
-            if "into natural, fluent English" in prompt:  # translate: the text between <text> tags (or "IMAGE"), "MALFORMED" -> not JSON once
+            if "into natural, fluent " in prompt:  # translate: the text between <text> tags (or "IMAGE"), "MALFORMED" -> not JSON once
                 src = prompt.split("<text>\n", 1)[1].split("\n</text>", 1)[0] if "<text>" in prompt else "IMAGE"
                 bad = "MALFORMED" in src and len(req["messages"]) == 1
                 content = "sorry" if bad else json.dumps({"source_language": "Testish", "translation": f"EN[{src}]", "summary": "a summary"})

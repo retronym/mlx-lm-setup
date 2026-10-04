@@ -282,10 +282,11 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_look(catalog, sup(), client(), **body))
 
     async def translate(request: Request):
-        """{"text"} | {"image": path | data URI}, "mode"? (auto | ocr | vision), "model"?, "max_attempts"? -> {source_language,
+        """{"text"} | {"image": path | data URI}, "source"? (a hint; default: detect), "target"? (default English), "mode"? (auto | ocr |
+        vision), "model"?, "max_attempts"? -> {source_language,
         translation, summary, markdown, route (text | ocr | vision), model, ...}. Screenshots go through macOS OCR first."""
         body = await read_json(request)
-        known = {"text", "image", "mode", "model", "max_attempts"}
+        known = {"text", "image", "source", "target", "mode", "model", "max_attempts"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         return JSONResponse(await run_translate(catalog, sup(), client(), **body))
@@ -463,6 +464,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/jev", page("jev.html"), methods=["GET"]),
         Route("/speech", page("speech.html"), methods=["GET"]),
         Route("/vision", page("vision.html"), methods=["GET"]),
+        Route("/translate", page("translate.html"), methods=["GET"]),
         Route("/admin", page("admin.html"), methods=["GET"]),
         Route("/vendor/{name}", vendor, methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),

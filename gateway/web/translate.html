@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Translate</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #0369a1; --bad: #dc2626; --warn: #d97706; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #38bdf8; --bad: #f87171; --warn: #fbbf24; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 5px 16px; }
+  button.small { font-size: 12px; padding: 0 8px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .bar input[list] { width: 170px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  h2 .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  #src { width: 100%; min-height: 260px; resize: vertical; font-size: 16px; line-height: 1.5; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 10px; text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+  #drop:hover, #drop:focus { border-color: var(--muted); outline: none; }
+  kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  #shot { position: relative; } #shot img { display: block; max-width: 100%; max-height: 320px; border-radius: 6px; border: 1px solid var(--line); margin: 0 auto; }
+  #shot .x { position: absolute; top: 6px; right: 6px; border-radius: 10px; background: var(--panel); }
+  #overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 4px dashed var(--accent); display: none;
+             align-items: center; justify-content: center; font-size: 22px; font-weight: 650; color: var(--accent); z-index: 10; pointer-events: none; }
+  body.dragging #overlay { display: flex; }
+  #out { white-space: pre-wrap; word-break: break-word; font-size: 16px; line-height: 1.55; min-height: 120px; }
+  #out.empty, #sum.empty { color: var(--muted); font-size: 14px; }
+  #sumbox { border-top: 1px solid var(--line); padding-top: 8px; }
+  #sum { font-size: 14px; }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  details summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-height: 300px; overflow: auto; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="overlay">Drop an image</div>
+<header>
+  <h1>Local Models · Translate</h1>
+  <a href="/">Home</a>
+  <a href="/chat">Chat</a>
+  <a href="/jev">Decide</a>
+  <a href="/speech">Speech</a>
+  <a href="/vision">Vision</a>
+  <a href="/translate" style="color:var(--ink)">Translate</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <div class="bar">
+    <label>From <input id="from" list="langs" value="Polish" spellcheck="false" title="A hint: the actual language is detected and reported. Auto-detect for none."></label>
+    <button id="swap" class="small" title="Swap languages">⇄</button>
+    <label>To <input id="to" list="langs" value="English" spellcheck="false"></label>
+    <label title="For images: macOS OCR first (fast, no model load), or let the vision model read the image">image <select id="mode">
+      <option value="auto">OCR, vision model as fallback</option><option value="ocr">OCR only</option><option value="vision">vision model</option></select></label>
+    <button class="primary" id="go">Translate</button>
+    <span class="meta"><kbd>⌘</kbd> <kbd>↵</kbd></span>
+    <span class="status" id="status"></span>
+  </div>
+  <datalist id="langs"></datalist>
+  <div class="grid">
+    <section>
+      <h2><span id="srclabel">Polish</span><span class="r"><button id="clear" class="small">clear</button></span></h2>
+      <textarea id="src" placeholder="Type or paste text…" autofocus></textarea>
+      <div id="shot" hidden><img id="shotimg" alt="screenshot to translate"><button class="x small" id="unshot" title="remove">×</button></div>
+      <div id="drop" tabindex="0">or paste a screenshot (<kbd>⌘V</kbd>), drop an image, or click to choose one</div>
+      <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+    </section>
+    <section>
+      <h2><span id="dstlabel">English</span><span class="r"><button id="copy" class="small" disabled>copy</button></span></h2>
+      <div id="out" class="empty">The translation appears here.</div>
+      <div id="sumbox" hidden><h2>Summary</h2><div id="sum"></div></div>
+      <div class="meta" id="meta"></div>
+      <details id="ocrbox" hidden><summary>Text read from the image</summary><pre id="ocrtext"></pre></details>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const LANGS = ["Auto-detect", "Arabic", "Chinese", "Czech", "Danish", "Dutch", "English", "Finnish", "French", "German", "Greek", "Hebrew", "Hindi",
+  "Hungarian", "Indonesian", "Italian", "Japanese", "Korean", "Norwegian", "Polish", "Portuguese", "Romanian", "Russian", "Spanish", "Swedish",
+  "Thai", "Turkish", "Ukrainian", "Vietnamese"];
+$("langs").replaceChildren(...LANGS.map(l => Object.assign(document.createElement("option"), { value: l })));
+let image = null, aborter = null, timer = null;
+
+// ---- remembered languages (per browser; the page works without storage) ----------------------------------------------
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+for (const id of ["from", "to", "mode"]) { const v = store.get(`translate.${id}`); if (v) $(id).value = v; }
+function labels() {
+  $("srclabel").textContent = image ? "Screenshot" : (/^auto/i.test($("from").value) || !$("from").value ? "Detect language" : $("from").value);
+  $("dstlabel").textContent = $("to").value || "English";
+}
+for (const id of ["from", "to", "mode"]) $(id).addEventListener("change", () => { store.set(`translate.${id}`, $(id).value); labels(); });
+$("swap").onclick = () => {
+  const f = /^auto/i.test($("from").value) ? "English" : $("from").value;
+  [$("from").value, $("to").value] = [$("to").value || "English", f];
+  for (const id of ["from", "to"]) store.set(`translate.${id}`, $(id).value);
+  if (!$("out").classList.contains("empty") && !image) $("src").value = $("out").textContent;
+  labels();
+};
+labels();
+
+// ---- input: text, or one image (paste, drop, pick) ---------------------------------------------------------------------
+const ACCEPT = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+function setImage(url) {
+  image = url;
+  $("shot").hidden = !url; $("shotimg").src = url || ""; $("src").hidden = !!url; $("drop").hidden = !!url;
+  labels();
+}
+async function takeFile(f) {
+  if (!f || !ACCEPT.has(f.type)) { status("not a PNG, JPEG, WebP or GIF image", "err"); return; }
+  const url = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(f); });
+  setImage(url); status("");
+  go();
+}
+$("unshot").onclick = () => { setImage(null); $("src").focus(); };
+$("clear").onclick = () => { setImage(null); $("src").value = ""; showEmpty(); $("src").focus(); };
+$("drop").onclick = () => $("file").click();
+$("drop").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } };
+$("file").onchange = () => { takeFile($("file").files[0]); $("file").value = ""; };
+document.addEventListener("paste", e => {
+  const dt = e.clipboardData; if (!dt) return;
+  const f = [...dt.files][0] || [...dt.items].find(i => i.kind === "file")?.getAsFile();
+  if (f) { e.preventDefault(); takeFile(f); }
+});
+let depth = 0;
+const dragging = e => [...(e.dataTransfer?.types || [])].includes("Files");
+document.addEventListener("dragenter", e => { if (!dragging(e)) return; e.preventDefault(); depth++; document.body.classList.add("dragging"); });
+document.addEventListener("dragover", e => { if (dragging(e)) e.preventDefault(); });
+document.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; document.body.classList.remove("dragging"); } });
+document.addEventListener("drop", e => {
+  if (!dragging(e)) return;
+  e.preventDefault(); depth = 0; document.body.classList.remove("dragging");
+  takeFile(e.dataTransfer.files[0]);
+});
+document.addEventListener("keydown", e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); go(); } });
+$("go").onclick = go;
+
+// ---- translate ---------------------------------------------------------------------------------------------------------
+function status(msg, cls = "") { $("status").textContent = msg; $("status").className = `status ${cls}`; }
+function showEmpty() {
+  $("out").textContent = "The translation appears here."; $("out").className = "empty";
+  $("sumbox").hidden = true; $("ocrbox").hidden = true; $("meta").textContent = ""; $("copy").disabled = true;
+}
+async function go() {
+  const text = $("src").value.trim();
+  if (!image && !text) { status("type or paste some text, or paste a screenshot", "err"); return; }
+  if (aborter) aborter.abort();
+  aborter = new AbortController();
+  const body = { target: $("to").value || "English", source: $("from").value };
+  if (image) { body.image = image; body.mode = $("mode").value; } else body.text = text;
+  const t0 = performance.now();
+  clearInterval(timer);
+  const tick = () => { const s = (performance.now() - t0) / 1000; status(s > 4 ? `translating… ${s.toFixed(0)} s (loading a model on first use takes a few seconds)` : "translating…", "wait"); };
+  tick(); timer = setInterval(tick, 500);
+  $("go").disabled = true;
+  try {
+    const r = await fetch("/api/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: aborter.signal });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+    $("out").textContent = d.translation; $("out").className = "";
+    $("copy").disabled = false;
+    $("sumbox").hidden = !d.summary; $("sum").textContent = d.summary || "";
+    $("dstlabel").textContent = d.target_language;
+    const how = { text: "text", ocr: `macOS OCR (${Math.round((d.ocr?.confidence || 0) * 100)}% confidence, ${d.ocr?.secs} s)`, vision: "vision model read the image" }[d.route];
+    $("meta").textContent = [`${d.source_language} → ${d.target_language}`, how, d.model, `${d.secs} s`, d.cold_start_s ? `incl. ${d.cold_start_s} s model start` : null,
+                             d.attempts?.length > 1 ? `${d.attempts.length} attempts` : null].filter(Boolean).join(" · ");
+    $("ocrbox").hidden = !d.source_text; $("ocrtext").textContent = d.source_text || "";
+    status("");
+  } catch (e) {
+    if (e.name !== "AbortError") status(e.message, "err");
+  } finally {
+    clearInterval(timer); $("go").disabled = false;
+  }
+}
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("out").textContent); $("copy").textContent = "copied"; setTimeout(() => $("copy").textContent = "copy", 1200); }
+  catch { status("copy failed: select the text and press ⌘C", "err"); }
+};
+</script>
+</body>
+</html>
