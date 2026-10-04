@@ -1,4 +1,4 @@
-import asyncio, base64, tempfile, unittest
+import asyncio, base64, json, tempfile, unittest
 from pathlib import Path
 
 import httpx
@@ -45,6 +45,33 @@ class Pure(unittest.TestCase):
         self.assertEqual(translate.pick_text_model(cat, snap("stopped", "ready")), "eyes")
         self.assertEqual(translate.pick_text_model(cat, snap("stopped", "stopped")), "eyes")
         self.assertEqual(translate.pick_text_model(cat, snap("starting", "stopped")), "eyes")
+
+
+class Paragraphs(unittest.TestCase):
+    """Layout wraps joined from real Vision line boxes (gateway/tests/ocr_lines.json, recorded from rendered notices in Polish,
+    Japanese and Russian and a UI screenshot; each joined result checked by eye)."""
+    CASES = json.loads((Path(__file__).parent / "ocr_lines.json").read_text())
+
+    def test_recorded_cases(self):
+        for name, case in self.CASES.items():
+            self.assertEqual(ocr.paragraphs(case["lines"]).split("\n"), case["paragraphs"], name)
+
+    def test_what_is_joined_and_what_is_kept(self):
+        p = {k: v["paragraphs"] for k, v in self.CASES.items()}
+        self.assertEqual(len(p["polish_notice"]), 2)                                     # bold heading kept, 6 wrapped lines joined
+        self.assertTrue(p["polish_notice"][1].startswith("Pociąg") and p["polish_notice"][1].endswith("przepraszamy."))
+        self.assertEqual(p["polish_letter"][0], "Dzień dobry Panie Jasonie,")              # a short line is a real break
+        self.assertEqual(p["polish_dialog"][-1], "[ Anuluj ] [ Spróbuj ponownie ]")       # the button row is not prose
+        self.assertEqual(len(p["japanese_notice"]), 2)                                   # CJK joined without spaces
+        self.assertIn("おかけして申し訳", p["japanese_notice"][1])
+        self.assertEqual(len(p["russian_notice"]), 1)                                    # Cyrillic box heights vary ~30%
+        self.assertIn("22.5%", p["ui_bar_labels"])                                       # a column of numbers stays a column
+
+    def test_hyphenated_and_unboxed_lines(self):
+        line = lambda t, y, w=0.9: {"text": t, "box": [0.05, y, w, 0.05]}
+        self.assertEqual(ocr.paragraphs([line("this sentence has a hyphen-", 0.1), line("ated word in it", 0.16, 0.3)]),
+                         "this sentence has a hyphenated word in it")
+        self.assertEqual(ocr.paragraphs([{"text": "a b c d"}, {"text": "e f"}]), "a b c d\ne f")
 
 
 @unittest.skipUnless(ocr.available(), "macOS Vision (pyobjc-framework-Vision) not installed")

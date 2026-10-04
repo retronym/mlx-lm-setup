@@ -1,0 +1,702 @@
+{
+ "polish_notice": {
+  "lines": [
+   {
+    "text": "Komunikat dla podróżnych",
+    "box": [
+     0.0333,
+     0.1206,
+     0.4156,
+     0.1135
+    ]
+   },
+   {
+    "text": "Pociąg InterCity „Mazowsze\" relacji Warszawa Centralna - Kraków",
+    "box": [
+     0.0332,
+     0.2227,
+     0.8581,
+     0.1299
+    ]
+   },
+   {
+    "text": "Główny, planowy odjazd 14:35, jest opóźniony o około 40 minut z",
+    "box": [
+     0.031,
+     0.3425,
+     0.8402,
+     0.1245
+    ]
+   },
+   {
+    "text": "powodu awarii sieci trakcyjnej w okolicach Koluszek. Podróżnych",
+    "box": [
+     0.031,
+     0.4568,
+     0.8358,
+     0.1162
+    ]
+   },
+   {
+    "text": "udających się do Krakowa prosimy o śledzenie komunikatów na peronie",
+    "box": [
+     0.0311,
+     0.5745,
+     0.9244,
+     0.1064
+    ]
+   },
+   {
+    "text": "3. Bilety zachowują ważność w pociągach TLK tej samej relacji. Za",
+    "box": [
+     0.0311,
+     0.6809,
+     0.8578,
+     0.1064
+    ]
+   },
+   {
+    "text": "utrudnienia przepraszamy.",
+    "box": [
+     0.0306,
+     0.7844,
+     0.3477,
+     0.1308
+    ]
+   }
+  ],
+  "paragraphs": [
+   "Komunikat dla podróżnych",
+   "Pociąg InterCity „Mazowsze\" relacji Warszawa Centralna - Kraków Główny, planowy odjazd 14:35, jest opóźniony o około 40 minut z powodu awarii sieci trakcyjnej w okolicach Koluszek. Podróżnych udających się do Krakowa prosimy o śledzenie komunikatów na peronie 3. Bilety zachowują ważność w pociągach TLK tej samej relacji. Za utrudnienia przepraszamy."
+  ]
+ },
+ "polish_letter": {
+  "lines": [
+   {
+    "text": "Dzień dobry Panie Jasonie,",
+    "box": [
+     0.0309,
+     0.1024,
+     0.2717,
+     0.0982
+    ]
+   },
+   {
+    "text": "uprzejmie informuję, że w przyszły wtorek, 14 października, w godzinach od 8:00 do 12:00 w",
+    "box": [
+     0.0311,
+     0.1929,
+     0.9111,
+     0.0857
+    ]
+   },
+   {
+    "text": "budynku zostanie wyłączona ciepła woda z powodu wymiany zaworów w węźle cieplnym.",
+    "box": [
+     0.0311,
+     0.2643,
+     0.8733,
+     0.0929
+    ]
+   },
+   {
+    "text": "Proszę również o pozostawienie dostępu do szafki z licznikami w przedpokoju - technik będzie",
+    "box": [
+     0.0311,
+     0.35,
+     0.9267,
+     0.0857
+    ]
+   },
+   {
+    "text": "odczytywał stan wodomierzy.",
+    "box": [
+     0.0311,
+     0.4286,
+     0.2911,
+     0.0786
+    ]
+   },
+   {
+    "text": "Czynsz za listopad wzrośnie o 85 zł w związku z nowymi stawkami za ogrzewanie. Szczegółowe",
+    "box": [
+     0.0311,
+     0.5071,
+     0.9244,
+     0.0857
+    ]
+   },
+   {
+    "text": "rozliczenie prześlę do końca miesiąca.",
+    "box": [
+     0.0289,
+     0.5786,
+     0.3778,
+     0.0929
+    ]
+   },
+   {
+    "text": "Z powazaniem,",
+    "box": [
+     0.0327,
+     0.6651,
+     0.1524,
+     0.0865
+    ]
+   },
+   {
+    "text": "Grazyna Wiśniewska",
+    "box": [
+     0.0331,
+     0.7466,
+     0.2049,
+     0.0707
+    ]
+   },
+   {
+    "text": "Administracja „Zielone Wzgórze\"",
+    "box": [
+     0.031,
+     0.8139,
+     0.3315,
+     0.0998
+    ]
+   }
+  ],
+  "paragraphs": [
+   "Dzień dobry Panie Jasonie,",
+   "uprzejmie informuję, że w przyszły wtorek, 14 października, w godzinach od 8:00 do 12:00 w budynku zostanie wyłączona ciepła woda z powodu wymiany zaworów w węźle cieplnym.",
+   "Proszę również o pozostawienie dostępu do szafki z licznikami w przedpokoju - technik będzie odczytywał stan wodomierzy.",
+   "Czynsz za listopad wzrośnie o 85 zł w związku z nowymi stawkami za ogrzewanie. Szczegółowe rozliczenie prześlę do końca miesiąca.",
+   "Z powazaniem,",
+   "Grazyna Wiśniewska",
+   "Administracja „Zielone Wzgórze\""
+  ]
+ },
+ "polish_dialog": {
+  "lines": [
+   {
+    "text": "Nie udało się zapisać zmian",
+    "box": [
+     0.0452,
+     0.1954,
+     0.4581,
+     0.1379
+    ]
+   },
+   {
+    "text": "Połączenie z serwerem zostało przerwane. Sprawdź połączenie z",
+    "box": [
+     0.0452,
+     0.3448,
+     0.8484,
+     0.1149
+    ]
+   },
+   {
+    "text": "internetem i spróbuj ponownie. Niezapisane zmiany zostaną",
+    "box": [
+     0.045,
+     0.4663,
+     0.7777,
+     0.1202
+    ]
+   },
+   {
+    "text": "zachowane na tym urządzeniu przez 24 godziny.",
+    "box": [
+     0.0452,
+     0.6092,
+     0.6323,
+     0.1149
+    ]
+   },
+   {
+    "text": "[ Anuluj ] [ Spróbuj ponownie ]",
+    "box": [
+     0.0417,
+     0.7175,
+     0.4263,
+     0.1335
+    ]
+   }
+  ],
+  "paragraphs": [
+   "Nie udało się zapisać zmian",
+   "Połączenie z serwerem zostało przerwane. Sprawdź połączenie z internetem i spróbuj ponownie. Niezapisane zmiany zostaną zachowane na tym urządzeniu przez 24 godziny.",
+   "[ Anuluj ] [ Spróbuj ponownie ]"
+  ]
+ },
+ "japanese_notice": {
+  "lines": [
+   {
+    "text": "お知らせ",
+    "box": [
+     0.0242,
+     0.1227,
+     0.1071,
+     0.144
+    ]
+   },
+   {
+    "text": "本日のシステムメンテナンスは午後10時から午前2時まで行われます。この",
+    "box": [
+     0.0208,
+     0.2737,
+     0.925,
+     0.1969
+    ]
+   },
+   {
+    "text": "間、ログインおよびデータの保存ができなくなります。ご不便をおかけして",
+    "box": [
+     0.0244,
+     0.4421,
+     0.9267,
+     0.1684
+    ]
+   },
+   {
+    "text": "申し訳ございませんが、ご理解とご協力をお願いいたします。作業が予定よ",
+    "box": [
+     0.0208,
+     0.5684,
+     0.9333,
+     0.1963
+    ]
+   },
+   {
+    "text": "り早く終了した場合は、このページでお知らせします。",
+    "box": [
+     0.0208,
+     0.7255,
+     0.6792,
+     0.1961
+    ]
+   }
+  ],
+  "paragraphs": [
+   "お知らせ",
+   "本日のシステムメンテナンスは午後10時から午前2時まで行われます。この間、ログインおよびデータの保存ができなくなります。ご不便をおかけして申し訳ございませんが、ご理解とご協力をお願いいたします。作業が予定より早く終了した場合は、このページでお知らせします。"
+  ]
+ },
+ "russian_notice": {
+  "lines": [
+   {
+    "text": "Уважаемые пассажиры! В связи с ремонтом путей поезда на участке",
+    "box": [
+     0.0125,
+     0.1375,
+     0.925,
+     0.2125
+    ]
+   },
+   {
+    "text": "между станциями «Сокол» и «Динамо» будут ходить с увеличенным",
+    "box": [
+     0.0222,
+     0.35,
+     0.9156,
+     0.1625
+    ]
+   },
+   {
+    "text": "интервалом до конца недели. Просим вас заранее планировать свои",
+    "box": [
+     0.0167,
+     0.5116,
+     0.9208,
+     0.2093
+    ]
+   },
+   {
+    "text": "поездки и пользоваться наземным транспортом.",
+    "box": [
+     0.0167,
+     0.7187,
+     0.6542,
+     0.1882
+    ]
+   }
+  ],
+  "paragraphs": [
+   "Уважаемые пассажиры! В связи с ремонтом путей поезда на участке между станциями «Сокол» и «Динамо» будут ходить с увеличенным интервалом до конца недели. Просим вас заранее планировать свои поездки и пользоваться наземным транспортом."
+  ]
+ },
+ "ui_bar_labels": {
+  "lines": [
+   {
+    "text": "PROMPT",
+    "box": [
+     0.0317,
+     0.0416,
+     0.0698,
+     0.0198
+    ]
+   },
+   {
+    "text": "Surfing",
+    "box": [
+     0.0412,
+     0.084,
+     0.066,
+     0.03
+    ]
+   },
+   {
+    "text": "Which country of the world would you associate with this?",
+    "box": [
+     0.0423,
+     0.1936,
+     0.4672,
+     0.0221
+    ]
+   },
+   {
+    "text": "Try: Sentiment",
+    "box": [
+     0.0338,
+     0.2426,
+     0.1163,
+     0.0172
+    ]
+   },
+   {
+    "text": "Triage",
+    "box": [
+     0.1772,
+     0.2428,
+     0.0452,
+     0.0164
+    ]
+   },
+   {
+    "text": "Urgency",
+    "box": [
+     0.2474,
+     0.2426,
+     0.0613,
+     0.0196
+    ]
+   },
+   {
+    "text": "Emoji",
+    "box": [
+     0.334,
+     0.2426,
+     0.0444,
+     0.0147
+    ]
+   },
+   {
+    "text": "OPTIONS",
+    "box": [
+     0.0316,
+     0.3305,
+     0.0741,
+     0.0203
+    ]
+   },
+   {
+    "text": "Afghanistan",
+    "box": [
+     0.0442,
+     0.381,
+     0.1039,
+     0.0222
+    ]
+   },
+   {
+    "text": "Albania",
+    "box": [
+     0.0444,
+     0.4067,
+     0.0677,
+     0.0176
+    ]
+   },
+   {
+    "text": "Algeria",
+    "box": [
+     0.0442,
+     0.433,
+     0.068,
+     0.0213
+    ]
+   },
+   {
+    "text": "Andorra",
+    "box": [
+     0.0444,
+     0.4608,
+     0.0677,
+     0.0172
+    ]
+   },
+   {
+    "text": "Ango la",
+    "box": [
+     0.0441,
+     0.4855,
+     0.0578,
+     0.0199
+    ]
+   },
+   {
+    "text": "Argentina",
+    "box": [
+     0.0444,
+     0.5121,
+     0.0846,
+     0.02
+    ]
+   },
+   {
+    "text": "Armenia",
+    "box": [
+     0.0443,
+     0.5389,
+     0.0678,
+     0.0178
+    ]
+   },
+   {
+    "text": "kind",
+    "box": [
+     0.0338,
+     0.6029,
+     0.0317,
+     0.0147
+    ]
+   },
+   {
+    "text": "choice: pick the best option",
+    "box": [
+     0.0825,
+     0.6029,
+     0.1839,
+     0.0172
+    ]
+   },
+   {
+    "text": "v LLM",
+    "box": [
+     0.3488,
+     0.6029,
+     0.055,
+     0.0196
+    ]
+   },
+   {
+    "text": "gemma-4-26b-a4b v",
+    "box": [
+     0.4121,
+     0.6007,
+     0.161,
+     0.0199
+    ]
+   },
+   {
+    "text": "suggest",
+    "box": [
+     0.5809,
+     0.6022,
+     0.0582,
+     0.0202
+    ]
+   },
+   {
+    "text": "64",
+    "box": [
+     0.6469,
+     0.6029,
+     0.0233,
+     0.0172
+    ]
+   },
+   {
+    "text": "Decide",
+    "box": [
+     0.0422,
+     0.7105,
+     0.0635,
+     0.0201
+    ]
+   },
+   {
+    "text": "→ Costa Rica",
+    "box": [
+     0.0338,
+     0.7623,
+     0.1332,
+     0.0245
+    ]
+   },
+   {
+    "text": "Costa Rica",
+    "box": [
+     0.0338,
+     0.811,
+     0.0868,
+     0.0201
+    ]
+   },
+   {
+    "text": "Australia",
+    "box": [
+     0.0317,
+     0.8454,
+     0.0699,
+     0.02
+    ]
+   },
+   {
+    "text": "Fiji",
+    "box": [
+     0.0317,
+     0.8799,
+     0.0275,
+     0.0221
+    ]
+   },
+   {
+    "text": "Bahamas",
+    "box": [
+     0.0335,
+     0.9166,
+     0.0725,
+     0.0179
+    ]
+   },
+   {
+    "text": "Ecuador",
+    "box": [
+     0.0357,
+     0.9498,
+     0.0639,
+     0.0196
+    ]
+   },
+   {
+    "text": "Rarbados",
+    "box": [
+     0.0317,
+     0.985,
+     0.0783,
+     0.0129
+    ]
+   },
+   {
+    "text": "+ Suggest options",
+    "box": [
+     0.7801,
+     0.3333,
+     0.129,
+     0.0172
+    ]
+   },
+   {
+    "text": "options",
+    "box": [
+     0.7104,
+     0.6029,
+     0.0571,
+     0.0196
+    ]
+   },
+   {
+    "text": "22.5%",
+    "box": [
+     0.8647,
+     0.8113,
+     0.055,
+     0.0196
+    ]
+   },
+   {
+    "text": "22.1%",
+    "box": [
+     0.8646,
+     0.8451,
+     0.0552,
+     0.0206
+    ]
+   },
+   {
+    "text": "9.6%",
+    "box": [
+     0.8753,
+     0.8799,
+     0.0444,
+     0.0221
+    ]
+   },
+   {
+    "text": "8.1%",
+    "box": [
+     0.8752,
+     0.914,
+     0.0446,
+     0.0226
+    ]
+   },
+   {
+    "text": "5.6%",
+    "box": [
+     0.8753,
+     0.9485,
+     0.0444,
+     0.0221
+    ]
+   },
+   {
+    "text": "4.0%",
+    "box": [
+     0.8753,
+     0.9853,
+     0.0444,
+     0.0123
+    ]
+   }
+  ],
+  "paragraphs": [
+   "PROMPT",
+   "Surfing",
+   "Which country of the world would you associate with this?",
+   "Try: Sentiment",
+   "Triage",
+   "Urgency",
+   "Emoji",
+   "OPTIONS",
+   "Afghanistan",
+   "Albania",
+   "Algeria",
+   "Andorra",
+   "Ango la",
+   "Argentina",
+   "Armenia",
+   "kind",
+   "choice: pick the best option",
+   "v LLM",
+   "gemma-4-26b-a4b v",
+   "suggest",
+   "64",
+   "Decide",
+   "→ Costa Rica",
+   "Costa Rica",
+   "Australia",
+   "Fiji",
+   "Bahamas",
+   "Ecuador",
+   "Rarbados",
+   "+ Suggest options",
+   "options",
+   "22.5%",
+   "22.1%",
+   "9.6%",
+   "8.1%",
+   "5.6%",
+   "4.0%"
+  ]
+ }
+}
