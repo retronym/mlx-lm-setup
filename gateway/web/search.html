@@ -6,10 +6,10 @@
 <title>Local Models · Search</title>
 <style>
   :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706;
-          --scalac: #4f46e5; --docs: #0d9488; --bug: #be185d; }
+          --scalac: #4f46e5; --scala3: #ea580c; --docs: #0d9488; --bug: #be185d; --scalapr: #0369a1; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24;
-            --scalac: #818cf8; --docs: #2dd4bf; --bug: #f472b6; }
+            --scalac: #818cf8; --scala3: #fb923c; --docs: #2dd4bf; --bug: #f472b6; --scalapr: #38bdf8; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
@@ -31,7 +31,7 @@
   .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .hit { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .hit.scalac { --c: var(--scalac); } .hit.scala3docs { --c: var(--docs); } .hit.bug { --c: var(--bug); }
+  .hit.scalac { --c: var(--scalac); } .hit.scala3 { --c: var(--scala3); } .hit.scala3docs { --c: var(--docs); } .hit.bug { --c: var(--bug); } .hit.scalapr { --c: var(--scalapr); }
   .top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
   .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; width: 1.6em; }
   .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 4px; padding: 0 5px; }
@@ -66,11 +66,11 @@
     <span class="status" id="status"></span>
   </form>
   <div class="row">
-    <label>in <select id="source"><option value="">everything</option><option value="scalac">scala/scala code and spec</option>
-      <option value="scala3docs">Scala 3 docs</option><option value="bug">scala/bug issues</option></select></label>
+    <label>in <select id="source"><option value="">everything</option><option value="scalac">scala/scala code and spec</option><option value="scala3">scala/scala3 code</option>
+      <option value="scala3docs">Scala 3 docs</option><option value="bug">scala/bug issues</option><option value="scalapr">scala/scala PRs</option></select></label>
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
-    <label><input type="checkbox" id="open"> hide closed issues</label>
+    <label><input type="checkbox" id="open"> open issues and PRs only</label>
     <label>top <select id="k"><option>5</option><option selected>8</option><option>15</option><option>30</option></select></label>
   </div>
   <div class="chips" id="samples"></div>
@@ -97,8 +97,8 @@ for (const id of ["source", "mode", "k"]) { const v = store.get(`search.${id}`);
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 function status(msg, cls = "") { $("status").textContent = msg; $("status").className = `status ${cls}`; }
-const COLOR = { scalac: "var(--scalac)", scala3docs: "var(--docs)", bug: "var(--bug)" };
-const LABEL = { scalac: "scala/scala", scala3docs: "Scala 3 docs", bug: "scala/bug" };
+const COLOR = { scalac: "var(--scalac)", scala3: "var(--scala3)", scala3docs: "var(--docs)", bug: "var(--bug)", scalapr: "var(--scalapr)" };
+const LABEL = { scalac: "scala/scala", scala3: "scala/scala3 code", scala3docs: "Scala 3 docs", bug: "scala/bug", scalapr: "scala/scala PRs" };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 fetch("/api/search/status").then(r => r.json()).then(d => {
@@ -114,7 +114,7 @@ function render(d) {
     const box = el("div", `hit ${h.source}`);
     const top = el("div", "top");
     top.append(el("span", "n", i + 1), el("span", "badge", LABEL[h.source] || h.source));
-    if (h.state === "closed") top.append(el("span", "badge closed", "closed"));
+    if (h.state === "closed" || h.state === "merged") top.append(el("span", "badge closed", h.state));
     const a = el("a", "title", h.title); a.rel = "noopener noreferrer"; a.target = "_blank";
     if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
     top.append(a);

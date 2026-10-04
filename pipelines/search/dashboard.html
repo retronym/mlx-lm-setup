@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search index · Progress</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --track: #ece9e6; --ok: #16a34a; --warn: #d97706;
+          --scalac: #4f46e5; --scala3: #ea580c; --scala3docs: #0d9488; --bug: #be185d; --scalapr: #0369a1; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --track: #2a2725; --ok: #4ade80; --warn: #fbbf24;
+            --scalac: #818cf8; --scala3: #fb923c; --scala3docs: #2dd4bf; --bug: #f472b6; --scalapr: #38bdf8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pill { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+  .pill.on::before { content: "● "; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card.overall { --c: var(--ink); }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+  .head b { font-weight: 650; } .head .r { margin-left: auto; }
+  .muted, .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .bar { display: grid; grid-template-columns: 78px 1fr 180px; gap: 10px; align-items: center; font-size: 13px; }
+  .bar .nm { color: var(--muted); font-size: 12px; }
+  .bar .val { font-variant-numeric: tabular-nums; font-size: 12px; text-align: right; color: var(--muted); }
+  .track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; position: relative; }
+  .fill { height: 100%; background: var(--c); border-radius: 5px; transition: width .6s ease; min-width: 0; }
+  .fill.done { background: var(--ok); }
+  .track.live .fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sheen 1.6s linear infinite; }
+  @keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .sub .nm { padding-left: 12px; }
+  .log { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .err { color: #dc2626; }
+  @media (max-width: 640px) { .bar { grid-template-columns: 70px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Search index · progress <span class="pill" id="p-sync">sync idle</span><span class="pill" id="p-embed">embed idle</span><span class="meta" id="clock"></span></h1>
+  <div class="card overall" id="overall"></div>
+  <div id="cards" style="display:flex;flex-direction:column;gap:14px"></div>
+  <div class="card"><div class="muted">Latest log lines</div><div class="log" id="l-sync"></div><div class="log" id="l-embed"></div></div>
+  <div class="meta">Reads <code>data/search.db</code> read-only, refreshing every 2 s. "Synced" is text in the index (git sources: files indexed of files in the tree; GitHub sources: how far each stream has walked from its start date to now). "Embedded" is chunks that have a current vector, which is what hybrid and vector search can see.</div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const pct = f => `${(f * 100).toFixed(f > .995 && f < 1 ? 2 : 1)}%`;
+const n = x => x.toLocaleString();
+const dur = s => s == null ? "" : s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+
+function bar(name, f, text, live, sub) {
+  const row = el("div", `bar${sub ? " sub" : ""}`);
+  const fill = el("div", `fill${f >= 1 ? " done" : ""}`); fill.style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
+  const track = el("div", `track${live && f < 1 ? " live" : ""}`); track.append(fill);
+  row.append(el("div", "nm", name), track, el("div", "val", text));
+  return row;
+}
+
+function render(d) {
+  if (!d.indexed) { $("cards").replaceChildren(el("div", "card", "No index yet: run sync.py first.")); return; }
+  const on = k => d.running.includes(k);
+  for (const k of ["sync", "embed"]) { $(`p-${k}`).textContent = `${k} ${on(k) ? "running" : "idle"}`; $(`p-${k}`).className = `pill${on(k) ? " on" : ""}`; }
+  $("clock").textContent = d.now.replace("T", " ").replace("Z", " UTC");
+  const e = d.embed, ef = e.chunks ? e.embedded / e.chunks : 1;
+  const ov = $("overall");
+  const head = el("div", "head"); head.append(el("b", "", "All sources"), el("span", "muted", `${n(e.chunks)} chunks indexed`),
+    el("span", "muted r", [e.rate > 0.5 ? `embedding ${e.rate} chunks/s` : null, e.eta_s != null ? `about ${dur(e.eta_s)} left` : null,
+                          d.ingest_rate > 0.5 ? `ingesting ${d.ingest_rate} chunks/s` : null].filter(Boolean).join(" · ")));
+  ov.replaceChildren(head, bar("embedded", ef, `${n(e.embedded)} / ${n(e.chunks)} · ${pct(ef)}`, on("embed")));
+  $("cards").replaceChildren(...d.sources.map(s => {
+    const c = el("div", "card"); c.style.setProperty("--c", `var(--${s.source})`);
+    const h = el("div", "head"); h.append(el("b", "", s.label), el("span", "muted", s.source), el("span", "muted r", s.updated ? `last write ${new Date(s.updated * 1000).toLocaleTimeString()}` : "nothing yet"));
+    const sy = s.sync, rows = [];
+    if (s.kind === "git") rows.push(bar("synced", sy.frac ?? (s.chunks ? 1 : 0), sy.text + (sy.position ? ` · @ ${sy.position}` : ""), s.active));
+    else if (!sy.streams.length) rows.push(bar("synced", 0, "not started", false));
+    else {
+      rows.push(bar("synced", sy.frac, `${pct(sy.frac)} · from ${sy.horizon.slice(0, 10)}`, s.active));
+      for (const st of sy.streams) rows.push(bar(st.name, st.frac, `up to ${st.cursor.slice(0, 10)} · ${pct(st.frac)}`, s.active, true));
+    }
+    const f = s.chunks ? s.embedded / s.chunks : 0;
+    rows.push(bar("embedded", f, `${n(s.embedded)} / ${n(s.chunks)} · ${s.chunks ? pct(f) : "–"}`, on("embed") && s.embedded < s.chunks));
+    c.append(h, ...rows);
+    return c;
+  }));
+  $("l-sync").textContent = d.logs.sync ? `sync:  ${d.logs.sync}` : "";
+  $("l-embed").textContent = d.logs.embed ? `embed: ${d.logs.embed}` : "";
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/progress");
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    render(d);
+  } catch (e) {
+    $("clock").textContent = ""; $("l-sync").textContent = ""; $("l-embed").textContent = "";
+    $("cards").replaceChildren(el("div", "card err", `dashboard server not reachable or failing: ${e.message}`));
+  }
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>
