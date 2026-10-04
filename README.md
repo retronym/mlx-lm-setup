@@ -194,6 +194,7 @@ Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `
 - **Memory as parts**: give `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost.
 - **Argument passthrough**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
 - **Profiles**: `[profiles.<name>]` is a named virtual model on an existing backend with request defaults (sampling, a token cap, `chat_template_kwargs` such as `enable_thinking`, a system prompt). Fill-only: whatever the client sends wins. No second process.
+- **Model picker details**: give each backend a `description`; the chat page's dropdown (and `GET /api/models`) then shows, per model and profile, what it is, memory breakdown, thinking default, context limit and KV cost, the defaults a profile applies, and live load/idle state.
 - **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio) with size, KV cost and mlx-lm support; `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
 
 Which model for which job: [docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md). Tests (no models needed, they use a fake backend): `.venv/bin/python -m unittest discover -s gateway/tests -t .`

@@ -22,7 +22,23 @@
   label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
   input[type=number] { width: 72px; }
-  #model { max-width: 320px; }
+  #model { max-width: 470px; }
+  .minfo { max-width: 820px; margin: 10px auto 0; padding: 0 16px; }
+  .mcard { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; font-size: 13px; }
+  .mcard > summary { cursor: pointer; padding: 8px 14px; list-style: none; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .mcard > summary::-webkit-details-marker { display: none; }
+  .mcard > summary::before { content: "▸"; color: var(--muted); }
+  .mcard[open] > summary::before { content: "▾"; }
+  .mcard .msum { color: var(--muted); }
+  #minfobody { padding: 0 14px 10px; }
+  .badge { font-size: 11px; padding: 0 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.profile { border-color: var(--accent); color: var(--accent); }
+  .mdesc { margin: 0 0 10px; line-height: 1.5; }
+  .mgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 22px; margin: 0; }
+  .mgrid dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 1px; }
+  .mgrid dd { margin: 0; }
+  .mgrid small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .mchips span { display: inline-block; font: 12px ui-monospace, Menlo, monospace; padding: 0 7px; margin: 0 5px 3px 0; border-radius: 9px; background: var(--user); }
   button { cursor: pointer; } button:hover { border-color: var(--muted); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   button:disabled { opacity: .5; cursor: default; }
@@ -73,6 +89,7 @@
   <span style="flex:1"></span>
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
+<div class="minfo"><details class="mcard" id="modelinfo" open><summary id="minfosum">Model details</summary><div id="minfobody"></div></details></div>
 
 <details id="adv">
   <summary>System prompt &amp; sampling</summary>
@@ -110,23 +127,83 @@ let history = [], controller = null, models = [];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const current = () => models.find(m => m.id === $("model").value);
 
+const DOT = { ready: "●", starting: "◐", passivating: "◌", stopped: "○", failed: "✕" };
+const gb = x => x == null ? "?" : (Math.abs(x - Math.round(x)) < 0.05 ? String(Math.round(x)) : x.toFixed(1)) + " GB";
+const tok = n => n == null ? "?" : n >= 1048576 ? Math.round(n / 1048576) + "M" : n >= 1024 ? Math.round(n / 1024) + "K" : String(n);
+const dur = s => s == null ? "" : s < 90 ? Math.round(s) + " s" : Math.round(s / 60) + " min";
+
+function labelBits(m) {                                   // the facts shown in the dropdown line and the card summary
+  const bits = [];
+  if (m.type === "profile") bits.push("on " + m.backend);
+  else if (m.memory && m.memory.est_gb != null) bits.push("≈" + gb(m.memory.est_gb));
+  if (m.thinking) bits.push("thinking " + m.thinking);
+  if (m.defaults && m.defaults.max_tokens) bits.push("≤" + m.defaults.max_tokens + " tokens");
+  return bits;
+}
+const optionLabel = m => `${DOT[m.state] || "○"} ${m.id}` + (labelBits(m).length ? " — " + labelBits(m).join(" · ") : "");
+
 async function loadModels() {
+  let list;
   try {
-    const j = await (await fetch("/v1/models", { cache: "no-store" })).json();
-    models = j.data;
-    const sel = $("model"), keep = sel.value || store.get("gwchat.model", "");
-    sel.innerHTML = models.map(m => `<option value="${esc(m.id)}">${esc(m.id)}</option>`).join("");
-    if (models.some(m => m.id === keep)) sel.value = keep;
-    showState();
-  } catch { $("state").textContent = "gateway unreachable"; $("state").className = "chip"; }
+    try { list = (await (await fetch("/api/models", { cache: "no-store" })).json()).models; }       // rich details
+    catch { list = (await (await fetch("/v1/models", { cache: "no-store" })).json()).data; }       // older gateway: ids and state only
+    if (!Array.isArray(list)) throw new Error("bad model list");
+  } catch { $("state").textContent = "gateway unreachable"; $("state").className = "chip"; return; }
+  models = list;
+  const sel = $("model"), keep = sel.value || store.get("gwchat.model", "");
+  const opt = m => `<option value="${esc(m.id)}">${esc(optionLabel(m))}</option>`;
+  const bs = models.filter(m => m.type !== "profile"), ps = models.filter(m => m.type === "profile");
+  sel.innerHTML = ps.length
+    ? `<optgroup label="Models (each is its own process)">${bs.map(opt).join("")}</optgroup><optgroup label="Profiles (same process, different defaults)">${ps.map(opt).join("")}</optgroup>`
+    : bs.map(opt).join("");
+  if (models.some(m => m.id === keep)) sel.value = keep;
+  showState();
+}
+
+const row = (label, html) => html ? `<div><dt>${label}</dt><dd>${html}</dd></div>` : "";
+function renderInfo(m) {
+  const isProfile = m.type === "profile", mem = m.memory || {}, disk = m.disk || null, def = m.defaults || {};
+  $("minfosum").innerHTML = `${DOT[m.state] || "○"} <b>${esc(m.id)}</b> <span class="badge ${isProfile ? "profile" : ""}">${isProfile ? "profile" : "model"}</span> <span class="msum">${esc(labelBits(m).join(" · "))}</span>`;
+  if (m.memory === undefined && !m.description) { $("minfobody").innerHTML = ""; return; }      // lean fallback list: nothing more to say
+  const life = m.state === "ready"
+    ? `running${m.busy ? " (busy)" : ""} · idle ${dur(m.idle_s)}` + (m.pinned ? " · pinned, never unloaded" : m.ttl_left_s != null && m.ttl_s ? " · unloads in " + dur(m.ttl_left_s) : "")
+    : m.state === "stopped"
+      ? "stopped · loads on your first message" + (m.last_start_s ? ` (last load ${m.last_start_s.toFixed(1)} s)` : "") + (m.ttl_s ? `, unloads after ${dur(m.ttl_s)} idle` : "")
+      : String(m.state);
+  let memHtml = "";
+  if (isProfile) memHtml = `none extra: runs on <b>${esc(m.backend)}</b> (shared process)`;
+  else if (mem.weights_gb != null) memHtml = `<b>≈ ${gb(mem.est_gb)}</b> while loaded<small>weights ${gb(mem.weights_gb)} + KV cache ${gb(mem.kv_gb)} (sized for ${tok(mem.context_tokens)} tokens) + overhead ${gb(mem.overhead_gb)}</small>`;
+  else if (mem.est_gb != null) memHtml = `<b>≈ ${gb(mem.est_gb)}</b> while loaded<small>a catalog estimate</small>`;
+  let ctxHtml = "";
+  if (disk && disk.kv_kib_per_token) {
+    const at = n => gb(disk.kv_kib_per_token * 1024 * n / 1e9);          // decimal GB, matching the model guide
+    ctxHtml = (disk.max_context ? `up to <b>${tok(disk.max_context)}</b> tokens` : "context limit unknown")
+      + `<small>KV cache grows ${disk.kv_kib_per_token} KiB per token: ${at(32768)} at 32K, ${at(131072)} at 128K</small>`;
+  } else if (disk && disk.max_context) ctxHtml = `up to <b>${tok(disk.max_context)}</b> tokens`;
+  const think = m.thinking === "on" ? "<b>on</b><small>reasons first, then answers: slower and more tokens, so it is capped</small>"
+    : m.thinking === "off" ? "<b>off</b> by default<small>a request can turn it on with chat_template_kwargs.enable_thinking</small>"
+    : "the model's own default<small>not set by the gateway</small>";
+  const chips = Object.entries(def).map(([k, v]) => `${k} = ${typeof v === "object" ? JSON.stringify(v) : v}`);
+  if (m.system_prompt) chips.push("adds a system prompt");
+  const defHtml = chips.length ? `<div class="mchips">${chips.map(c => `<span>${esc(c)}</span>`).join("")}</div><small>used only where your request does not set them: the settings below always win</small>` : "";
+  const alias = (m.aliases || []).length ? `<small>also answers to: ${m.aliases.map(esc).join(", ")}</small>` : "";
+  $("minfobody").innerHTML = (m.description ? `<p class="mdesc">${esc(m.description)}</p>` : "") + `<dl class="mgrid">`
+    + row("Status", esc(life)) + row("Memory", memHtml) + row("Context", ctxHtml) + row("Thinking", think)
+    + (disk ? row("Weights on disk", `${gb(disk.weights_gb)}${disk.model_type ? " · " + esc(disk.model_type) : ""}${disk.quant_bits ? " · " + disk.quant_bits + "-bit" : ""}`) : "")
+    + (isProfile ? row("Based on", esc(m.backend)) : "") + row(isProfile ? "Defaults it applies" : "", defHtml)
+    + ((m.profiles || []).length ? row("Profiles on this model", m.profiles.map(esc).join(", ")) : "")
+    + row("In the API", `<code>"model": "${esc(m.id)}"</code>${alias}`) + `</dl>`;
 }
 function showState() {
   const m = current(); if (!m) return;
   const st = m.state;
   $("state").textContent = st === "ready" ? "ready" : st === "stopped" ? "stopped · starts on first message" : st;
   $("state").className = "chip " + (st === "ready" ? "ready" : st === "starting" ? "starting" : "");
+  renderInfo(m);
 }
 $("model").addEventListener("change", () => { store.set("gwchat.model", $("model").value); showState(); });
+$("modelinfo").open = store.get("gwchat.info", "1") === "1";                                       // remember whether the card is open
+$("modelinfo").addEventListener("toggle", () => store.set("gwchat.info", $("modelinfo").open ? "1" : "0"));
 
 function renderPlain(text) {   // fallback when the markdown libs failed to load (vendor scripts failed to load)
   return text.split(/```/).map((seg, i) => {
