@@ -17,7 +17,8 @@ from . import auth
 from .catalog import Catalog
 from .gates import GateSpecError, parse_gates
 from .iterate import MAX_ATTEMPTS_CAP, run_iterate
-from .core import ApiError, compact_backend, map_errors, op_policy, op_start, op_stop, post_json, resolve, status_payload
+from .core import ApiError, compact_backend, map_errors, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
+from .profiles import apply_defaults
 from .supervisor import Supervisor
 
 INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start on first use and stop when idle.
@@ -55,7 +56,16 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         except ApiError as e:
             raise fail(e) from None
 
-    async def call(spec, path: str, body: dict) -> tuple[Any, dict]:
+    def profile_for(model: str | None, kind: str):
+        try:
+            return resolve_target(catalog, model, kind)[1]
+        except ApiError as e:
+            raise fail(e) from None
+
+    async def call(spec, path: str, body: dict, profile=None) -> tuple[Any, dict]:
+        # Profile defaults fill only keys the tool did not send (thinking flags, system prompt, ...). The chat tools always send
+        # max_tokens and temperature, so those stay authoritative over a profile's values.
+        body = apply_defaults(body, profile)
         try:
             r, meta = await post_json(get_supervisor(), get_client(), spec, path, body)
         except ApiError as e:
@@ -90,7 +100,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         t0 = time.monotonic()
         data, meta = await call(spec, "/v1/chat/completions", {
             "model": spec.options.get("model", spec.name), "messages": msgs, "max_tokens": max_tokens,
-            "temperature": temperature, "stream": False})
+            "temperature": temperature, "stream": False}, profile_for(model, "llm"))
         choice = (data.get("choices") or [{}])[0]
         return {"text": (choice.get("message") or {}).get("content", ""), "model": meta["backend"],
                 "finish_reason": choice.get("finish_reason"), "usage": data.get("usage"),
@@ -129,7 +139,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
             t0 = time.monotonic()
             data, meta = await call(spec, "/v1/chat/completions", {
                 "model": spec.options.get("model", spec.name), "messages": convo, "max_tokens": max_tokens,
-                "temperature": temperature, "stream": False})
+                "temperature": temperature, "stream": False}, profile_for(override or model, "llm"))
             choice = (data.get("choices") or [{}])[0]
             return (choice.get("message") or {}).get("content", ""), {"model": meta["backend"], "secs": round(time.monotonic() - t0, 2)}
 

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from .profiles import Profile, parse_profiles
+
 BACKENDS_DIR = Path(__file__).parent / "backends"
 
 
@@ -49,6 +51,10 @@ class BackendSpec:
     start_timeout_s: int = 180     # give up if /health is not 200 by then
     concurrency: int = 1           # simultaneous requests the backend may serve (heavy models: 1)
     aliases: tuple[str, ...] = ()  # extra names clients may use as `model` (an mlx_lm model id is an implicit alias)
+    weights_gb: float | None = None    # memory = weights + KV cache + overhead; est_mem_gb is their sum when given as parts
+    kv_gb: float | None = None
+    overhead_gb: float | None = None
+    context_tokens: int | None = None  # the context the KV figure was sized for (documentation, shown in the admin site)
 
     def command(self) -> list[str]:
         return ADAPTERS[self.adapter].build(self)
@@ -59,6 +65,7 @@ class Catalog:
     gateway: GatewaySettings
     backends: dict[str, BackendSpec]
     base_dir: Path
+    profiles: dict[str, Profile] = field(default_factory=dict)
 
     def state_path(self) -> Path:
         """Where logs, pidfiles and the token live."""
@@ -67,8 +74,23 @@ class Catalog:
     def total_ports(self) -> list[int]:
         return [b.port for b in self.backends.values()]
 
+    def resolve(self, model: str | None, kind: str) -> tuple[BackendSpec, Profile | None]:
+        """Resolve a client-supplied model name to (backend, profile). A profile name or alias selects its backend plus the
+        profile's request defaults; a backend name or alias selects the backend alone."""
+        if model:
+            for p in self.profiles.values():
+                if model == p.name or model in p.aliases:
+                    spec = self.backends[p.backend]
+                    if spec.kind != kind:
+                        raise ValueError(f"{model!r} is a profile of a {spec.kind} backend, not {kind}")
+                    return spec, p
+        return self._find_backend(model, kind), None
+
     def find(self, model: str | None, kind: str) -> BackendSpec:
-        """Resolve a client-supplied model name (backend name or alias) to a backend of the given kind."""
+        """Like ``resolve`` but returns only the backend (profile names work too)."""
+        return self.resolve(model, kind)[0]
+
+    def _find_backend(self, model: str | None, kind: str) -> BackendSpec:
         if not model:
             if kind == "llm" and self.gateway.default_llm:
                 return self.backends[self.gateway.default_llm]
@@ -95,7 +117,8 @@ class Adapter:
 
 
 def _mlx_lm(s: BackendSpec) -> list[str]:
-    return [s.python, "-m", "mlx_lm.server", "--model", s.options["model"], "--host", "127.0.0.1", "--port", str(s.port)]
+    return [s.python, "-m", "mlx_lm.server", "--model", s.options["model"], "--host", "127.0.0.1", "--port", str(s.port),
+            *s.options.get("args", [])]
 
 
 def _jevstyle(s: BackendSpec) -> list[str]:
@@ -113,12 +136,15 @@ def _command(s: BackendSpec) -> list[str]:
 
 
 ADAPTERS: dict[str, Adapter] = {
-    "mlx_lm": Adapter("llm", ("python", "model"), (), "/v1/models", _mlx_lm),
+    "mlx_lm": Adapter("llm", ("python", "model"), ("args",), "/v1/models", _mlx_lm),
     "jevstyle": Adapter("decision", ("python", "model_dir"), ("precision",), "/health", _jevstyle, ("model_dir",)),
     "openjev_nli": Adapter("nli", ("python", "root", "subfolder"), (), "/health", _openjev_nli, ("root",)),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
-COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases"}
+COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",
+          "weights_gb", "kv_gb", "overhead_gb", "context_tokens"}
+# Flags the gateway sets itself; a catalog `args` list may not override them.
+RESERVED_FLAGS = {"mlx_lm": {"--model", "--host", "--port"}}
 
 
 def _check_type(name: str, key: str, value: Any, types: tuple[type, ...]) -> None:
@@ -160,12 +186,32 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         extra = set(b) - COMMON - set(ad.required) - set(ad.optional)
         if extra:
             raise CatalogError(f"backends.{name} ({adapter}): unknown keys {sorted(extra)}")
-        est = b.get("est_mem_gb")
-        if est is None:
-            raise CatalogError(f"backends.{name}: est_mem_gb is required (the memory budget needs it)")
-        _check_type(name, "est_mem_gb", est, (int, float))
-        if est <= 0:
-            raise CatalogError(f"backends.{name}.est_mem_gb must be > 0")
+        parts = [k for k in ("weights_gb", "kv_gb", "overhead_gb") if k in b]
+        part_vals: dict[str, float] = {}
+        if "est_mem_gb" in b and parts:
+            raise CatalogError(f"backends.{name}: give est_mem_gb OR the parts (weights_gb + kv_gb + overhead_gb), not both")
+        if parts:
+            if "weights_gb" not in b:
+                raise CatalogError(f"backends.{name}: weights_gb is required when giving the memory parts")
+            for k, dflt in (("weights_gb", None), ("kv_gb", 0.0), ("overhead_gb", 1.0)):
+                v = b.get(k, dflt)
+                _check_type(name, k, v, (int, float))
+                if v < 0 or (k == "weights_gb" and v <= 0):
+                    raise CatalogError(f"backends.{name}.{k} must be {'> 0' if k == 'weights_gb' else '>= 0'}")
+                part_vals[k] = float(v)
+            est = round(sum(part_vals.values()), 2)
+        else:
+            est = b.get("est_mem_gb")
+            if est is None:
+                raise CatalogError(f"backends.{name}: est_mem_gb is required (or weights_gb + kv_gb + overhead_gb); the memory budget needs it")
+            _check_type(name, "est_mem_gb", est, (int, float))
+            if est <= 0:
+                raise CatalogError(f"backends.{name}.est_mem_gb must be > 0")
+        ctx = b.get("context_tokens")
+        if ctx is not None:
+            _check_type(name, "context_tokens", ctx, (int,))
+            if ctx <= 0:
+                raise CatalogError(f"backends.{name}.context_tokens must be > 0")
         ttl = b.get("ttl_s", 600)
         _check_type(name, "ttl_s", ttl, (int,))
         if ttl < 0:
@@ -201,11 +247,20 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         env = b.get("env", {})
         if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
             raise CatalogError(f"backends.{name}.env: expected a table of strings")
+        args = b.get("args")
+        if args is not None:
+            if not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
+                raise CatalogError(f"backends.{name}.args: expected a list of strings")
+            for a in args:
+                flag = a.split("=", 1)[0]
+                if flag in RESERVED_FLAGS.get(adapter, ()):
+                    raise CatalogError(f"backends.{name}.args: {flag} is set by the gateway and cannot be overridden")
         specs[name] = BackendSpec(
             name=name, adapter=adapter, kind=opts.pop("kind", ad.kind) if adapter == "command" else ad.kind,
             python=python, est_mem_gb=float(est), ttl_s=ttl, pinned=pinned,
             health=opts.pop("health", ad.health) if adapter == "command" else ad.health,
-            port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc, aliases=tuple(dict.fromkeys(aliases)))
+            port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc, aliases=tuple(dict.fromkeys(aliases)),
+            weights_gb=part_vals.get("weights_gb"), kv_gb=part_vals.get("kv_gb"), overhead_gb=part_vals.get("overhead_gb"), context_tokens=ctx)
     pinned_gb = sum(sp.est_mem_gb for sp in specs.values() if sp.pinned)
     if pinned_gb > gs.memory_budget_gb:
         raise CatalogError(f"pinned backends need {pinned_gb} GB, more than the whole memory budget ({gs.memory_budget_gb} GB)")
@@ -217,7 +272,16 @@ def parse(data: dict, base_dir: Path) -> Catalog:
             seen[key] = n
     if gs.default_llm is not None and (gs.default_llm not in specs or specs[gs.default_llm].kind != "llm"):
         raise CatalogError(f"[gateway].default_llm {gs.default_llm!r} must name an llm backend")
-    return Catalog(gs, specs, base_dir)
+    try:
+        profiles = parse_profiles(data.get("profiles", {}), specs)
+    except ValueError as e:
+        raise CatalogError(str(e)) from None
+    for pn, pr in profiles.items():                   # profile names and aliases share one namespace with backends
+        for key in (pn, *pr.aliases):
+            if key in seen:
+                raise CatalogError(f"profile name/alias {key!r} collides with backend {seen[key]!r}")
+            seen[key] = f"profile {pn}"
+    return Catalog(gs, specs, base_dir, profiles)
 
 
 def _resolve(base: Path, p: str) -> Path:

@@ -21,7 +21,8 @@ from starlette.routing import Mount, Route
 
 from . import auth
 from .catalog import Catalog
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, status_payload
+from .profiles import apply_defaults
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from .supervisor import Supervisor
 
@@ -126,6 +127,9 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
     def resolve(model: str | None, kind: str):
         return core_resolve(catalog, model, kind)
 
+    def target(model: str | None, kind: str):
+        return core_resolve_target(catalog, model, kind)       # (backend, profile or None)
+
     async def read_json(request: Request) -> dict:
         try:
             body = await request.json()
@@ -184,18 +188,21 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
     # ---- routes ----
     async def chat_completions(request: Request):
         body = await read_json(request)
-        spec = resolve(body.get("model"), "llm")
+        spec, prof = target(body.get("model"), "llm")
+        body = apply_defaults(body, prof)                                  # profile defaults fill only what the client omitted
         body = {**body, "model": spec.options.get("model", spec.name)}     # mlx_lm.server may try to load a different model id
         return await forward(spec, "/v1/chat/completions", body, stream=bool(body.get("stream")))
 
     async def decide(request: Request):
         body = await read_json(request)
-        spec = resolve(body.pop("model", None), "decision")
+        spec, prof = target(body.pop("model", None), "decision")
+        body = apply_defaults(body, prof)
         return await forward(spec, "/score_many" if "questions" in body else "/decide", body)
 
     async def entail(request: Request):
         body = await read_json(request)
-        spec = resolve(body.pop("model", None), "nli")
+        spec, prof = target(body.pop("model", None), "nli")
+        body = apply_defaults(body, prof)
         return await forward(spec, "/entail", body)
 
     async def models(request: Request):
@@ -203,7 +210,10 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse({"object": "list", "data": [
             {"id": s.name, "object": "model", "owned_by": "local", "aliases": list(s.aliases),
              "state": snap[s.name]["state"], "ready": snap[s.name]["state"] == "ready"}
-            for s in catalog.backends.values() if s.kind == "llm"]})
+            for s in catalog.backends.values() if s.kind == "llm"] + [
+            {"id": p.name, "object": "model", "owned_by": "local", "profile_of": p.backend, "description": p.description,
+             "aliases": list(p.aliases), "state": snap[p.backend]["state"], "ready": snap[p.backend]["state"] == "ready"}
+            for p in catalog.profiles.values() if catalog.backends[p.backend].kind == "llm"]})
 
     async def backends(request: Request):
         return JSONResponse(await status_payload(catalog, sup()))

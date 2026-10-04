@@ -6,6 +6,7 @@ import time
 import httpx
 
 from .catalog import BackendSpec, Catalog
+from .profiles import Profile
 from .supervisor import BackendUnavailable, InsufficientMemory, StartFailed, Supervisor, UnknownBackend
 
 COLD_HEADER_THRESHOLD_S = 0.05
@@ -36,6 +37,16 @@ def map_errors(e: Exception) -> ApiError:
 def resolve(catalog: Catalog, model: str | None, kind: str) -> BackendSpec:
     try:
         return catalog.find(model, kind)
+    except KeyError as e:
+        raise ApiError(404, "model_not_found", str(e.args[0])) from None
+    except ValueError as e:
+        raise ApiError(400, "wrong_model_kind", str(e)) from None
+
+
+def resolve_target(catalog: Catalog, model: str | None, kind: str) -> tuple[BackendSpec, Profile | None]:
+    """Like ``resolve`` but also returns the profile when ``model`` names one (apply it with ``profiles.apply_defaults``)."""
+    try:
+        return catalog.resolve(model, kind)
     except KeyError as e:
         raise ApiError(404, "model_not_found", str(e.args[0])) from None
     except ValueError as e:

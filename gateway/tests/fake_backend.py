@@ -52,7 +52,7 @@ class H(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 return
-            return self._json({"model": req.get("model"), "pid": os.getpid(), "choices": [{"message": {"role": "assistant", "content": f"echo:{len(req.get('messages', []))}"}}]})
+            return self._json({"model": req.get("model"), "received": req, "pid": os.getpid(), "choices": [{"message": {"role": "assistant", "content": f"echo:{len(req.get('messages', []))}"}}]})
         if self.path == "/decide":
             if req.get("question") == "bad":
                 return self._err(400, {"error": "QuestionError: bad"})
