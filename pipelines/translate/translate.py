@@ -38,6 +38,34 @@ def as_gateway_image(data, kind, tmp):
     return out
 
 
+CAPTURE_APP = os.path.expanduser("~/Applications/TranslateCapture.app")       # built by make_capture_app.sh
+CAPTURE_DIR = os.path.expanduser("~/Library/Caches/mlx-translate")
+NO_PERMISSION = "could not create image"                      # what screencapture says without Screen Recording permission
+
+
+def capture(tmp):
+    """Let the user pick a screen region -> (png path or None if cancelled, error message or None).
+
+    Through TranslateCapture.app when it is installed: launched by LaunchServices it is its own responsible process, so its
+    Screen Recording grant applies whatever app is in front (a Quick Action's own children are charged to the front app)."""
+    if os.path.isdir(CAPTURE_APP):
+        shot, errf = os.path.join(CAPTURE_DIR, "shot.png"), os.path.join(CAPTURE_DIR, "shot.err")
+        for f in (shot, errf):
+            if os.path.exists(f):
+                os.remove(f)
+        subprocess.run(["/usr/bin/open", "-W", "-n", CAPTURE_APP], capture_output=True)
+        stderr = open(errf).read() if os.path.exists(errf) else ""
+        who = "TranslateCapture (in ~/Applications)"
+    else:
+        shot = os.path.join(tmp, "shot.png")
+        stderr = subprocess.run(["/usr/sbin/screencapture", "-i", "-x", shot], capture_output=True, text=True).stderr
+        who = "the app running this (your terminal, or the app in front when run as a Quick Action; build TranslateCapture.app to avoid that)"
+    if NO_PERMISSION in stderr:
+        return None, (f"Screen capture failed: {who} needs Screen Recording permission in System Settings → Privacy & Security → "
+                      "Screen & System Audio Recording.")
+    return (shot if os.path.exists(shot) else None), None
+
+
 def notify(msg):
     subprocess.run(["/usr/bin/osascript", "-e", f'display notification "{msg}" with title "Translate"'], capture_output=True)
 
@@ -67,13 +95,11 @@ def main():
             elif data.strip():
                 body = {"text": data.decode("utf-8", errors="replace").strip()}
         if body is None:                                              # nothing given: let the user pick a region
-            shot = os.path.join(tmp, "shot.png")
-            r = subprocess.run(["/usr/sbin/screencapture", "-i", "-x", shot], capture_output=True, text=True)
-            if "could not create image" in r.stderr:                  # what screencapture says without Screen Recording permission
-                print("Screen capture failed: the app running this (your terminal, or Shortcuts) needs Screen Recording permission in "
-                      "System Settings → Privacy & Security → Screen & System Audio Recording; then quit and reopen it.", file=sys.stderr)
+            shot, err = capture(tmp)
+            if err:
+                print(err, file=sys.stderr)
                 return 1
-            if not os.path.exists(shot):                              # Escape pressed
+            if shot is None:                                          # Escape pressed
                 print("_Cancelled._")
                 return 0
             body = {"image": shot}

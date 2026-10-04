@@ -33,4 +33,11 @@ The shortcut file cannot be shipped (signing it needs an iCloud sign-in), but it
 4. **Make Rich Text from Markdown** (input: *Shell Script Result*).
 5. **Quick Look** (input: *Rich Text from Markdown*).
 
-One-time permissions: Shortcuts → Settings → Advanced → **Allow Running Scripts**, and Screen Recording for Shortcuts the first time it captures a region.
+One-time setup:
+
+- Shortcuts → Settings → Advanced → **Allow Running Scripts**.
+- Build the capture helper and give *it* Screen Recording permission:
+  ```bash
+  pipelines/translate/make_capture_app.sh
+  ```
+  then turn on **TranslateCapture** in System Settings → Privacy & Security → Screen & System Audio Recording. A Quick Action's shell script runs as a child of whatever app is in front, so without the helper macOS asks each of those apps for permission in turn. Launched through LaunchServices, the helper is its own responsible process, so one grant covers them all. Rebuilding it changes its ad-hoc signature, so macOS asks again.
