@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models</title>
+<style>
+  /* One hue per section; the same code marks the panel, its models and the memory bar. */
+  :root { --bg: #f6f5f3; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --track: #eeecea;
+          --chat: #4f46e5; --decide: #9333ea; --speech: #0d9488; --vision: #ea580c; --batch: #be185d; --admin: #475569;
+          --good: #16a34a; --warn: #d97706; --bad: #dc2626; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121110; --panel: #1b1918; --ink: #f5f5f4; --muted: #a8a29e; --line: #2c2927; --track: #262321;
+            --chat: #818cf8; --decide: #c084fc; --speech: #2dd4bf; --vision: #fb923c; --batch: #f472b6; --admin: #94a3b8;
+            --good: #4ade80; --warn: #fbbf24; --bad: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; }
+  .top { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; }
+  h1 { font-size: 26px; letter-spacing: -.02em; margin: 0; font-weight: 720; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  /* memory: a stacked bar, one segment per resident model, coloured by section */
+  .mem { min-width: min(420px, 100%); flex: 1; max-width: 520px; }
+  .mem .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+  .bar { position: relative; display: flex; height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; }
+  .bar span { height: 100%; transition: width .4s ease; border-right: 2px solid var(--panel); }
+  .bar span.starting { opacity: .55; background-image: repeating-linear-gradient(45deg, transparent 0 6px, #fff4 6px 12px); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 0; }
+  /* panels */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+  .panel { --c: var(--admin); position: relative; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line);
+           border-radius: 14px; padding: 18px 18px 14px; text-decoration: none; color: inherit; overflow: hidden;
+           transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+  .panel::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--c); }
+  .panel::after { content: ""; position: absolute; right: -60px; top: -60px; width: 180px; height: 180px; border-radius: 50%;
+                  background: radial-gradient(closest-side, color-mix(in srgb, var(--c) 16%, transparent), transparent); pointer-events: none; }
+  a.panel:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--c) 45%, var(--line)); box-shadow: 0 10px 28px -12px color-mix(in srgb, var(--c) 45%, transparent); }
+  a.panel:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+  .head { display: flex; align-items: center; gap: 12px; }
+  .icon { width: 42px; height: 42px; flex: none; border-radius: 11px; display: grid; place-items: center; color: var(--c);
+          background: color-mix(in srgb, var(--c) 13%, transparent); }
+  .icon svg { width: 22px; height: 22px; }
+  .panel h2 { margin: 0; font-size: 17px; font-weight: 680; letter-spacing: -.01em; }
+  .kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--c); font-weight: 650; }
+  .panel p { margin: 10px 0 12px; color: var(--muted); font-size: 13.5px; }
+  .models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font: 12px ui-monospace, Menlo, monospace; padding: 2px 9px 2px 7px; border-radius: 999px;
+          border: 1px solid var(--line); background: var(--bg); white-space: nowrap; }
+  .chip small { color: var(--muted); font-family: system-ui, sans-serif; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .45; flex: none; }
+  .dot.ready { background: var(--good); opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+  .dot.starting, .dot.passivating { background: var(--warn); opacity: 1; animation: pulse 1s ease-in-out infinite; }
+  .dot.failed { background: var(--bad); opacity: 1; }
+  .dot.busy { background: var(--c); opacity: 1; animation: pulse .7s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .go { color: var(--c); font-weight: 650; font-size: 13px; }
+  .feats { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 3px; font-size: 13px; }
+  .feats li::before { content: "→ "; color: var(--c); }
+  code, .snip { font: 12px ui-monospace, Menlo, monospace; }
+  .snip { display: flex; gap: 8px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; margin-top: 6px; }
+  .snip span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .snip button { font: 11px system-ui, sans-serif; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 5px; padding: 1px 7px; cursor: pointer; }
+  .snip button:hover { color: var(--ink); }
+  .empty { font-size: 12px; color: var(--muted); }
+  @media (max-width: 520px) { main { padding: 18px 14px; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Local Models</h1>
+      <div class="sub">Models on this Mac, started on first use and stopped when idle.</div>
+    </div>
+    <div class="mem">
+      <div class="lbl"><span id="memtxt">memory</span><span id="systxt"></span></div>
+      <div class="bar" id="bar"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </div>
+  <div class="grid" id="panels"></div>
+</main>
+<script>
+"use strict";
+const ICON = {
+  chat: '<path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  decide: '<path d="M12 3v6"/><path d="M12 9l-6 5v6M12 9l6 5v6"/><circle cx="12" cy="3" r="1.4"/><circle cx="6" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/>',
+  speech: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10v4"/>',
+  vision: '<path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  batch: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+  admin: '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="7" cy="18" r="1.8"/>',
+};
+// Sections: which backend kinds they show, where they link, and what they are for.
+const SECTIONS = [
+  { id: "chat", title: "Chat", kicker: "Text in, text out", href: "/chat", kinds: ["llm"],
+    text: "Talk to the local LLMs: summaries, extraction, boilerplate, quick questions, with thinking on or off.",
+    feats: ["OpenAI-compatible /v1/chat/completions", "chat and iterate (gated retries) over MCP"] },
+  { id: "vision", title: "Vision", kicker: "Images in, text out", href: "/vision", kinds: ["vision"],
+    text: "Paste or drop screenshots, film stills or PDF pages. Check layout, compare a frame with its storyboard, read tables and charts.",
+    feats: ["look over MCP; /api/look", "image_url parts on /v1/chat/completions"] },
+  { id: "speech", title: "Speech", kicker: "Voices and timing", href: "/speech", kinds: ["tts", "stt"],
+    text: "Narration with preset, designed or cloned voices, and word timestamps for captions.",
+    feats: ["narrate, speak, transcribe over MCP", "/v1/audio/speech"] },
+  { id: "decide", title: "Decide", kicker: "Probabilities, not prose", href: "/jev", kinds: ["decision", "nli"],
+    text: "Typed decisions (choose, rate, yes/no) with probabilities, and NLI checks of claims against a source.",
+    feats: ["decide and entail over MCP", "/api/decide, /api/entail"] },
+  { id: "batch", title: "Scoring", kicker: "For pipelines", href: null, kinds: ["score", "custom"],
+    text: "Log-probabilities of candidate continuations, used by the batch workers (emoji book, PR triage).",
+    feats: ["/api/score"] },
+  { id: "admin", title: "Admin", kicker: "What is running", href: "/admin", kinds: [],
+    text: "Start, stop and pin models, idle timers, the memory budget and the event log, live.",
+    feats: [] },
+];
+const KIND_SECTION = Object.fromEntries(SECTIONS.flatMap(s => s.kinds.map(k => [k, s.id])));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+function chip(b) {
+  const st = b.busy ? "busy" : b.state;
+  const tip = `${b.name} · ${b.kind} · ${b.state}${b.busy ? " (working)" : ""} · ~${b.est_mem_gb} GB` + (b.ttl_left_s != null ? ` · idle stop in ${Math.round(b.ttl_left_s)} s` : "");
+  return `<span class="chip" title="${esc(tip)}"><span class="dot ${esc(st)}"></span>${esc(b.name)}<small>${b.est_mem_gb} GB</small></span>`;
+}
+function panel(s, d) {
+  const mine = d.backends.filter(b => s.kinds.includes(b.kind));
+  if (s.id === "batch" && !mine.length) return "";
+  const ready = mine.filter(b => b.state === "ready").length;
+  let body;
+  if (s.id === "admin") {
+    const g = d.gateway, running = d.backends.filter(b => b.holds_memory).length;
+    const mcp = `claude mcp add --transport http local-models http://127.0.0.1:${g.port}/mcp`;
+    body = `<ul class="feats"><li>${running} of ${d.backends.length} models in memory</li><li>budget ${g.memory_budget_gb} GB · ${g.resident_est_gb} GB in use</li></ul>
+      <div class="snip" onclick="event.preventDefault()"><span title="${esc(mcp)}">${esc(mcp)}</span><button data-copy="${esc(mcp)}">copy</button></div>
+      <div class="snip" onclick="event.preventDefault()"><span>OPENAI_BASE_URL=http://127.0.0.1:${g.port}/v1</span><button data-copy="http://127.0.0.1:${g.port}/v1">copy</button></div>`;
+  } else {
+    body = `<ul class="feats">${s.feats.map(f => `<li>${esc(f)}</li>`).join("")}</ul>
+      <div class="models">${mine.length ? mine.map(chip).join("") : '<span class="empty">none in the catalog</span>'}</div>`;
+  }
+  const foot = s.id === "admin" ? `<span>live</span>` : `<span>${ready ? `${ready} running` : "starts on first use"}</span>`;
+  const tag = s.href ? "a" : "div";
+  return `<${tag} class="panel" style="--c: var(--${s.id})" ${s.href ? `href="${s.href}"` : ""}>
+    <div class="head"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[s.id]}</svg></div>
+      <div><div class="kicker">${esc(s.kicker)}</div><h2>${esc(s.title)}</h2></div></div>
+    <p>${esc(s.text)}</p>${body}
+    <div class="foot">${foot}${s.href ? `<span class="go">Open →</span>` : ""}</div></${tag}>`;
+}
+function memory(d) {
+  const g = d.gateway, budget = g.memory_budget_gb || 1;
+  const held = d.backends.filter(b => b.holds_memory || b.state === "starting");
+  document.getElementById("bar").innerHTML = held.map(b =>
+    `<span class="${b.state === "starting" ? "starting" : ""}" title="${esc(b.name)} · ~${b.est_mem_gb} GB · ${esc(b.state)}"
+       style="width:${(100 * b.est_mem_gb / budget).toFixed(2)}%;background:var(--${KIND_SECTION[b.kind] || "admin"})"></span>`).join("");
+  document.getElementById("legend").innerHTML = held.length
+    ? held.map(b => `<span><i style="background:var(--${KIND_SECTION[b.kind] || "admin"})"></i>${esc(b.name)}</span>`).join("")
+    : "<span>nothing in memory</span>";
+  document.getElementById("memtxt").textContent = `${g.resident_est_gb} of ${budget} GB budget`;
+  const s = g.system || {};
+  document.getElementById("systxt").textContent = s.free_pct != null ? `system ${s.free_pct}% free · swap ${s.swap_used_gb ?? "?"} GB` : "";
+}
+let lastSig = null;
+async function refresh() {
+  try {
+    const d = await (await fetch("/api/backends")).json();
+    const sig = JSON.stringify([d.gateway.resident_est_gb, d.gateway.system?.free_pct, d.backends.map(b => [b.name, b.state, b.busy, b.holds_memory])]);
+    if (sig === lastSig) return;                                  // re-render only on change, so hover effects do not flicker
+    lastSig = sig;
+    document.getElementById("panels").innerHTML = SECTIONS.map(s => panel(s, d)).join("");
+    memory(d);
+  } catch (e) {
+    document.getElementById("memtxt").textContent = "gateway not reachable";
+  }
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button[data-copy]");
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  await navigator.clipboard.writeText(b.dataset.copy);
+  b.textContent = "copied"; setTimeout(() => { b.textContent = "copy"; }, 1200);
+});
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

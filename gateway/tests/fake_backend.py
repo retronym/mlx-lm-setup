@@ -52,6 +52,14 @@ class H(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 return
+            parts = [p for m in req.get("messages", []) if isinstance(m.get("content"), list) for p in m["content"]]
+            urls = [p["image_url"]["url"] for p in parts if p.get("type") == "image_url"]
+            if urls:                                   # a vision request: answer with JSON about the images (or not JSON, on "FAIL")
+                text = " ".join(p.get("text", "") for p in parts if p.get("type") == "text")
+                content = "no json here" if "FAIL" in text else json.dumps({"ok": len(urls) == 1 and "#page=" not in urls[0], "issues": [], "images": [u[:40] for u in urls],
+                                                                              "image_tokens": req.get("image_tokens")})
+                return self._json({"id": "x", "created": 1, "model": "fake", "choices": [{"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
+                                   "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}, "x_timing": {"secs": 0.01}})
             return self._json({"model": req.get("model"), "received": req, "pid": os.getpid(), "choices": [{"message": {"role": "assistant", "content": f"echo:{len(req.get('messages', []))}"}}]})
         if self.path == "/decide":
             if req.get("question") == "bad":

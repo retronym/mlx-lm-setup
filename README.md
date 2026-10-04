@@ -10,6 +10,7 @@
 - **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide`, `/api/entail` and `/api/score` (log P(candidate | prompt) for a closed list of continuations, from an LLM, without generating).
 - **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
 - **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
+- **See** (`look`, image parts on `/v1/chat/completions`, `/vision`): Gemma 4 or Qwen3.6 vision on the weights already on disk. Layout checks of film stills and screenshots (overlap, clipping, bad wraps), frames against their storyboard, tables and charts in PDF pages. Paste, drop or point at a directory; the page and the tool return a `flagged` list (PLAN.md, Vision).
 - **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland*, an NLI triage of scala/scala pull requests, and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
@@ -45,7 +46,7 @@ Every model runs behind the gateway, as its own process in its own environment (
 ```mermaid
 flowchart TB
   CC["Claude Code"] -- "MCP over HTTP + token" --> GW
-  BR["Browser"] -- "chat / · decide /jev · speech /speech · admin /admin" --> GW
+  BR["Browser"] -- "home / · chat /chat · decide /jev · speech /speech · vision /vision · admin /admin" --> GW
   PL["Pipelines (any python3)<br/>emoji book · PR triage · films"] -- "/api/decide · /api/score · /api/entail · /api/narrate" --> GW
   subgraph gw ["Gateway · launchd service · :8090 · .venv"]
     GW["MCP /mcp · OpenAI API /v1 · /api/* · sites<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
@@ -138,6 +139,8 @@ service/service.sh install           # the gateway as a launchd login service (s
 open http://127.0.0.1:8090/          # chat site: streaming, tok/s, shows "starting model..." on a cold start
 open http://127.0.0.1:8090/jev       # decision-model site: prompt + question + options; ✨ asks a local LLM (Gemma) to propose the options
 open http://127.0.0.1:8090/speech    # speech site: voices, timings, word-level transcript
+open http://127.0.0.1:8090/vision    # vision: paste or drop images, layout check, storyboard, tables
+open http://127.0.0.1:8090/          # home: one panel per section, live model state and memory
 python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
 ./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
@@ -160,6 +163,7 @@ service/service.sh status              # the gateway must be running for Claude 
 | `iterate` | `chat` with retries until the answer passes gates: JSON (+schema), regex, contains, length, NLI faithfulness to a source text; optional escalation model for the last try; no shell gate | no |
 | `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
 | `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
+| `look` | a vision model reads images, directories or PDF pages; presets `layout`, `storyboard`, `table`, `describe`; per-image `flagged` list | no |
 | `narrate` | timed narration: scenes with `[[cue]]` markers in; per scene a clip, its duration, word timestamps and cue times out | no |
 | `voices` | the speech models, their preset voices and the saved reference voices | no |
 | `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |

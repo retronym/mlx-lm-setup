@@ -15,7 +15,7 @@ class Raw:
         self.body, self.content_type = body, content_type
 
 
-def serve(port: int, health: dict, routes: dict) -> None:
+def serve(port: int, health: dict, routes: dict, max_body: int = MAX_BODY) -> None:
     lock = threading.Lock()
 
     class H(BaseHTTPRequestHandler):
@@ -46,7 +46,7 @@ def serve(port: int, health: dict, routes: dict) -> None:
             if fn is None:
                 return self._send(404, {"error": "not found"})
             n = int(self.headers.get("Content-Length", 0))
-            if n > MAX_BODY:
+            if n > max_body:
                 return self._send(413, {"error": "body too large"})
             try:
                 req = json.loads(self.rfile.read(n) or b"{}")

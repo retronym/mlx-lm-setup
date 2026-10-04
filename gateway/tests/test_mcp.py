@@ -31,6 +31,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             "nli": {"kind": "nli", "est_mem_gb": 1},
             "voice": {"kind": "tts", "est_mem_gb": 1},
             "ears": {"kind": "stt", "est_mem_gb": 1},
+            "eyes": {"kind": "vision", "est_mem_gb": 1},
         }, port=self.port, default_llm="llm", memory_budget_gb=10, room_timeout_s=0.4)
         self.sup = Supervisor(self.cat, state_dir=Path(self.tmp.name) / "state", reap_interval=0.05, health_interval=0.05, grace_s=0.5)
         app = create_app(self.cat, supervisor=self.sup, token=TOKEN)
@@ -68,7 +69,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "look", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -78,7 +79,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
         async with self.client() as s:
             err, data, _ = await self.call(s, "backends_status")
             self.assertFalse(err)
-            self.assertEqual([b["name"] for b in data["backends"]], ["llm", "llm2", "dec", "nli", "voice", "ears"])
+            self.assertEqual([b["name"] for b in data["backends"]], ["llm", "llm2", "dec", "nli", "voice", "ears", "eyes"])
             self.assertEqual(data["memory"]["budget_gb"], 10)
             self.assertEqual(data["default_llm"], "llm")
             self.assertIn("free_pct", data["system"])
@@ -101,6 +102,17 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("wrong_model_kind", text)
             err, _, text = await self.call(s, "chat", message="x", model="nope")
             self.assertIn("model_not_found", text)
+
+    async def test_look_through_mcp(self):
+        png = Path(self.tmp.name) / "still.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 16)
+        async with self.client() as s:
+            err, data, text = await self.call(s, "look", images=[str(png)], preset="layout")
+            self.assertFalse(err, text)
+            self.assertEqual((data["flagged"], data["results"][0]["json"]["ok"], data["model"]), ([], True, "eyes"))
+            err, _, text = await self.call(s, "look", images=["https://example.com/x.png"], prompt="hi")
+            self.assertTrue(err)
+            self.assertIn("not fetched", text)
 
     async def test_iterate_through_mcp(self):
         async with self.client() as s:

@@ -176,3 +176,57 @@ async def run_narrate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClie
     voice_args = {k: v for k, v in dict(voice=voice, ref_audio=ref_audio, speed=speed, fresh=fresh or None).items() if v is not None}
     res = await narrate(parsed, lambda b: post(tts, "/speak", apply_defaults(b, prof)), lambda b: post(stt, "/transcribe", b), voice_args)
     return {**res, "model": tts.name, "stt_model": stt.name}
+
+
+# ---- vision helpers shared by the HTTP API and the MCP tools ----------------------------------------------------------------
+def vision_models(catalog: Catalog) -> list[str]:
+    return [s.name for s in catalog.backends.values() if s.kind == "vision"]
+
+
+def vision_target(catalog: Catalog, model: str | None) -> tuple[BackendSpec, Profile | None] | None:
+    """(backend, profile) if `model` names a vision backend or a profile of one, else None."""
+    if not model:
+        return None
+    try:
+        return catalog.resolve(model, "vision")
+    except (KeyError, ValueError):
+        return None
+
+
+async def run_look(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, model: str | None = None, max_tokens: int = 1024,
+                   temperature: float = 0.0, **kw) -> dict:
+    """`look` against a vision backend; kw as for vision.look (images, prompt or preset, context, system, each, gates, image_tokens, max_attempts)."""
+    from .gates import GateSpecError, parse_gates
+    from .iterate import run_iterate
+    from .profiles import apply_defaults
+    from .vision import look
+    spec, prof = resolve_target(catalog, model, "vision")
+
+    async def chat(msgs: list[dict], image_tokens: int | None) -> tuple[str, dict]:
+        body = {"messages": msgs, "max_tokens": max_tokens, "temperature": temperature, **({"image_tokens": image_tokens} if image_tokens else {})}
+        r, meta = await post_json(sup, client, spec, "/v1/chat/completions", apply_defaults(body, prof))
+        if r.status_code != 200:
+            raise ApiError(400 if 400 <= r.status_code < 500 else 502, "backend_error", f"{spec.name} returned {r.status_code}: {r.text[:300]}")
+        d = r.json()
+        return (d["choices"][0]["message"].get("content") or ""), {"model": spec.name, "usage": d.get("usage"),
+                                                                     "secs": (d.get("x_timing") or {}).get("secs")}
+
+    async def iterate(gates: list[dict], msgs: list[dict], image_tokens: int | None, max_attempts: int) -> dict:
+        try:
+            parsed = parse_gates(gates)
+        except GateSpecError as e:
+            raise ApiError(400, "invalid_arguments", str(e)) from None
+        nli = resolve(catalog, None, "nli") if any(g.type == "nli" for g in parsed) else None
+
+        async def entail(premise: str, hyps: list[str]) -> list[dict]:
+            r, _ = await post_json(sup, client, nli, "/entail", {"premise": premise, "hypotheses": hyps})
+            if r.status_code != 200:
+                raise ApiError(502, "backend_error", f"{nli.name} returned {r.status_code}: {r.text[:300]}")
+            d = r.json()
+            return [dict(zip(d["labels"], p)) for p in d["probs"]]
+
+        return await run_iterate(lambda _override, convo: chat(convo, image_tokens), entail, parsed, msgs, max_attempts)
+
+    if not 1 <= int(kw.get("max_attempts", 2)) <= 6:
+        raise ApiError(400, "invalid_arguments", "max_attempts must be 1..6")
+    return {**await look(chat, iterate, **kw), "model": spec.name}
