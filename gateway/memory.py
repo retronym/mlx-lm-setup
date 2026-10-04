@@ -23,7 +23,7 @@ def macos_probe() -> dict:
     """{'free_pct': int | None, 'swap_used_gb': float | None, 'swap_total_gb': float | None}"""
     out = {"free_pct": None, "swap_used_gb": None, "swap_total_gb": None}
     try:
-        r = subprocess.run(["sysctl", "-n", "kern.memorystatus_level", "vm.swapusage"], capture_output=True, text=True, timeout=2)
+        r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.memorystatus_level", "vm.swapusage"], capture_output=True, text=True, timeout=2)
         lines = r.stdout.strip().splitlines()
         if lines and lines[0].strip().isdigit():
             out["free_pct"] = int(lines[0])

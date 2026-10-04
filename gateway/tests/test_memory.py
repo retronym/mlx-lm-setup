@@ -1,4 +1,5 @@
-import unittest
+import os, sys, unittest
+from unittest import mock
 from gateway.memory import macos_probe, parse_swapusage
 
 
@@ -18,6 +19,13 @@ class MemoryTests(unittest.TestCase):
             self.assertTrue(0 <= p["free_pct"] <= 100)
         if p["swap_total_gb"] is not None:
             self.assertGreaterEqual(p["swap_total_gb"], p["swap_used_gb"] - 0.01)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS probe")
+    def test_probe_works_with_the_launchd_path(self):              # the service's PATH has no /usr/sbin, where sysctl lives
+        with mock.patch.dict(os.environ, {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}):
+            p = macos_probe()
+        self.assertIsNotNone(p["free_pct"])
+        self.assertIsNotNone(p["swap_used_gb"])
 
 
 if __name__ == "__main__":
