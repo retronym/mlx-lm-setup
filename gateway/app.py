@@ -153,7 +153,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         t0 = time.monotonic()
         stack = AsyncExitStack()
         try:
-            url = await stack.enter_async_context(sup().lease(spec.name))
+            url = await stack.enter_async_context(sup().lease(spec.name, path))
             headers = meta_headers(spec.name, time.monotonic() - t0)
             if not stream:
                 r = await client().post(url + path, json=body)
@@ -355,6 +355,14 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(404, "model_not_found", f"{mid!r} is not among the discovered models")
         return PlainTextResponse(discovery.snippet(hit, context_tokens=ctx, kv_bits=bits, python=discovery.catalog_python(catalog) or "python3"))
 
+    async def requests_timeline(request: Request):
+        """Read-only: requests in flight and recently finished, per backend, with lifecycle events (the home page's timeline)."""
+        try:
+            window = float(request.query_params.get("window_s", 900))
+        except ValueError:
+            raise ApiError(400, "invalid_parameter", "window_s must be a number") from None
+        return JSONResponse(sup().requests_snapshot(min(max(window, 10.0), 3600.0)))
+
     async def backends(request: Request):
         return JSONResponse(await status_payload(catalog, sup()))
 
@@ -432,6 +440,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/score", handler(score), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),
+        Route("/api/requests", handler(requests_timeline), methods=["GET"]),
         Route("/api/models", handler(models_rich), methods=["GET"]),
         Route("/api/models/discovered", handler(models_discovered), methods=["GET"]),
         Route("/api/models/snippet", handler(models_snippet), methods=["GET"]),

@@ -58,7 +58,7 @@ async def post_json(sup: Supervisor, client: httpx.AsyncClient, spec: BackendSpe
     """Lease the backend (lazy start, queue, idle-clock reset), POST ``body`` as JSON, return (response, meta)."""
     t0 = time.monotonic()
     try:
-        async with sup.lease(spec.name) as url:
+        async with sup.lease(spec.name, path) as url:
             cold = time.monotonic() - t0
             r = await client.post(url + path, json=body)
     except Exception as e:                                           # noqa: BLE001

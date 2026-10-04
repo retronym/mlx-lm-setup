@@ -74,6 +74,33 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
             return (await self.http.get(url + "/info")).json()
 
     # ------------------------------------------------------------------------------------------------------------
+    async def test_requests_are_recorded_for_the_timeline(self):
+        sup = self.make({"a": {"flags": ["--ready-delay", "0.2"]}})
+        async with sup.lease("a", "/v1/chat/completions"):
+            snap = sup.requests_snapshot()
+            [act] = snap["active"]
+            self.assertEqual((act["backend"], act["label"], act["status"], act["cold"]), ("a", "/v1/chat/completions", "running", True))
+            self.assertGreaterEqual(act["t_run"] - act["t0"], 0.15)             # the cold start is the wait before running
+        with self.assertRaises(RuntimeError):
+            async with sup.lease("a", "/x"):
+                raise RuntimeError("boom")
+
+        async def hang():
+            async with sup.lease("a", "/slow"):
+                await asyncio.sleep(10)
+        t = asyncio.create_task(hang())
+        await asyncio.sleep(0.1)
+        t.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await t
+        snap = sup.requests_snapshot()
+        self.assertEqual(snap["active"], [])
+        self.assertEqual([(r["label"], r["status"], r["cold"]) for r in snap["recent"]],
+                         [("/v1/chat/completions", "ok", True), ("/x", "error", False), ("/slow", "cancelled", False)])
+        self.assertIn("boom", snap["recent"][1]["error"])
+        self.assertEqual([e["kind"] for e in snap["events"]], ["starting", "ready"])
+        self.assertEqual(sup.requests_snapshot(window_s=0.0001)["recent"], [])
+
     async def test_start_stop_and_events(self):
         sup = self.make({"a": {}})
         q = sup.subscribe()

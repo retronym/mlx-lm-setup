@@ -15,6 +15,7 @@ Asyncio single-threaded: a check followed by a state flip with no ``await`` in b
 from __future__ import annotations
 
 import asyncio
+import itertools
 import contextlib
 import enum
 import json
@@ -103,6 +104,9 @@ class Supervisor:
             r.sem = asyncio.Semaphore(s.concurrency)
             self.rt[n] = r
         self.events: deque[dict] = deque(maxlen=500)
+        self.request_log: deque[dict] = deque(maxlen=500)  # finished requests, newest last (the home page's timeline)
+        self.active_requests: dict[int, dict] = {}
+        self._request_seq = itertools.count(1)
         self._subs: set[asyncio.Queue] = set()
         self._http: httpx.AsyncClient | None = None
         self._reaper: asyncio.Task | None = None
@@ -201,9 +205,13 @@ class Supervisor:
             await asyncio.sleep(0)                           # transient state; let the owning task run
 
     @contextlib.asynccontextmanager
-    async def lease(self, name: str) -> AsyncIterator[str]:
-        """Admit one request: ensure the backend is up, wait for a slot, yield its base URL. Resets the idle clock on exit."""
+    async def lease(self, name: str, label: str = "") -> AsyncIterator[str]:
+        """Admit one request: ensure the backend is up, wait for a slot, yield its base URL. Resets the idle clock on exit.
+        Each lease is also recorded (wall-clock admit / run / end, outcome) for the request timeline; ``label`` says what it was."""
         b = self._get(name)
+        rec = {"id": next(self._request_seq), "backend": name, "kind": b.spec.kind, "label": label, "t0": time.time(), "t_run": None,
+               "t1": None, "status": "waiting", "cold": b.state is not State.READY}
+        self.active_requests[rec["id"]] = rec
         b.pending += 1                                       # blocks passivation from this moment on
         try:
             await self.ensure_running(name)
@@ -211,13 +219,33 @@ class Supervisor:
                 b.in_flight += 1
                 b.requests += 1
                 b.last_used = self.clock()
+                rec["t_run"], rec["status"] = time.time(), "running"
                 try:
                     yield b.base_url
                 finally:
                     b.in_flight -= 1
                     b.last_used = self.clock()
+            rec["status"] = "ok"
+        except asyncio.CancelledError:
+            rec["status"] = "cancelled"
+            raise
+        except BaseException as e:
+            rec["status"], rec["error"] = "error", f"{type(e).__name__}: {str(e)[:200]}"
+            raise
         finally:
             b.pending -= 1
+            rec["t1"] = time.time()
+            self.active_requests.pop(rec["id"], None)
+            self.request_log.append(rec)
+
+    def requests_snapshot(self, window_s: float = 900.0) -> dict:
+        """Requests in flight plus those that ended within ``window_s``, and lifecycle events in the same window (for markers)."""
+        now = time.time()
+        since = now - window_s
+        life = {"starting", "ready", "passivating", "stopped", "failed", "crashed", "pressure", "rejected"}
+        return {"now": now, "window_s": window_s, "active": [dict(r) for r in self.active_requests.values()],
+                "recent": [dict(r) for r in self.request_log if r["t1"] >= since],
+                "events": [e for e in self.events if e["ts"] >= since and e["kind"] in life]}
 
     async def start(self, name: str) -> Runtime:
         return await self.ensure_running(name, explicit=True)

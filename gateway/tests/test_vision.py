@@ -165,6 +165,12 @@ class VisionRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r.status_code, 400, body)
         self.assertEqual(self.sup.rt["eyes"].starts, 0)
 
+    async def test_requests_timeline_route(self):
+        await self.http.post("/api/look", json={"images": [str(self.d / "stills" / "s1.png")], "prompt": "hi"})
+        d = (await self.http.get("/api/requests?window_s=60")).json()
+        self.assertEqual([(r["backend"], r["label"], r["status"]) for r in d["recent"]], [("eyes", "/v1/chat/completions", "ok")])
+        self.assertEqual((await self.http.get("/api/requests?window_s=abc")).status_code, 400)
+
     async def test_models_presets_and_page(self):
         ids = {m["id"]: m for m in (await self.http.get("/v1/models")).json()["data"]}
         self.assertTrue(ids["eyes"]["vision"])
