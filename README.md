@@ -8,17 +8,17 @@
 - **Decide instead of generate** (`/jev`): give a text, a question and a list of options, and a decision model scores every option in a single forward pass, returning probabilities (pick the best emoji, classify sentiment, triage a bug, rate urgency on a scale). It is fast, deterministic and cheap, and it never generates text.
 - **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks), plus the speech tools below. Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
 - **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide`, `/api/entail` and `/api/score` (log P(candidate | prompt) for a closed list of continuations, from an LLM, without generating).
-- **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
+- **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop, and an activity timeline of every request lease (wait, run, outcome; also `/api/requests`). The home page (`/`) shows one panel per section with live model state.
 - **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
 - **See** (`look`, image parts on `/v1/chat/completions`, `/vision`): Gemma 4 or Qwen3.6 vision on the weights already on disk. Layout checks of film stills and screenshots (overlap, clipping, bad wraps), frames against their storyboard, tables and charts in PDF pages. Paste, drop or point at a directory; the page and the tool return a `flagged` list (PLAN.md, Vision).
 - **Translate** (`/translate`, `translate`, `/api/translate`, a macOS Shortcut): text or a screenshot into English (or another language; the page defaults to Polish → English) with a short summary. Screenshots are read by macOS's own OCR (no model load), so a warm translation takes 1–3 s ([pipelines/translate](pipelines/translate/README.md)).
 - **Search the Scala sources** (`/search`, `search`, `/api/search`, `/v1/embeddings`, `/api/rerank`): hybrid keyword + vector retrieval with a cross-encoder reranker over scala/scala (compiler, library, spec), the Scala 3 docs and scala/bug issues and comments. Returns passages with links, not answers. About 1 s per query once warm; the index is built and refreshed incrementally by [pipelines/search](pipelines/search/README.md).
-- **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland*, an NLI triage of scala/scala pull requests, and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
+- **Run pipelines on top**: an NLI triage of scala/scala pull requests, the search indexer, an emoji-annotated *Alice in Wonderland* ([pipelines/emoji_book](pipelines/emoji_book/README.md)) and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
 
 ```bash
-service/service.sh install          # the gateway as a login service (or: .venv/bin/python -m gateway &)
+mise run setup && mise run service-install   # the gateway as a login service (or: .venv/bin/python -m gateway &)
 open http://127.0.0.1:8090/
 ```
 
@@ -69,66 +69,20 @@ Every model runs behind the gateway, as its own process in its own environment (
 ```mermaid
 flowchart TB
   CC["Claude Code"] -- "MCP over HTTP + token" --> GW
-  BR["Browser"] -- "home / · chat /chat · decide /jev · speech /speech · vision /vision · admin /admin" --> GW
-  PL["Pipelines (any python3)<br/>emoji book · PR triage · films"] -- "/api/decide · /api/score · /api/entail · /api/narrate" --> GW
+  BR["Browser"] -- "home / · chat /chat · decide /jev · speech /speech · vision /vision · translate /translate · search /search · admin /admin" --> GW
+  PL["Pipelines (any python3)<br/>PR triage · search indexer · emoji book · films"] -- "/api/decide · /api/score · /api/entail · /api/narrate" --> GW
   subgraph gw ["Gateway · launchd service · :8090 · .venv"]
     GW["MCP /mcp · OpenAI API /v1 · /api/* · sites<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
   end
   GW -- "spawn / stop / proxy" --> LLM["LLMs · mlx_lm.server<br/>Qwen3-Coder · Qwen3.6-35B · Gemma 4 26B"]
+  GW --> VL["Vision · mlx-vlm<br/>Gemma 4 · Qwen3.6"]
   GW --> SC["Scorers<br/>Jev-Style 2B (decide) · OpenJev 4B (entail) · Qwen3-Coder (score)"]
+  GW --> SE["Search · Qwen3-Embedding + Qwen3-Reranker<br/>reads the SQLite index"]
   GW --> SP["Speech · mlx-audio<br/>Kokoro · Qwen3-TTS design and clone · Whisper"]
-  PL -- "results files" --> DASH["pipelines/dashboard_server.py :8766<br/>triage dashboard · emoji book"]
+  PL -- "results files, index" --> DASH["dashboards<br/>triage :8766 · search progress :8767"]
 ```
 
 ## Pipelines
-
-### Emoji book: Alice annotated phrase by phrase
-
-Deterministic code around scorers: spaCy cuts the text into phrases, a decision model and an LLM score every emoji, the scores are fused, and the page renders them as ruby text above each phrase, tinted by the "vibe colour" when the model is confident.
-
-```mermaid
-flowchart LR
-  TXT["corpus/alice.txt<br/>Project Gutenberg"] --> WORDS["data/book_words.json<br/>4,280 words, chapters I–II"]
-  WORDS --> CH["chunk_book.py<br/>spaCy chunker, 4–12 words<br/>0.1 s per phrase"]
-  CH --> CHUNKS["data/book_chunks.json<br/>748 phrases"]
-  CHUNKS --> JW["score_worker.py jev<br/>/api/decide · Jev-Style 2B · ~1 s per phrase"]
-  CHUNKS --> LW["score_worker.py lm<br/>/api/score · Qwen3-Coder log P(emoji) · ~4.5 s per phrase"]
-  JW -- "emoji scores + colour, mood,<br/>sentiment" --> SJ["scores_jev.jsonl"]
-  LW -- "log-probs, 346 emoji" --> SL["scores_lm.jsonl"]
-  SJ --> FU["emoji_book_fused.py<br/>z-score fusion, w_lm = 0.6<br/>Jev-only where LLM not yet scored"]
-  SL --> FU
-  FU --> EV["book_events.jsonl<br/>book_status.json"]
-  EV --> PG["book.html<br/>emoji ruby text · colour tint · hover popup"]
-```
-
-What one decision-model call looks like (this is why attributes are nearly free: the state is computed once and every extra question only adds its own options):
-
-```mermaid
-flowchart LR
-  subgraph state ["state: about 25 tokens"]
-    direction LR
-    B["15 words before"] --- C["⟦ phrase ⟧"] --- A["5 words after"]
-  end
-  state --> M["Jev-Style 2B<br/>one call, state computed once"]
-  Q1["emoji? · 346 options"] --> M
-  Q2["vibe colour? · 12 options"] --> M
-  Q3["mood? · 10 options"] --> M
-  Q4["sentiment · 5 ordered levels"] --> M
-  M --> S["score of option k =<br/>logit(yes) − logit(no) at its slot"]
-  S --> R["raw scores + softmax probabilities<br/>→ top-3 emoji, colour tint, popup"]
-```
-
-The workers call the gateway (`pipelines/gateway_client.py`, stdlib only), so they run under any `python3` and never load a model; run them one at a time, since they share the GPU. The chunker and the fusion step need spaCy and numpy from `.venv-jev`.
-
-```bash
-.venv-jev/bin/python pipelines/emoji_book/chunk_book.py        # phrase boundaries -> data/book_chunks.json
-python3 pipelines/emoji_book/score_worker.py jev               # resumable; --fresh to restart
-python3 pipelines/emoji_book/score_worker.py lm                # optional: the gateway evicts idle backends to fit the 18 GB scorer
-.venv-jev/bin/python pipelines/emoji_book/emoji_book_fused.py --fresh     # combine -> data/book_events.jsonl (follows the workers live)
-python3 pipelines/dashboard_server.py &                        # http://127.0.0.1:8766/book
-```
-
-`recolor.py` re-answers only the colour question for phrases already scored, so prompt wording can be iterated quickly. Questions and the context window live in `jev_attrs.py`, the LLM's few-shot prompt in `lm_prompt.py`, the emoji list in `emoji_vocab.py`.
 
 ### PR triage: OpenJev on scala/scala
 
@@ -145,6 +99,19 @@ python3 pipelines/dashboard_server.py &                  # http://127.0.0.1:8766
 python3 pipelines/pr_triage/jev_triage.py --fresh
 ```
 
+### Search indexer
+
+`pipelines/search/` builds the SQLite index (chunks, FTS5, embeddings) over scala/scala, scala/scala3, the Scala 3 docs, scala/bug and scala/scala pull requests that the gateway's `search` backend serves. Syncs are incremental and resumable (rate-limit-aware GitHub paging); a progress dashboard runs on :8767. See its [README](pipelines/search/README.md).
+
+```bash
+.venv-jev/bin/python pipelines/search/sync.py && .venv-jev/bin/python pipelines/search/embed.py
+python3 pipelines/search/dashboard.py        # http://127.0.0.1:8767/
+```
+
+### Emoji book
+
+Alice in Wonderland annotated phrase by phrase: a decision model and an LLM score every emoji per phrase, the scores are fused and rendered as ruby text. See [pipelines/emoji_book](pipelines/emoji_book/README.md).
+
 ### Narrated video explainer
 
 `examples/explainer/build.py` builds an MP4 with narration, captions and timed slides from a JSON script, entirely through the gateway's speech API; see [docs/SPEECH.md](docs/SPEECH.md).
@@ -157,13 +124,14 @@ python3 pipelines/pr_triage/jev_triage.py --fresh
 
 ```bash
 brew install mlx-lm                  # one-time
-service/service.sh install           # the gateway as a launchd login service (status, logs, restart, uninstall); or run it by hand:
+mise run service-install             # the gateway as a launchd login service (also service-status, -logs, -restart, -uninstall, wrapping service/service.sh); or run it by hand:
 .venv/bin/python -m gateway &        # chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
-open http://127.0.0.1:8090/          # chat site: streaming, tok/s, shows "starting model..." on a cold start
+open http://127.0.0.1:8090/chat      # chat site: streaming, tok/s, shows "starting model..." on a cold start
 open http://127.0.0.1:8090/jev       # decision-model site: prompt + question + options; ✨ asks a local LLM (Gemma) to propose the options
 open http://127.0.0.1:8090/speech    # speech site: voices, timings, word-level transcript
 open http://127.0.0.1:8090/vision    # vision: paste or drop images, layout check, storyboard, tables
 open http://127.0.0.1:8090/translate # translate: text or a pasted screenshot, Polish → English by default
+open http://127.0.0.1:8090/search    # search: Scala sources and issues, hybrid + rerank
 open http://127.0.0.1:8090/          # home: one panel per section, live model state and memory
 python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
@@ -175,7 +143,7 @@ The standalone server above is independent of the gateway. Claude Code now talks
 ### Gateway MCP tools
 
 ```bash
-service/service.sh status              # the gateway must be running for Claude Code to connect
+mise run service-status                # the gateway must be running for Claude Code to connect
 ./register_mcp.sh                      # claude mcp add --transport http ... with the token header; restart Claude Code after
 ```
 
@@ -217,8 +185,9 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | Path | What |
 |---|---|
 | `gateway/`, `gateway.toml` | the gateway: catalog, supervisor, HTTP app, MCP server, thin backend servers (`gateway/backends/`), sites (`gateway/web/`) |
-| `service/` | launchd service: `service.sh install / uninstall / restart / status / logs` |
-| `pipelines/` | what runs today, all as gateway clients: `emoji_book/`, `pr_triage/`, `translate/` (the Shortcut's client), `dashboard_server.py` (whitelist-only localhost server for both pages), `gateway_client.py` |
+| `service/` | launchd service: `service.sh install / uninstall / restart / status / logs` (also `mise run service-*`) |
+| `mise.toml`, `requirements.txt` | `mise run setup / test / build / translate-app / service-*`; the gateway venv's dependencies (CI runs `test` on macOS) |
+| `pipelines/` | what runs today, all as gateway clients: `search/` (index builder and dashboard), `pr_triage/`, `emoji_book/`, `translate/` (the Shortcut's client), `dashboard_server.py` (whitelist-only localhost server for the triage and book pages), `gateway_client.py` |
 | `examples/` | narrated films: `explainer/` (slides), `showcase/`, `safe-scala/` |
 | `experiments/` | benchmarks and earlier in-process iterations behind the choices above, kept for reference (`bench_llm_compare.py`: the head-to-head in the model guide) |
 | `ask.sh`, `serve.sh`, `register_mcp.sh` | one-shot client, a plain `mlx_lm.server` outside the gateway, MCP registration |
@@ -226,11 +195,11 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `PLAN.md` | the gateway's design and phase status, with findings per phase |
 | `data/`, `models/`, `corpus/`, `.venv*/` | generated or downloaded; git-ignored (logs in `data/logs/`) |
 
-Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx, and `pyobjc-framework-Vision` for OCR in `translate`), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev backend, the chunker and the fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
+Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx, and `pyobjc-framework-Vision` for OCR in `translate`; `mise run setup`), `.venv-vlm` (mlx-vlm, for the vision backends), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev and search backends, the search indexer, the emoji chunker and fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
 
 ## Gateway
 
-Starts models on demand, passivates idle ones, and fronts them with one API. All phases in [PLAN.md](PLAN.md) are done: catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service, speech, and the pipelines as clients. **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+Starts models on demand, passivates idle ones, and fronts them with one API. All phases in [PLAN.md](PLAN.md) are done: catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service, speech, vision, translate, search, and the pipelines as clients. **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
@@ -238,7 +207,7 @@ curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
 curl localhost:8090/api/backends                 # state, idle countdown, memory estimate per backend, system free memory and swap
 ```
 
-Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `mlx_lm_score`, `jevstyle`, `openjev_nli`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). The catalog has these features for managing models:
+Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `mlx_lm_score`, `mlx_vlm`, `jevstyle`, `openjev_nli`, `search`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). The catalog has these features for managing models:
 
 - **Memory as parts**: give `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost.
 - **Argument passthrough**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).

@@ -1,6 +1,6 @@
 # Plan: a local model gateway with lifecycle, passivation, MCP and web UIs
 
-Status: **phases 1–10 done.** Phases are tracked in the table below (DONE / TODO); ideas not yet started are under [Future work](#future-work).
+Status: **phases 1–12 done** (11 and 12, and the changes under [Landed without a plan](#landed-without-a-plan), are written up after the fact). Phases are tracked in the table below (DONE / TODO); ideas not yet started are under [Future work](#future-work).
 
 ## Problem
 
@@ -150,6 +150,7 @@ sequenceDiagram
 | 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | **DONE** |
 | 10 | Vision: Gemma 4 / Qwen3.6 vision via mlx-vlm, `look` MCP tool, image parts on `/v1/chat/completions`, `/vision` page, home page (see [Vision](#vision-phase-10)) | **DONE** |
 | 11 | Translate: `/api/translate`, `translate` MCP tool, macOS Vision OCR for screenshots, a client for a macOS Shortcut (see [Translate](#translate-phase-11)) | **DONE** |
+| 12 | Search: embedder + reranker backend, `/search`, `search` MCP tool, a sync/embed indexer over Scala sources and issues (see [Search](#search-phase-12), written post hoc) | **DONE** |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -405,6 +406,45 @@ A keyboard shortcut that translates the selected text, or a region of the screen
 - **Repo tidy.** `pipelines/` (emoji book, PR triage, the dashboard server, the client) and `experiments/` (benchmarks and earlier in-process iterations, repointed at the repo root's `data/` and `models/`; checked by compiling all of them and running the ones that need no model). Logs moved to `data/logs/`.
 - **Not done:** an MCP tool for `score`; `experiments/bench_emoji.py report` fails on `data/bench_*.json` files from later benchmarks that have no `model` key (true before the move as well).
 
+## Search (phase 12)
+
+Written after the fact: built in one day (2026-10-04) from a PoC to a gateway feature, without a design pass.
+
+### Why
+
+Retrieval over the Scala compiler, docs and issue history is the first thing a local model can do that the hosted one cannot do cheaply at scale: questions like "where is eta expansion of by-name parameters handled" or "is this a duplicate of an old scala/bug issue" over millions of tokens of text. It was the "embeddings and a reranker" item under Future work.
+
+### Key decisions
+
+1. **Index builder and query server are separate.** `pipelines/search/` (sync, embed, a CLI) writes one SQLite file (chunks, FTS5, embeddings); the gateway's `scala-search` backend only reads it, keeps the embedder and reranker warm, and reloads its vector matrix when the file changes. Reindexing never needs a gateway restart.
+2. **Hybrid retrieval**: BM25 (FTS5) and Qwen3-Embedding-0.6B vectors fused by reciprocal rank, one hit per document, optional Qwen3-Reranker-0.6B over the top 30. One process, ~3 GB, on the `.venv-jev` environment (new adapter `search`, kind `search`).
+3. **Sync and embed are separate passes with content-hash change detection**, so an edit to one method re-embeds one chunk, and keyword search works before any model exists. Chunk ids are stable under edits elsewhere (`path:Enclosing.name#n`, `issue:N`, `comment:ID`).
+4. **Sources are adapters that yield chunks**: `scalac`, `scala3` (git trees, one chunk per member-level definition, per heading for docs), `scala3docs`, `bug` and `scalapr` (GitHub issues, PRs, conversation and review comments; state and labels are metadata, so closing re-embeds nothing). GitHub paging is per stream with a cursor committed after every page, so an interrupted run resumes; it sleeps through rate limits and re-anchors before the 10k page cap.
+5. **Results are passages with links, not answers.** The tool also reports what is indexed and the commit or time each source was last synced, so a caller can judge staleness.
+
+### Surfaces
+
+`/search` page, MCP `search` (`query`, `k`, `source`, `mode`, `rerank`, `open_only`, `text_chars`), `POST /api/search`, OpenAI-compatible `POST /v1/embeddings`, `POST /api/rerank`, `GET /api/search/status`, and a stdlib progress dashboard on :8767 (`pipelines/search/dashboard.py`). Details and measured timings: [pipelines/search/README.md](pipelines/search/README.md).
+
+### Findings
+
+- About 1 s per query once warm; the CLI pays 4 s (hybrid) to 7 s (rerank) because it loads the models per call, which is what the gateway backend removes.
+- Initial scalac sync (37k chunks) 18 s, scala/bug since 2020 75 s, incremental issue sync 1.5 s; embedding is the slow step (~17 min for everything, once, ~50 chunks/s on MPS).
+- Reranking helps "where is X implemented" queries clearly and can demote a good hit (`EtaExpansion.expand` left the top 5 for the eta-expansion query); six hand-picked queries judged by eye is not an evaluation.
+- Comments inherit their issue's state, so `open_only` filters comments too.
+- **Not done:** an evaluation set for fusion and rerank defaults; sbt/zinc, SIPs and Discourse sources; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
+
+## Landed without a plan
+
+Smaller changes that shipped between phases 10 and 12 with no design pass, recorded here so the plan matches the repo.
+
+- **Request timeline** (2026-10-03). Every lease is recorded (wait, run, outcome) and exposed as `/api/requests`; the home page draws live activity lanes, and the admin page (2026-10-04) an activity timeline coloured like the memory stack. Motivation: with several clients sharing one GPU, "why was that slow" was unanswerable without seeing who held which backend.
+- **Home page and navigation.** A home page at `/` with one panel per section (chat moved to `/chat`) and live model and memory state; chat header options show only the model id (specs in a tooltip and details card), with a short state chip and nav as one group.
+- **Admin start/stop buttons and token handling.** The gateway token is kept in `localStorage` rather than per-tab `sessionStorage`, so `/admin` reached from the home or chat links is authenticated; the read-only banner has a paste-a-token box, and a 401 drops a stale token. This supersedes the sessionStorage note under Phase 5 findings.
+- **Vision progress.** `/api/look/expand` and per-image progress on `/vision` and in MCP progress notifications (also noted under Phase 10).
+- **Translate additions** after phase 11: a `/translate` page (text or pasted or dropped screenshot, source hint steering OCR), and capture through `TranslateCapture.app` so one Screen Recording grant covers every front app. OCR lines are joined into paragraphs from Vision's line boxes (font size, position, right edge, prose cue; a capitalised continuation needs a close size match, so banner lines stay apart), so translations do not inherit screen line breaks.
+- **Build and CI.** `mise.toml` tasks (`setup`, `test`, `translate-app`, `build`, and `service-install / -uninstall / -restart / -status / -logs` wrapping `service/service.sh`), `requirements.txt` for the gateway venv, and a GitHub Actions job running the unit tests on macOS.
+
 ## Future work
 
 Not started; each would get its own design pass first.
@@ -412,4 +452,5 @@ Not started; each would get its own design pass first.
 - **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
 - **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
 - **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
-- **New kinds of model:** embeddings and a reranker (Qwen3-Embedding, Qwen3-Reranker) for search and duplicate detection over issues, PRs and these docs; a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.
+- **Search follow-ups:** an evaluation set, duplicate-issue detection on top of `search`, SIPs and Discourse sources, and decide-model reranking of results.
+- **New kinds of model:** a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.
