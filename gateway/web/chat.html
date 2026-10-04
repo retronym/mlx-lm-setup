@@ -81,6 +81,9 @@
   .composer { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
   #input { flex: 1; resize: none; min-height: 44px; max-height: 220px; padding: 10px; }
   .empty { color: var(--muted); text-align: center; margin-top: 12vh; }
+  .samples { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 18px; }
+  .samples button { font-size: 12px; padding: 2px 10px; border-radius: 12px; background: transparent; color: var(--muted); }
+  .samples button:hover { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -105,7 +108,7 @@
   </div>
 </details>
 
-<main id="scroll"><div class="wrap" id="log"><div class="empty" id="empty">Ask a local model something.<br><small>The model starts on first use and stops when idle. Enter to send · Shift+Enter for a newline.</small></div></div></main>
+<main id="scroll"><div class="wrap" id="log"><div class="empty" id="empty">Ask a local model something.<br><small>The model starts on first use and stops when idle. Enter to send · Shift+Enter for a newline.</small><div class="samples"></div></div></div></main>
 
 <footer>
   <div class="composer">
@@ -249,9 +252,13 @@ function thinkUpdate(el, text, streaming) {                // reasoning is a per
   }
   if (!streaming && !d._user && d.open) { d._auto = true; d.open = false; setTimeout(() => d._auto = false); }
   d.querySelector("summary").textContent = `${streaming ? "Thinking…" : "Thought"} (${text.length} chars)`;
-  const b = d.querySelector(".tbody"), top = b.scrollTop, pin = b.scrollHeight - top - b.clientHeight < 24;
-  if (d._text !== text) { d._text = text; b.innerHTML = render(text); }   // markdown is re-rendered from the full text; replacing content clamps scrollTop, so restore it
-  b.scrollTop = pin ? b.scrollHeight : top;
+  const b = d.querySelector(".tbody"), top = b.scrollTop;
+  if (!d._follow) d._follow = pinLatch(b);
+  if (d._text !== text) {
+    const lines = text.split("\n").length, newLine = lines !== d._lines; d._text = text; d._lines = lines;
+    b.innerHTML = render(text);                                   // replacing content clamps scrollTop, so restore it
+    b.scrollTop = d._follow.on && newLine ? b.scrollHeight : top;  // only follow the tail when a new line has started, not on every token
+  }
   return d;
 }
 function addMsg(role, html, cls = "") {
@@ -277,13 +284,14 @@ async function send() {
     if (!out && !reasoning) el.innerHTML = `<p class="wait">${cold ? "Starting " + esc(model) + " (first message after idle)" : "Thinking"}… ${((performance.now() - t0) / 1000).toFixed(0)}s</p>`;
   }, 250);
   let tFirst = null, out = "", reasoning = "", chunks = 0, usage = null, coldSecs = null;
-  let raf = 0, renderedOut = -1;
+  let raf = 0, renderedOut = -1, lastLines = 0;
   const paint = () => {                                    // coalesce chunks into one DOM update per frame
-    raf = 0; const stick = atBottom();
+    raf = 0; const stick = atBottom(), lines = (reasoning + out).split("\n").length;
     if (reasoning) { thinkUpdate(el, reasoning, !out); if (out.length !== renderedOut) el.querySelector(".ans").innerHTML = out ? render(out) : ""; }
     else if (out.length !== renderedOut) el.innerHTML = render(out);
     renderedOut = out.length;
-    if (stick) toBottom();
+    if (stick && lines !== lastLines) toBottom();            // follow once per new line of output, not per token
+    lastLines = lines;
   };
   try {
     const r = await fetch("/v1/chat/completions", {
@@ -333,13 +341,34 @@ async function send() {
   }
 }
 
-function atBottom() { const s = $("scroll"); return s.scrollHeight - s.scrollTop - s.clientHeight < 40; }
+// "following" is a latch the user controls: scrolling away from the bottom turns it off, scrolling back to the bottom turns it on.
+// Content growth never changes it, so streaming can't drag the view away from where the user parked it.
+const pinLatch = (el, slack = 6) => { const st = { on: true };
+  el.addEventListener("scroll", () => { st.on = el.scrollHeight - el.scrollTop - el.clientHeight < slack; });
+  el.addEventListener("wheel", e => { if (e.deltaY < 0) st.on = false; }, { passive: true });
+  return st; };
+const pageFollow = pinLatch($("scroll"));
+function atBottom() { return pageFollow.on; }
 function toBottom() { const s = $("scroll"); s.scrollTop = s.scrollHeight; }
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 220) + "px"; }
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $("send").addEventListener("click", send);
-$("clear").addEventListener("click", () => { controller?.abort(); history = []; $("log").innerHTML = `<div class="empty" id="empty">New chat.</div>`; });
+const SAMPLES = [
+  ["Explain", "Explain how a B-tree keeps itself balanced, with a small worked example."],
+  ["Code", "Write a Python function that merges overlapping intervals, with a few tests."],
+  ["Summarize", "Summarize the trade-offs between optimistic and pessimistic locking in five bullet points."],
+  ["Rewrite", "Rewrite this to be clearer and shorter: “We are currently in the process of evaluating the possibility of potentially migrating our services.”"],
+  ["Reason", "A bat and a ball cost $1.10 together, and the bat costs $1.00 more than the ball. What does the ball cost? Think it through."],
+];
+function seedSamples(box) {
+  box.innerHTML = SAMPLES.map(([l, t], i) => `<button data-i="${i}" title="${esc(t)}">${esc(l)}</button>`).join("");
+  box.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+    $("input").value = SAMPLES[b.dataset.i][1]; autosize(); $("input").focus(); });
+}
+seedSamples(document.querySelector("#empty .samples"));
+$("clear").addEventListener("click", () => { controller?.abort(); history = [];
+  $("log").innerHTML = `<div class="empty" id="empty">New chat.<div class="samples"></div></div>`; seedSamples(document.querySelector("#empty .samples")); });
 loadModels(); setInterval(loadModels, 3000);
 </script>
 </body>

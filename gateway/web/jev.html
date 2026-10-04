@@ -32,6 +32,9 @@
   .res .name { overflow-wrap: anywhere; } .res .name.top { font-weight: 650; }
   .res .bar { background: var(--line); border-radius: 4px; height: 14px; overflow: hidden; } .res .bar i { display: block; height: 100%; background: var(--accent); }
   .res .p { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .samples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+  .samples button { font-size: 12px; padding: 1px 10px; border-radius: 12px; background: transparent; color: var(--muted); }
+  .samples button:hover { color: var(--ink); }
   .answer { font-size: 18px; margin-bottom: 10px; }
 </style>
 </head>
@@ -47,6 +50,7 @@
     <h2>Prompt</h2>
     <textarea id="state" placeholder="The text to decide about: a message, a code diff, a review, anything…"></textarea>
     <div class="row"><input type="text" id="question" placeholder="Question (e.g. “Which emoji fits best?”)"></div>
+    <div class="samples" id="samples"><small>Try:</small></div>
   </section>
 
   <section>
@@ -154,6 +158,25 @@ $("run").addEventListener("click", async () => {
       + probs.map(([k, v], i) => `<span class="name ${i ? "" : "top"}">${esc(k)}</span><span class="bar"><i style="width:${(100 * v / max).toFixed(1)}%"></i></span><span class="p">${(100 * v).toFixed(1)}%</span>`).join("") + `</div>`;
   } catch (e) { done(); $("runstat").className = "status err"; $("runstat").textContent = String(e.message || e); }
 });
+const SAMPLES = [
+  { label: "Sentiment", qtype: "choice", question: "What is the sentiment of this review?",
+    state: "The battery easily lasts two days and the screen is gorgeous, but the speaker is tinny and support took a week to reply.",
+    options: "positive\nnegative\nmixed\nneutral" },
+  { label: "Triage", qtype: "choice", question: "Which team should handle this bug report?",
+    state: "Clicking “Export CSV” on the billing page downloads an empty file when the date range spans a daylight-saving change.",
+    options: "frontend: UI rendering and browser behavior\nbackend: APIs, data and business logic\ninfra: deployment, networking and CI\ndocs: documentation and examples" },
+  { label: "Urgency", qtype: "score", question: "How urgent is this message?",
+    state: "Hi, production is returning 500s for about a third of checkout requests since the last deploy. Can someone take a look?",
+    options: "not urgent: can wait for a routine follow-up\nlow: should be handled this week\nmedium: should be handled today\nhigh: needs attention within the hour\ncritical: drop everything now" },
+  { label: "Emoji", qtype: "choice", question: "Which emoji fits best?",
+    state: "We shipped the release a day early and nothing broke.",
+    options: "🎉\n🚀\n😅\n🔥\n👍\n😢" },
+];
+$("samples").insertAdjacentHTML("beforeend", SAMPLES.map((x, i) => `<button data-i="${i}">${esc(x.label)}</button>`).join(""));
+$("samples").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+  const x = SAMPLES[b.dataset.i];
+  for (const id of ["state", "question", "options", "qtype"]) { $(id).value = x[id]; store.set("gwjev." + id, x[id]); }
+  $("out").innerHTML = `<span class="hint">Scores every option in one forward pass of the Jev-Style decision model. Nothing is generated.</span>`; });
 loadLlms();
 </script>
 </body>
