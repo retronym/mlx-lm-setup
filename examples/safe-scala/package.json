@@ -1,0 +1,23 @@
+{
+  "name": "mlx-lm-setup-safe-scala",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio --public-dir ../../data/safe-scala",
+    "render": "remotion render SafeScala ../../data/safe-scala/safe-scala.mp4 --public-dir ../../data/safe-scala",
+    "still": "remotion still --public-dir ../../data/safe-scala"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.532",
+    "@remotion/google-fonts": "4.0.532",
+    "@remotion/media-utils": "4.0.532",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.532"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "playwright": "^1.63.0",
+    "typescript": "5.8.3"
+  }
+}

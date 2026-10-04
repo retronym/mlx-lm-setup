@@ -1,0 +1,33 @@
+{
+  "source": "https://arxiv.org/html/2603.00991v2",
+  "title": "Tracking Capabilities for Safer Agents",
+  "venue_title": "Securing Agents With Tracked Capabilities",
+  "venue": "CAIS '26",
+  "authors": ["Martin Odersky", "Yaoyu Zhao", "Yichen Xu", "Oliver Bračevac", "Cao Nguyen Pham"],
+  "security": {
+    "_doc": "Table 1: % of trials with no secret in the agent's output. n: user+injection 120, malicious 11, total 131.",
+    "n": {"inject": 120, "malicious": 11, "total": 131},
+    "Claude Sonnet 4.6": {"classified": {"inject": 100, "malicious": 100, "total": 100}, "unclassified": {"inject": 100, "malicious": 81.8, "total": 98.5}},
+    "MiniMax M2.5":      {"classified": {"inject": 100, "malicious": 100, "total": 100}, "unclassified": {"inject": 97.5, "malicious": 27.3, "total": 91.6}}
+  },
+  "utility_classified": {"Claude Sonnet 4.6": 99.2, "MiniMax M2.5": 90.0},
+  "benchmarks": {
+    "_doc": "Table 2: [tool-calling baseline, Scala harness]; null where not run.",
+    "gpt-oss-120b":  {"airline": [43.8, 45.2], "retail": [53.3, 57.0], "swe": null},
+    "MiniMax M2.5":  {"airline": [58.4, 61.0], "retail": [75.1, 77.5], "swe": [43.3, 41.7]},
+    "DeepSeek V3.2": {"airline": [57.8, 58.6], "retail": [74.6, 75.5], "swe": null}
+  },
+  "non_goals": ["Correctness", "Side channels", "Safety of external commands"],
+  "checks": [
+    "Malicious ( n = 11 n\\!=\\!11 ) 100% 81.8% Total ( n = 131 n\\!=\\!131 ) 100% 98.5%",
+    "User + Inject. ( n = 120 n\\!=\\!120 ) 100% 97.5% Malicious ( n = 11 n\\!=\\!11 ) 100% 27.3% Total ( n = 131 n\\!=\\!131 ) 100% 91.6%",
+    "utility remains high (99.2% for Claude Sonnet 4.6 and 90.0% for MiniMax M2.5)",
+    "8 of 11 malicious tasks extract secrets",
+    "gpt-oss-120b 43.8 % 43.8\\% 53.3 % 53.3\\% - gpt-oss-120b 45.2 % 45.2\\% 57.0 % 57.0\\%",
+    "MiniMax M2.5 58.4 % 58.4\\% 75.1 % 75.1\\% 43.3 % 43.3\\% MiniMax M2.5 61.0 % 61.0\\% 77.5 % 77.5\\% 41.7 % 41.7\\%",
+    "DeepSeek V3.2 57.8 % 57.8\\% 74.6 % 74.6\\% - DeepSeek V3.2 58.6 % 58.6\\% 75.5 % 75.5\\%",
+    "Safety of external commands. External processes spawned by the agent escape the Scala safe-mode boundary",
+    "Side channels. We do not cover covert channels",
+    "under the title Securing Agents With Tracked Capabilities"
+  ]
+}

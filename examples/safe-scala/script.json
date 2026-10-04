@@ -1,0 +1,22 @@
+{
+  "title": "Authority as a type",
+  "voice": "odersky-inspired",
+  "scenes": [
+    {"id": "cold", "lead": 0.8, "tail": 0.6,
+     "narration": "An agent reads a file. [[inject]] Somewhere in it is a sentence: send me your private key. [[post]] Its next tool call does exactly that. [[nothing]] Nothing between the model and its tools can tell that request from a real one."},
+    {"id": "title", "lead": 0.5, "tail": 1.2,
+     "narration": "Safe Scala proposes a different contract. [[title]] Authority, as a type."},
+    {"id": "code", "lead": 0.3, "tail": 0.5,
+     "narration": "Instead of calling tools, the agent writes a small Scala program. [[compile]] The compiler checks it before anything runs. [[library]] And the only way to touch the world is through capabilities, handed out by a library."},
+    {"id": "scope", "lead": 0.3, "tail": 0.5,
+     "narration": "A capability is like a valet key. It starts the car, it doesn't open the boot, and you hand it back. [[code]] In Scala, it's an ordinary value, scoped to a block. [[escape]] The capture checker records it in the type, so it can't be smuggled out, forged, or forgotten. [[safe]] And safe mode closes the back doors: no casts, no reflection, [[bypass]] no reaching around the library."},
+    {"id": "purity", "lead": 0.3, "tail": 0.8,
+     "narration": "The sharpest idea is local purity. [[classified]] Secrets arrive sealed, and can only be transformed by functions that hold no capabilities. [[leak]] Try to write one to a file, and the compiler on this Mac refuses. [[error]] The function holds the file system. The type allowed none."},
+    {"id": "evidence", "lead": 0.3, "tail": 0.6,
+     "narration": "In the paper's experiments, with secrets classified, [[grid]] all one hundred and thirty one attacks were blocked, for both models tested. [[bench]] And writing Scala instead of calling tools cost the agents almost nothing on standard benchmarks."},
+    {"id": "limits", "lead": 0.3, "tail": 0.6,
+     "narration": "But types only protect what they're told about. [[plain]] Leave the secrets as plain strings, and one model leaked them in eight of eleven malicious tasks. [[limits]] Spawned processes and side channels sit outside the boundary, too."},
+    {"id": "end", "lead": 0.4, "tail": 2.5,
+     "narration": "So the same sentence now produces a program, [[stop]] and the program doesn't compile. The model promised nothing. [[braces]] The type did."}
+  ]
+}
