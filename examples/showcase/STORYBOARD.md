@@ -35,7 +35,23 @@ The through-line is a **deck of real job cards**: the small requests that come u
 3. **Bookend with a promise.** The first line says the voice was made on this Mac and that we'll come back to it; the last act keeps that promise.
 4. **Show the mechanism.** As in v1: decide is animated as the real computation on a real phrase, and the gates as a real retry.
 5. **Honesty beats.** Local models are smaller and are confidently wrong sometimes (the invented IndexError, and the NLI model agreeing with it). Act 1 says it, act 3 deals with it.
-6. **No stage-manager metaphor.** It's not needed once memory is a single beat.
+6. **The team: a lead and its interns.** This is the film's one metaphor, carried throughout because it is accurate. Claude Opus 5.5 (the hosted model driving Claude Code) is the **lead**: it plans, designs, reviews, and decides who does what. The local models are **interns**, each good at one kind of junior job and cheap to ask. The drawing is precise rather than cute: ID badges, not faces.
+   - **The office.** A thin outline labelled *this Mac*, with the gateway as its only door (`127.0.0.1:8090`). The lead sits outside the outline, above it. Everything inside is local; the outline is the sovereignty line.
+   - **The interns**, each a badge on a desk: name, size in GB, speciality, and a small *in / out* light.
+
+     | Intern | Size | Speciality | Speed |
+     |---|---|---|---|
+     | Gemma 4 26B | 16 GB | drafts, summaries | ~85 tok/s |
+     | Qwen3-Coder 30B | 17.5 GB | boilerplate code, extraction | ~108 tok/s |
+     | Jev-Style 2B | 3 GB | sorting and labelling | ~1 s a decision |
+     | OpenJev 4B | 9.5 GB | fact-checking | |
+     | Qwen3-TTS | 4.5 GB | voice | |
+     | Whisper | 3 GB | transcription and timing | |
+
+   - **Delegation is the motion.** Job cards come to the lead, who reads each one and passes it down through the door (the MCP tool name is the label on the hand-off) to the right desk. The intern's light comes on, the work goes back up, and for generated work it passes the fact-checker's desk first.
+   - **Memory, absorbed.** Interns only come in when there's work and go home when idle. That is passivation, said once and shown by the lights. The desks are limited (the memory budget), so when a new intern is needed and the room is full, the one idle longest goes home. One beat, no incident.
+   - **Honesty fits the metaphor.** You check an intern's work. The confidently wrong review in 3c is an intern's mistake, caught by review. That is why the gates exist, and why the lead keeps judgment.
+   - **The timesheet** replaces the generic ledger: jobs per intern and jobs done by the lead, taken from the gateway's real per-backend request counters.
 
 Kept from v1: the visual language (dark warm ground, one orange accent for "problem" and "active", family hues, real captures, numbers that count up, morphs through shared objects rather than cuts), and the build pipeline (Remotion, `narrate` with cue markers, real data).
 
@@ -79,8 +95,8 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
 
 ### 2. The plan (1:05–1:15)
 
-- **Visual:** the three columns fold away. A question types out in the centre and then splits into three titles, which rise into the **plan rail** at the top of the frame and stay there for the rest of the film.
-- **Narration:** "So the question isn't local or cloud. It's which jobs to hand a small model, and how to trust the result. [[plan]] Three parts: [[p1]] one front door, [[p2]] the right kind of model for each job, [[p3]] and checking its work."
+- **Visual:** the three columns fold away. **Meet the team:** the lead's badge settles above the frame, the office outline draws itself, and the interns' desks appear one by one with their badges and lights off. Then the question types out across the office, splits into three titles, and they rise into the **plan rail**, where they stay for the rest of the film.
+- **Narration:** "So the question isn't local or cloud. It's how to run a team: [[team]] a capable lead, the hosted model, and a row of interns on this Mac, each good at one junior job. [[plan]] Three parts: [[p1]] how the interns are reached, [[p2]] which jobs suit them, [[p3]] and how their work gets checked."
 
 ### 3a. One front door (1:15–1:45)
 
@@ -125,7 +141,7 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
 - **The ledger (3:18–3:30):**
   - The film's own production jobs deal out as a second deck: draft each scene, fact-check each sentence, voice each scene, pick the best take, time the words, sort the cards, design the storyboard, write the renderer, edit the script.
   - They route exactly as the deck in 3c did. Most go down to the Mac; design, code and the final edit go up to Claude.
-  - The ledger grows to full frame with the real counts: calls per local model from the gateway's counters (reset before the build), and how many drafted lines Claude kept as written and how many it edited.
+  - The ledger becomes the **timesheet** at full frame: jobs per intern from the gateway's per-backend counters (reset before the build), the lead's jobs, and how many drafted lines the lead kept as written and how many it edited.
   - Fade to the repo name.
   - "Making this film was a stack of jobs too. [[total]] The drafts, the fact-checks, the voice and the timing ran on this Mac. The storyboard, the code and the final edit were Claude's. Same split, same reasons."
 
