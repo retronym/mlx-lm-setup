@@ -55,8 +55,8 @@ export const TeamSketch: React.FC = () => {
       <Arrow x1={960} y1={450} x2={x0 + 2 * (deskW + gap) + deskW / 2} y2={deskY - 14} color={C.decision} width={3} bend={-30} />
       <div style={{ position: "absolute", left: 1000, top: 330, width: 360, padding: "10px 14px", borderRadius: 10, background: "#f1ece3", color: "#15130f",
                     fontFamily: BODY, fontSize: 18, transform: "rotate(-2deg)", boxShadow: "0 10px 30px rgba(0,0,0,0.5)" }}>
-        Which emoji fits “when suddenly a White Rabbit”?
-        <div style={{ fontFamily: MONO, fontSize: 13, marginTop: 4, color: "#55503f" }}>decide · 346 options</div>
+        Is PR #11285 just internal housekeeping?
+        <div style={{ fontFamily: MONO, fontSize: 13, marginTop: 4, color: "#55503f" }}>decide · yes / no</div>
       </div>
       <Mono size={18} color={C.decision} style={{ position: "absolute", left: 760, top: 520 }}>decide →</Mono>
       {INTERNS.map((it, i) => (

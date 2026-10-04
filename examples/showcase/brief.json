@@ -1,0 +1,241 @@
+{
+ "style": "Narration for a calm, precise explainer video for software engineers. Plain spoken English, short sentences, no hype, no rhetorical questions, no exclamation marks, no lists or headings, no stage directions. British spelling. Write every number as words. Use only the facts given; do not add claims, numbers or examples of your own.",
+ "scenes": [
+  {
+   "id": "hook",
+   "words": 28,
+   "brief": "Open the film. Say where this voice and these words came from, promise to explain how at the end, and turn to why that matters.",
+   "facts": [
+    "The voice narrating this film was generated on this Mac, not in a data centre.",
+    "The first draft of this narration was written by a local model on this Mac.",
+    "Each sentence of the narration was fact-checked by a local model on this Mac.",
+    "The film explains how this was done at the end."
+   ],
+   "sources": [
+    "docs/SPEECH.md",
+    "examples/showcase/STORYBOARD.md"
+   ]
+  },
+  {
+   "id": "deal",
+   "words": 30,
+   "brief": "Working with an AI coding assistant creates a stream of small jobs. Name four of them as examples.",
+   "facts": [
+    "Working with an AI coding assistant creates a steady stream of small jobs.",
+    "One small job is summarising a source file.",
+    "One small job is deciding whether a pull request is just internal housekeeping.",
+    "One small job is deciding whether a review is positive, negative or mixed.",
+    "One small job is checking whether a summary matches the code it describes."
+   ],
+   "sources": [
+    "README.md"
+   ]
+  },
+  {
+   "id": "cost",
+   "words": 38,
+   "brief": "The first reason to run these jobs locally: cost at volume. Contrast one job with the volumes in this repo, and say re-takes are free locally.",
+   "facts": [
+    "A hosted model bills every request by the token.",
+    "For a single small job that cost does not matter.",
+    "This repo triaged three hundred Scala pull requests against six questions each, one thousand eight hundred judgments.",
+    "The narration for the explainers in this repo has been synthesised more than thirty times so far, counting re-takes.",
+    "On a local model the marginal cost of another request is electricity, so a re-take is free and you can iterate more."
+   ],
+   "sources": [
+    "data/results.jsonl",
+    "data/audio"
+   ]
+  },
+  {
+   "id": "latency",
+   "words": 22,
+   "brief": "The second reason: latency for small jobs.",
+   "facts": [
+    "Small jobs are latency bound: the round trip can cost more than the work.",
+    "A local decision takes about a second.",
+    "There is no network round trip and no rate limit on the local machine."
+   ],
+   "sources": [
+    "README.md"
+   ]
+  },
+  {
+   "id": "private",
+   "words": 32,
+   "brief": "The third reason: some text should never leave the machine.",
+   "facts": [
+    "Some of the text these jobs read should not leave the machine.",
+    "Examples are unreleased code, private pull request descriptions, and a recording of a person's voice.",
+    "The local gateway listens only on the machine itself, on one two seven dot zero dot zero dot one."
+   ],
+   "sources": [
+    "PLAN.md (D6)",
+    "docs/SPEECH.md"
+   ]
+  },
+  {
+   "id": "catch",
+   "words": 16,
+   "brief": "The honest catch about local models.",
+   "facts": [
+    "Local models are much smaller than the big hosted models.",
+    "Local models are sometimes confidently wrong."
+   ],
+   "sources": [
+    "docs/FINDINGS.md"
+   ]
+  },
+  {
+   "id": "team",
+   "words": 48,
+   "brief": "Reframe the question as running a team: a capable lead (the hosted model) and interns on this Mac, each good at one junior job. Then announce the three parts of the film.",
+   "facts": [
+    "The question is not whether to use local or hosted models, but how to split the work between them.",
+    "The arrangement is like a team with a capable lead and a row of interns.",
+    "The lead is Claude Opus five point five, the hosted model that drives Claude Code. It plans, designs, reviews, and decides who does what.",
+    "The interns are local models on this Mac, and each one is good at one kind of junior job.",
+    "The film has three parts: how the interns are reached, which jobs suit them, and how their work gets checked."
+   ],
+   "sources": [
+    "README.md",
+    "examples/showcase/STORYBOARD.md"
+   ]
+  },
+  {
+   "id": "door",
+   "words": 70,
+   "brief": "Part one: how the interns are reached. One gateway is the only door to them. Who comes through it. Interns come in when there is work and go home when idle, within a limited number of desks (the memory budget).",
+   "facts": [
+    "Part one is how the interns are reached.",
+    "One gateway on this Mac is the only door to the local models.",
+    "Claude Code talks to the gateway over MCP.",
+    "The browser gets a chat site and an admin page from the gateway.",
+    "Anything that speaks the OpenAI API can use the gateway too.",
+    "A local model is loaded only when a request needs it, in about two seconds.",
+    "A local model that has been idle long enough is unloaded and its memory is returned.",
+    "The models share a memory budget of twenty eight of the Mac's forty eight gigabytes, so the Mac stays usable for everything else.",
+    "When a model needs memory and the budget is full, the model that has been idle longest is unloaded."
+   ],
+   "sources": [
+    "README.md",
+    "PLAN.md (D2, D4)",
+    "gateway.toml"
+   ]
+  },
+  {
+   "id": "sort",
+   "words": 34,
+   "brief": "Part two: which jobs suit the interns. Look at the jobs again: most are choices, not essays. A small decision model did this sorting, and got one wrong.",
+   "facts": [
+    "Part two is which jobs suit the interns.",
+    "Most of the small jobs are not essays; they are choices, such as which label, which category, or yes or no.",
+    "The sorting of the jobs shown on screen was done by a small local decision model, Jev-Style.",
+    "It sorted five of six jobs correctly. It filed checking a summary against code as a writing job."
+   ],
+   "sources": [
+    "experiment 2026-10-04 (decide on six job cards)"
+   ]
+  },
+  {
+   "id": "mechanism",
+   "words": 52,
+   "brief": "How a decision model works, contrasted with generating an answer. Use the example of one pull request asked four questions in one pass.",
+   "facts": [
+    "A generating model writes its answer token by token, and the prose then has to be parsed.",
+    "A decision model scores every option of a closed list in a single forward pass and returns probabilities.",
+    "The pull request is read once; each extra question only adds its own options.",
+    "Each option's score is how much more the model leans towards yes than towards no for that option.",
+    "Asked about a Scala pull request that updates a build plugin, the decision model answered four questions at once: a dependency update, low risk, no release note needed, internal housekeeping.",
+    "A decision is fast, deterministic, and there is nothing to parse."
+   ],
+   "sources": [
+    "README.md (decision model)",
+    "run 2026-10-04: decide on PR #11285, four questions"
+   ]
+  },
+  {
+   "id": "evidence",
+   "words": 38,
+   "brief": "A real pipeline built from yes or no questions, and an honest result about it.",
+   "facts": [
+    "This repo triaged three hundred Scala pull requests with six yes or no questions each, using a local entailment model.",
+    "The triage ranked pull requests well, but at its default threshold it flagged many that maintainers had not labelled.",
+    "For the collections question it flagged thirty nine pull requests, of which nineteen were right."
+   ],
+   "sources": [
+    "README.md",
+    "data/results.jsonl"
+   ]
+  },
+  {
+   "id": "wrong",
+   "words": 42,
+   "brief": "Part three: how intern work gets checked. Start with a real mistake.",
+   "facts": [
+    "Part three is how the interns' work gets checked.",
+    "Asked to review a short Python function, a local model said it raised an IndexError. It does not; it invented the bug.",
+    "A local fact-checking model was asked whether the code supports that claim, and it agreed, with a probability of zero point seven two.",
+    "The real bug was different: the last windows are partial but still divided by n."
+   ],
+   "sources": [
+    "docs/FINDINGS.md",
+    "jev_check.py"
+   ]
+  },
+  {
+   "id": "gates",
+   "words": 26,
+   "brief": "How generated work is checked: gates and retries.",
+   "facts": [
+    "Generated work from an intern goes through checks that a machine can verify: valid JSON, a pattern, a length, and faithfulness to a source.",
+    "When a check fails, the failure is fed back and the intern tries again.",
+    "If it still fails, the lead takes over."
+   ],
+   "sources": [
+    "README.md",
+    "gateway/iterate.py"
+   ]
+  },
+  {
+   "id": "route",
+   "words": 24,
+   "brief": "The resulting division of labour between the lead and the interns.",
+   "facts": [
+    "The lead keeps design, review and judgment.",
+    "The interns get the cheap, checkable work: summaries, extraction, classification, boilerplate and first-pass triage.",
+    "The lead hands work to the interns through four tools: chat, decide, entail and iterate."
+   ],
+   "sources": [
+    "README.md"
+   ]
+  },
+  {
+   "id": "voice",
+   "words": 34,
+   "brief": "Keep the promise from the opening: explain how this voice was made and timed.",
+   "facts": [
+    "The narrator's voice was designed by a local voice model from one sentence describing it.",
+    "That voice was saved and then cloned by a local model for every scene, so every scene sounds the same.",
+    "A local speech recognition model, Whisper, listened back and timed every word, which is how the animations know when to move."
+   ],
+   "sources": [
+    "docs/SPEECH.md"
+   ]
+  },
+  {
+   "id": "timesheet",
+   "words": 34,
+   "brief": "Close: making this film was a stack of jobs too, split the same way. End on the split.",
+   "facts": [
+    "Making this film was itself a stack of small jobs.",
+    "The interns on this Mac drafted the narration, fact-checked it, voiced it and timed it.",
+    "The lead wrote the storyboard and the animation code, and edited the script.",
+    "It is the same split, for the same reasons."
+   ],
+   "sources": [
+    "examples/showcase/STORYBOARD.md"
+   ]
+  }
+ ]
+}
