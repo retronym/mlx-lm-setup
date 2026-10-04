@@ -1,0 +1,46 @@
+# Model catalog for the local gateway. Adding a model = adding a [backends.<name>] table; no code.
+# Paths are resolved relative to this file. Memory is in GB, TTLs in seconds (0 = never passivate).
+
+[gateway]
+host = "127.0.0.1"
+port = 8090                  # the gateway; not 8080 (that stays free for a plain mlx_lm.server if you want one)
+backend_port_base = 18101    # backends get 18101, 18102, ... in catalog order
+memory_budget_gb = 28        # resident backends may not exceed this (macOS, JVM, sbt need the rest)
+default_llm = "qwen3-coder"
+
+# --- built-in adapters -------------------------------------------------------------------------------
+#   mlx_lm       any mlx-community model, served by `mlx_lm.server` (OpenAI-compatible)      needs: python, model
+#   jevstyle     a Jev-Style decision model in MLX format                                    needs: python, model_dir  [precision]
+#   openjev_nli  an OpenJev NLI cross-encoder checkpoint                                     needs: python, root, subfolder
+#   command      anything else that speaks HTTP on a port; "{port}" is substituted           needs: command  [health] [kind]
+
+[backends.qwen3-coder]
+adapter = "mlx_lm"
+python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
+model = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
+est_mem_gb = 17.5
+ttl_s = 600
+
+[backends.openjev-4b]
+adapter = "openjev_nli"
+python = ".venv-jev/bin/python"
+root = "models/openjev"
+subfolder = "qwen3.5-4b-nli-v5"
+est_mem_gb = 9.5
+ttl_s = 300
+
+[backends.jevstyle-2b]
+adapter = "jevstyle"
+python = ".venv-mlxjev/bin/python"
+model_dir = "models/jevstyle-2b-mlx"
+precision = "8bit"
+est_mem_gb = 3
+ttl_s = 900
+
+# Example of adding another model (uncomment): a second generative LLM is just a few lines.
+# [backends.gpt-oss-20b]
+# adapter = "mlx_lm"
+# python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
+# model = "mlx-community/gpt-oss-20b-MXFP4-Q8"
+# est_mem_gb = 13
+# ttl_s = 600
