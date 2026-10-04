@@ -12,20 +12,7 @@ from mlx_lm.models.cache import make_prompt_cache
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from emoji_vocab import EMOJI
-
-FEWSHOT = """Phrase: The cat knocked the glass off the table and stared at me.
-Emoji: 😼
-
-Phrase: We finally got the keys to our first house!
-Emoji: 🏠
-
-Phrase: I am literally dying, that was so funny.
-Emoji: 💀
-
-Phrase: Her heart sank when she read the letter.
-Emoji: 💔
-
-Phrase: """
+from lm_prompt import FEWSHOT
 
 
 class LMEmoji:

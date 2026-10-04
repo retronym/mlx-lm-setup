@@ -4,11 +4,15 @@ Reads data/prs.json (gh pr list ... --json number,title,body,labels,files,merged
 appends one JSON line per PR to data/results.jsonl and keeps data/status.json current,
 so dashboard.html can follow along live. Resumable: PRs already in results.jsonl are skipped.
 
-Usage: .venv-jev/bin/python jev_triage.py [--limit N] [--fresh]
+Scoring goes through the gateway's NLI backend (/api/entail), which starts OpenJev on first use.
+
+Usage: python3 jev_triage.py [--limit N] [--fresh]
 """
 import argparse, json, os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import gateway_client as gw
 DATA = os.path.join(HERE, "data")
 PRS, RESULTS, STATUS = (os.path.join(DATA, f) for f in ("prs.json", "results.jsonl", "status.json"))
 
@@ -66,15 +70,12 @@ def main():
         done = {json.loads(l)["number"] for l in open(RESULTS) if l.strip()}
 
     qdefs = [dict(key=k, name=n, hypothesis=h, labels=l) for k, n, h, l in QUESTIONS]
-    base = dict(total=len(prs), questions=qdefs, model="AlexWortega/openjev qwen3.5-4b-nli-v5",
-                started=time.time(), device=None)
-    write_status(state="loading", done=len(done), **{k: v for k, v in base.items() if k != "started"}, started=base["started"])
+    base = dict(total=len(prs), questions=qdefs, model="AlexWortega/openjev qwen3.5-4b-nli-v5 (gateway backend openjev-4b)",
+                started=time.time(), device="gateway")
+    write_status(state="loading", done=len(done), **base)
 
-    import torch
-    from jev_check import Jev
     t = time.time()
-    jev = Jev()
-    base["device"] = str(jev.enc.device)
+    gw.entail("warm up", ["the gateway has started the NLI backend"])     # cold start happens here, not in the first PR's timing
     base["load_s"] = round(time.time() - t, 1)
     base["started"] = time.time()
     hyps = [h for _, _, h, _ in QUESTIONS]
@@ -88,7 +89,7 @@ def main():
                 continue
             labels = [l["name"] for l in pr["labels"]]
             t0 = time.time()
-            probs = jev.enc.predict_hypotheses(premise(pr), hyps)  # [n_hyp, 3] = contradiction, entailment, neutral
+            probs = gw.entail(premise(pr), hyps)  # [n_hyp, 3] = contradiction, entailment, neutral
             dt = time.time() - t0
             t_infer += dt
             rec = dict(
