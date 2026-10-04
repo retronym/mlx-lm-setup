@@ -79,6 +79,23 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual((a.start_timeout_s, a.concurrency), (5, 2))
         self.assertEqual((b.start_timeout_s, b.concurrency), (180, 1))
 
+    def test_aliases_and_find(self):
+        d = bad(**{"backends__b__aliases": ["decider"]})
+        c = parse(d, BASE)
+        self.assertEqual(c.find("decider", "decision").name, "b")
+        self.assertEqual(c.find("org/model", "llm").name, "a")             # an mlx_lm model id is an implicit alias
+        self.assertEqual(c.find(None, "llm").name, "a")                    # default_llm
+        self.assertEqual(c.find(None, "nli").name, "c")                    # first backend of the kind
+        with self.assertRaises(ValueError):
+            c.find("b", "llm")                                             # right name, wrong kind
+        with self.assertRaises(KeyError):
+            c.find("nope", "llm")
+
+    def test_duplicate_alias_rejected(self):
+        with self.assertRaises(CatalogError) as cm:
+            parse(bad(**{"backends__b__aliases": ["a"]}), BASE)
+        self.assertIn("used by both", str(cm.exception))
+
     def test_invalid_toml(self):
         with tempfile.TemporaryDirectory() as t:
             p = Path(t) / "x.toml"; p.write_text("[gateway\n")

@@ -42,6 +42,7 @@ class BackendSpec:
     env: dict[str, str] = field(default_factory=dict)
     start_timeout_s: int = 180     # give up if /health is not 200 by then
     concurrency: int = 1           # simultaneous requests the backend may serve (heavy models: 1)
+    aliases: tuple[str, ...] = ()  # extra names clients may use as `model` (an mlx_lm model id is an implicit alias)
 
     def command(self) -> list[str]:
         return ADAPTERS[self.adapter].build(self)
@@ -55,6 +56,22 @@ class Catalog:
 
     def total_ports(self) -> list[int]:
         return [b.port for b in self.backends.values()]
+
+    def find(self, model: str | None, kind: str) -> BackendSpec:
+        """Resolve a client-supplied model name (backend name or alias) to a backend of the given kind."""
+        if not model:
+            if kind == "llm" and self.gateway.default_llm:
+                return self.backends[self.gateway.default_llm]
+            for s in self.backends.values():
+                if s.kind == kind:
+                    return s
+            raise KeyError(f"no {kind} backend in the catalog")
+        for s in self.backends.values():
+            if model == s.name or model in s.aliases:
+                if s.kind != kind:
+                    raise ValueError(f"{model!r} is a {s.kind} backend, not {kind}")
+                return s
+        raise KeyError(f"unknown model {model!r}")
 
 
 @dataclass(frozen=True)
@@ -91,7 +108,7 @@ ADAPTERS: dict[str, Adapter] = {
     "openjev_nli": Adapter("nli", ("python", "root", "subfolder"), (), "/health", _openjev_nli, ("root",)),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
-COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency"}
+COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases"}
 
 
 def _check_type(name: str, key: str, value: Any, types: tuple[type, ...]) -> None:
@@ -157,6 +174,11 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         _check_type(name, "concurrency", conc, (int,))
         if conc < 1:
             raise CatalogError(f"backends.{name}.concurrency must be >= 1")
+        aliases = b.get("aliases", [])
+        if not (isinstance(aliases, list) and all(isinstance(a, str) and a for a in aliases)):
+            raise CatalogError(f"backends.{name}.aliases: expected a list of non-empty strings")
+        if adapter == "mlx_lm":
+            aliases = [*aliases, b["model"]]
         env = b.get("env", {})
         if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
             raise CatalogError(f"backends.{name}.env: expected a table of strings")
@@ -164,7 +186,13 @@ def parse(data: dict, base_dir: Path) -> Catalog:
             name=name, adapter=adapter, kind=opts.pop("kind", ad.kind) if adapter == "command" else ad.kind,
             python=python, est_mem_gb=float(est), ttl_s=ttl, pinned=pinned,
             health=opts.pop("health", ad.health) if adapter == "command" else ad.health,
-            port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc)
+            port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc, aliases=tuple(dict.fromkeys(aliases)))
+    seen: dict[str, str] = {}
+    for n, sp in specs.items():                       # every name and alias must be unique across the catalog
+        for key in (n, *sp.aliases):
+            if key in seen and seen[key] != n:
+                raise CatalogError(f"name/alias {key!r} is used by both {seen[key]!r} and {n!r}")
+            seen[key] = n
     if gs.default_llm is not None and (gs.default_llm not in specs or specs[gs.default_llm].kind != "llm"):
         raise CatalogError(f"[gateway].default_llm {gs.default_llm!r} must name an llm backend")
     return Catalog(gs, specs, base_dir)

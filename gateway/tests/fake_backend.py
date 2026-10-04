@@ -36,11 +36,36 @@ class H(BaseHTTPRequestHandler):
         b = json.dumps(obj).encode()
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def do_GET(self):
+        if self.path == "/v1/models":
+            return self._json({"data": [{"id": "fake-model"}]})
         self._json({"pid": os.getpid(), "child": child.pid if child else None} if self.path == "/info" else {"status": "ok"})
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0)); req = json.loads(self.rfile.read(n) or b"{}")
+        if self.path == "/v1/chat/completions":
+            if req.get("stream"):
+                self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
+                try:
+                    for i in range(req.get("n_chunks", 5)):
+                        c = ("data: " + json.dumps({"model": req.get("model"), "choices": [{"delta": {"content": f"tok{i} "}}]}) + "\n\n").encode()
+                        self.wfile.write(f"{len(c):x}\r\n".encode() + c + b"\r\n"); self.wfile.flush(); time.sleep(req.get("delay", 0.2))
+                    c = b"data: [DONE]\n\n"; self.wfile.write(f"{len(c):x}\r\n".encode() + c + b"\r\n0\r\n\r\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+            return self._json({"model": req.get("model"), "pid": os.getpid(), "choices": [{"message": {"role": "assistant", "content": f"echo:{len(req.get('messages', []))}"}}]})
+        if self.path == "/decide":
+            if req.get("question") == "bad":
+                return self._err(400, {"error": "QuestionError: bad"})
+            return self._json({"answer": "x", "echo": req})
+        if self.path == "/score_many":
+            return self._json([{"answer": "y", "q": q} for q in req["questions"]])
+        if self.path == "/entail":
+            return self._json({"labels": ["contradiction", "entailment", "neutral"], "probs": [[0, 1, 0] for _ in req["hypotheses"]]})
         t0 = time.time(); time.sleep(req.get("sleep", 0))
         self._json({"pid": os.getpid(), "t0": t0, "t1": time.time()})
+    def _err(self, code, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
 
 if a.crash_after:
