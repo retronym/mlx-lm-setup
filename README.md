@@ -23,7 +23,7 @@ Built on top: [pipelines](#pipelines) for PR triage, search indexing and an emoj
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
 
 ```bash
-mise run setup && mise run service-install   # the gateway as a login service (or: .venv/bin/python -m gateway &)
+mise run setup && mise run service-install   # the gateway as a login service (or: mise run gateway &)
 open http://127.0.0.1:8090/
 ```
 
