@@ -147,6 +147,7 @@ sequenceDiagram
 | 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
 | 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; repo tidy deferred until after phase 7, which touches the workers) |
+| 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | TODO |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -282,3 +283,37 @@ Phase 4b: `iterate` with restricted and NLI gates (done, see findings below).
 - **Log rotation:** launchd does not rotate, so `run.sh` rotates `.gateway/logs/gateway.out` at start (5 MB, 3 kept) and appends. It only rotates on restart; a gateway that runs for weeks grows its log between restarts (info-level access lines), acceptable for now.
 - **Verified:** installed, answered a chat request, then `kill -9` of the gateway: launchd respawned it within the throttle (runs = 2, new pid) and the supervisor's orphan reaper cleaned up the Qwen backend the kill had left (no `mlx_lm` process afterwards). Reboot survival itself was not tested (needs a login cycle); `RunAtLoad` is set.
 - **Deferred:** the repo tidy (benches and logs out of the root). The workers and benches use relative `data/` paths, so moving them is best done together with phase 7.
+
+## Speech (phase 9)
+
+### Why
+
+The gateway only handles text in and text out. Local text-to-speech is what lets Claude produce **video explainers** end to end: Claude writes the script, the gateway turns each scene into audio with a known duration, and a renderer (ffmpeg, Remotion or similar) lays the visuals out against those durations. Local synthesis has no per-character cost and no rate limit, so re-takes are free, and nothing leaves the machine. It is also the cheapest model class we could add: the narration model is a few hundred MB, so it barely touches the 28 GB budget.
+
+### Key decisions
+
+1. **One runtime: [mlx-audio](https://github.com/Blaizzy/mlx-audio).** It runs Kokoro, Qwen3-TTS, Dia, Orpheus, CSM and others on MLX and ships an OpenAI-compatible `/v1/audio/speech` server. Each model is a catalog entry on the existing `command` adapter (its own venv, as for the other non-Homebrew runtimes); a dedicated adapter only if the `command` adapter proves too thin. Supervision, lazy start, TTL and memory accounting come for free.
+2. **Start with Kokoro-82M**, small enough to stay resident and good enough for English narration with preset voices. It answers the question "is local quality enough?" before any larger commitment.
+3. **Second backend: Qwen3-TTS (0.6B or 1.7B)** for a distinctive narrator: Apache 2.0, voice cloning from a few seconds of audio, and voice design from a text description. Loaded on demand and evicted LRU like the LLMs.
+4. **Defer the rest.** Dia (multi-speaker dialogue tags) is the one to add if explainers become conversational. Orpheus, Chatterbox, Higgs Audio v3 and OmniVoice overlap with Qwen3-TTS; revisit only if it disappoints.
+5. **Audio output is files, not payloads.** Generated clips are written under the gateway's data directory and returned as paths plus metadata. MCP tool results should not carry audio bytes.
+6. **Timing is the product.** The `speak` tool returns the clip duration; word-level timestamps (for captions and word-synced highlights) come from a separate STT step, below.
+
+### Steps
+
+| Step | What | Status |
+|---|---|---|
+| 9a | Spike: install mlx-audio in `.venv-audio`, run Kokoro by hand, listen to the voices, measure real-time factor and resident memory. Decide go / no-go on quality | TODO |
+| 9b | `kokoro` catalog entry on the `command` adapter; `/v1/audio/speech` proxied by the gateway with lazy start (like `/v1/chat/completions`); `est_mem_gb` from the spike | TODO |
+| 9c | `speak` MCP tool: text, voice and optional speed in; wav path, duration and sample rate out. Long text split at sentence boundaries and concatenated, so callers do not manage model context limits | TODO |
+| 9d | Chat site: a play button on assistant messages and a voice picker, mostly as a cheap way to audition voices | TODO |
+| 9e | `qwen3-tts` backend: cloned voices from a reference clip kept in the repo's data directory, and voice design from a description. Extend `speak` with `voice` as a preset name, a reference clip or a description | TODO |
+| 9f | Word-level timestamps via `mlx-whisper` as a `transcribe` tool (or a `timestamps` option on `speak`), so a renderer can drive captions | TODO |
+| 9g | Worked example: a short explainer for this repo, built from a script by Claude, per-scene `speak` calls and an ffmpeg or Remotion render. Documented as a pipeline next to the emoji book and PR triage | TODO |
+
+### Open questions
+
+- **Audio quality bar.** Kokoro is flat on long passages and has no emotion control; if 9a says that is not good enough, 9e moves ahead of 9b-9d.
+- **Where rendering lives.** Video assembly is a pipeline on top of the gateway (like the book pipeline), not part of it. 9g decides whether that is a script in this repo or a skill.
+- **Concurrency.** TTS runs on the same GPU as the LLMs, and the existing note on GPU contention applies: a narration batch running while a 30B model generates will slow both. One request at a time per backend is already enforced; cross-backend serialisation is not planned unless it proves a problem.
+- **Licences.** Kokoro and Qwen3-TTS are Apache 2.0. Cloning a real person's voice is a user decision, not something the gateway should police, but the docs should say that reference clips need consent.
