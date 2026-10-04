@@ -243,7 +243,7 @@ function thinkBlock(text, open) {                          // the model's reason
 function addMsg(role, html, cls = "") {
   $("empty")?.remove();
   const d = document.createElement("div"); d.className = `msg ${role} ${cls}`; d.innerHTML = html;
-  $("log").appendChild(d); $("scroll").scrollTop = $("scroll").scrollHeight; return d;
+  const stick = role === "user" || atBottom(); $("log").appendChild(d); if (stick) toBottom(); return d;
 }
 
 async function send() {
@@ -291,7 +291,7 @@ async function send() {
         if (d.reasoning || d.content) {
           if (tFirst === null) tFirst = performance.now();
           reasoning += d.reasoning || ""; out += d.content || ""; chunks++;
-          el.innerHTML = thinkBlock(reasoning, !out) + (out ? render(out) : ""); $("scroll").scrollTop = $("scroll").scrollHeight;
+          const stick = atBottom(); el.innerHTML = thinkBlock(reasoning, !out) + (out ? render(out) : ""); if (stick) toBottom();
         }
       }
     }
@@ -310,6 +310,8 @@ async function send() {
   }
 }
 
+function atBottom() { const s = $("scroll"); return s.scrollHeight - s.scrollTop - s.clientHeight < 40; }
+function toBottom() { const s = $("scroll"); s.scrollTop = s.scrollHeight; }
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 220) + "px"; }
 $("input").addEventListener("input", autosize);
 $("input").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
