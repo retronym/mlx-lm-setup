@@ -72,7 +72,7 @@ export const Memory: React.FC = () => {
         <div style={{ position: "absolute", left: RIBBON.x, top: RIBBON.y - 120, width: total * k, opacity: bracket }}>
           <div style={{ height: 14, borderTop: `3px solid ${C.ink}`, borderLeft: `3px solid ${C.ink}`, borderRight: `3px solid ${C.ink}`, marginTop: 60 }} />
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, textAlign: "center" }}>
-            <Heading size={44}>{(total * Math.min(1, bracket * 1.2)).toFixed(0)} GB wanted <span style={{ color: C.accent }}>· {(total / budget_gb).toFixed(0)}× the budget</span></Heading>
+            <Heading size={44}>{(total * prog(f, cue("overflow") + 40, 24)).toFixed(0)} GB wanted <span style={{ color: C.accent }}>· {(total / budget_gb).toFixed(0)}× the budget</span></Heading>
           </div>
         </div>
       )}

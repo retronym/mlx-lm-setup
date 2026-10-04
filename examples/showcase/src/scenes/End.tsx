@@ -15,8 +15,6 @@ export const End: React.FC = () => {
   const k = pxPerGb();
   const blocks = [
     { label: "macOS + apps", gb: 8, color: C.os },
-    { label: "TTS clone", gb: 4.5, color: C.speech },
-    { label: "Whisper", gb: 3, color: C.speech },
   ];
   let x = 0;
   const zero = prog(f, cue("zero"), 16);
@@ -38,6 +36,9 @@ export const End: React.FC = () => {
             x += b.gb;
             return el;
           })}
+          <div style={{ position: "absolute", left: 8 * k + 30, top: 22, opacity: prog(f, 30, 20) }}>
+            <Mono size={22} color={C.muted}>models: every one passivated after its narration · 0 GB</Mono>
+          </div>
         </RibbonBar>
         <div style={{ position: "absolute", left: RIBBON.x + RIBBON.w - 360, top: RIBBON.y + RIBBON.h + 64, width: 360, height: 44, borderRadius: 8,
                       boxShadow: `inset 0 0 0 2px ${zero > 0 ? C.good : C.line}`, background: "#100e0b" }}>

@@ -1,6 +1,6 @@
 # Showcase explainer: storyboard
 
-Status: **proposal, for review.** Nothing built yet.
+Status: **built** (see [README.md](README.md)). The film follows this storyboard, with the deviations listed under "As built" at the end.
 
 ## Intent
 
@@ -105,3 +105,12 @@ The heart of the film; longest scene.
 3. **Length:** 3½ minutes as above, or a tighter 2-minute cut (drop scenes 3 and 6)?
 4. **Music:** none (recommended; keeps it local and licence-free) or a quiet bed?
 5. **The stage-manager metaphor:** keep it as a one-scene device, or go straight to the state diagram?
+
+## As built
+
+- **Defaults taken:** Remotion, the existing `narrator` clone voice, the full length (3:03), no music, and the stage-manager metaphor kept as a one-scene device.
+- **Cold open:** "macOS + apps" (8 GB) is drawn as a block, so the overflow into swap comes to exactly the 6 GB from the findings log.
+- **Stage scene:** the eviction uses OpenJev 4B as the newcomer (3 + 17.5 + 9.5 > 28 GB, and evicting the least recently used model, Jev-Style, makes room). Qwen3.6 would have needed two evictions.
+- **Pipelines:** the narration no longer says "748 phrases", because only 315 had been scored when the film was made.
+- **Ending:** the line is "the swap did not grow" rather than "stayed at zero", because swap was already 7.6 GB from earlier work. The ribbon shows every model passivated, which is true at render time, and the swap was measured during the render.
+- **Not done:** a separate timing export (the timeline JSON plays that role), and narration changes reviewed by ear (Whisper round-trips every scene).

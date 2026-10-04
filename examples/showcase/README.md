@@ -1,0 +1,15 @@
+# Showcase film
+
+A 3-minute explainer of this project with motion design, rendered entirely on this Mac. [STORYBOARD.md](STORYBOARD.md) has the intent, story devices and scene list; this file covers how to build it.
+
+```bash
+python3 examples/showcase/narrate.py          # narration (clone voice "narrator"), word timestamps, cues, data.json -> data/showcase/
+node examples/showcase/capture.mjs            # screenshots of the real sites (needs the gateway and dashboard_server.py running)
+cd examples/showcase && npm install && npm run render     # -> data/showcase/showcase.mp4
+```
+
+- **Narration drives timing.** `script.json` holds one narration per scene with `[[cue]]` markers. `narrate.py` strips them, calls `/api/speak` and `/api/transcribe`, aligns the script's words with Whisper's, and records each cue as the start time of the word after it. Scenes key animations off cue names (`useCue()("evict")`), so a re-recorded line re-times its scene. `--only stage,decide` re-narrates some scenes and keeps the rest; clips are cached by the gateway, so an unchanged scene costs nothing.
+- **Real data.** Model sizes come from `gateway.toml`, the Alice phrase and its scores from `data/book_events.jsonl`, and the ROC curves and the operating point from `data/results.jsonl`. The decide panel's percentages come from the live `/jev` capture (constants in `Decide.tsx`).
+- **Checking a scene.** Each scene is also its own composition: `npx remotion still scene-stage out.png --frame 600 --public-dir ../../data/showcase`, or `npm run studio` to scrub.
+- **Generated assets** (audio, captures, timeline, video) live in `data/showcase/`, which git ignores.
+- The closing line ("the swap did not grow") was checked by sampling `vm.swapusage` every 5 s during the render: 7.67 GB before, 7.64 GB after, never above the start. Swap was not zero, because pages swapped out earlier stay swapped until touched. Re-check it if you change the ending.

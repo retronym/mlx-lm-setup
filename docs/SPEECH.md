@@ -56,7 +56,7 @@ Voice design draws a **new** voice on every call, so scenes narrated with it wou
 open data/explainer/explainer.mp4
 ```
 
-Per scene it calls `/api/speak` (duration), then `/api/transcribe` (word timestamps), draws slides with Pillow, and assembles them with ffmpeg. A frame changes exactly when a caption line or a bullet is due, so timing follows the audio. The five-scene demo (82 s of video) takes about 35 s end to end, most of it synthesis (3-5 s per scene) and model loading. It is the workflow in miniature: Claude writes `script.json`, runs the script, and looks at frames; swapping the slide renderer for Remotion or HTML screenshots changes `draw_slide` and nothing else.
+Per scene it calls `/api/speak` (duration), then `/api/transcribe` (word timestamps), draws slides with Pillow, and assembles them with ffmpeg. A frame changes exactly when a caption line or a bullet is due, so timing follows the audio. The five-scene demo (82 s of video) takes about 35 s end to end, most of it synthesis (3-5 s per scene) and model loading. It is the workflow in miniature: Claude writes `script.json`, runs the script, and looks at frames; swapping the slide renderer for Remotion or HTML screenshots changes `draw_slide` and nothing else. [`examples/showcase/`](../examples/showcase/) does exactly that with Remotion, plus cue markers aligned to word timestamps.
 
 ## What we measured and what we could not
 
