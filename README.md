@@ -12,6 +12,7 @@
 - **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
 - **See** (`look`, image parts on `/v1/chat/completions`, `/vision`): Gemma 4 or Qwen3.6 vision on the weights already on disk. Layout checks of film stills and screenshots (overlap, clipping, bad wraps), frames against their storyboard, tables and charts in PDF pages. Paste, drop or point at a directory; the page and the tool return a `flagged` list (PLAN.md, Vision).
 - **Translate** (`/translate`, `translate`, `/api/translate`, a macOS Shortcut): text or a screenshot into English (or another language; the page defaults to Polish → English) with a short summary. Screenshots are read by macOS's own OCR (no model load), so a warm translation takes 1–3 s ([pipelines/translate](pipelines/translate/README.md)).
+- **Search the Scala sources** (`/search`, `search`, `/api/search`, `/v1/embeddings`, `/api/rerank`): hybrid keyword + vector retrieval with a cross-encoder reranker over scala/scala (compiler, library, spec), the Scala 3 docs and scala/bug issues and comments. Returns passages with links, not answers. About 1 s per query once warm; the index is built and refreshed incrementally by [pipelines/search](pipelines/search/README.md).
 - **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland*, an NLI triage of scala/scala pull requests, and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
@@ -54,6 +55,7 @@ Image or Text to Text
 | Decision model | Jev-Style 2B v3 (Qwen3.5-2B fine-tune), 8-bit | MLX, `.venv-mlxjev` (versions pinned, the runtime refuses others) | ~2 GB weights | emoji, colour, mood, sentiment: one pass scores hundreds of options |
 | Speech out | Kokoro-82M; Qwen3-TTS 1.7B (voice design, voice clone), 8-bit | `mlx-audio`, `.venv-audio` (python 3.13) | 0.9 GB; 3.7 GB each | narration for video explainers; see [docs/SPEECH.md](docs/SPEECH.md) |
 | Speech in | Whisper large-v3-turbo, fp16 | `mlx-audio`, `.venv-audio` | 2 GB | transcripts with word timestamps (captions) |
+| Embedder + reranker | Qwen3-Embedding-0.6B and Qwen3-Reranker-0.6B, fp16, one process | PyTorch on MPS, `.venv-jev` | ~3 GB | `/search`, `search`, `/v1/embeddings`, `/api/rerank` |
 | Encoder (alternative) | open-jev DeBERTa-v3-large | PyTorch on MPS, `.venv-jev` | 1.7 GB | fast baseline; 512-token cap |
 
 Which LLM to pick for which job, with measurements: **[docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md)**. Weights live under `models/` (git-ignored) or the Hugging Face cache. The DeBERTa model is used only by benchmarks in `experiments/`.
@@ -184,6 +186,7 @@ service/service.sh status              # the gateway must be running for Claude 
 | `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
 | `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
 | `look` | a vision model reads images, directories or PDF pages; presets `layout`, `storyboard`, `table`, `describe`; per-image `flagged` list | no |
+| `search` | hybrid BM25 + Qwen3-Embedding search, reranked by Qwen3-Reranker, over the indexed Scala compiler, docs and issue sources; `source`, `mode`, `rerank`, `open_only` | no |
 | `translate` | text or a screenshot into English with a summary; screenshots via macOS OCR, the vision model as fallback | no |
 | `narrate` | timed narration: scenes with `[[cue]]` markers in; per scene a clip, its duration, word timestamps and cue times out | no |
 | `voices` | the speech models, their preset voices and the saved reference voices | no |

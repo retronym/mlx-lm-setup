@@ -258,3 +258,51 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
         return {**res, "cold_start_s": round(cold[0], 2)}
 
     return await translate(iterate, catalog, sup.snapshot(), **kw)
+
+
+# ---- search over the indexed Scala sources (HTTP API and MCP tool) -------------------------------------------------------------
+SEARCH_SOURCES = {"scalac": "scala/scala (compiler, reflect, library, spec)", "scala3docs": "Scala 3 reference and internals docs",
+                  "bug": "scala/bug issues and comments"}
+
+
+async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 8, source: str | None = None,
+                     mode: str = "hybrid", rerank: bool = True, open_only: bool = False, model: str | None = None) -> dict:
+    """Hybrid keyword + vector search, optionally reranked, over the local index. Returns the backend's reply plus backend and cold start."""
+    spec = resolve(catalog, model, "search")
+    body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only, **({"source": source} if source else {})}
+    r, meta = await post_json(sup, client, spec, "/search", body)
+    if r.status_code != 200:
+        try:
+            msg = r.json().get("error", r.text)
+        except ValueError:
+            msg = r.text
+        raise ApiError(400 if 400 <= r.status_code < 500 else 502, "backend_error" if r.status_code >= 500 else "invalid_arguments", str(msg)[:300])
+    return {**r.json(), "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
+
+
+def search_stats(catalog: Catalog, model: str | None = None) -> dict:
+    """What is in the index (chunks and vectors per source, last sync positions), read straight from the SQLite file: starts nothing."""
+    import sqlite3
+    spec = resolve(catalog, model, "search")
+    idx = spec.options.get("index_dir")
+    db = Path(spec.options.get("db") or Path(idx) / "data" / "search.db") if (spec.options.get("db") or idx) else None
+    if db is None or not db.exists():
+        return {"backend": spec.name, "indexed": False, "db": str(db) if db else None, "sources": []}
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute("""SELECT c.source, count(*), count(v.rowid), max(c.updated) FROM chunks c
+                              LEFT JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash GROUP BY c.source""").fetchall()
+        state = dict(con.execute("SELECT source || ':' || k, v FROM state WHERE k IN ('head', 'since')").fetchall())
+    finally:
+        con.close()
+    return {"backend": spec.name, "indexed": True, "db": str(db), "sources": [
+        {"source": s, "description": SEARCH_SOURCES.get(s, ""), "chunks": n, "embedded": e, "updated": u,
+         "position": state.get(f"{s}:head") or state.get(f"{s}:since")} for s, n, e, u in rows]}
+
+
+async def run_embed(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, body: dict, model: str | None = None) -> dict:
+    spec = resolve(catalog, model, "search")
+    r, meta = await post_json(sup, client, spec, "/embed", body)
+    if r.status_code != 200:
+        raise ApiError(400 if 400 <= r.status_code < 500 else 502, "backend_error", f"{spec.name} returned {r.status_code}: {r.text[:300]}")
+    return {**r.json(), "backend": meta["backend"]}

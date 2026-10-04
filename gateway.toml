@@ -25,6 +25,7 @@ default_llm = "qwen3-coder"
 #   jevstyle     a Jev-Style decision model in MLX format                                    needs: python, model_dir  [precision]
 #   openjev_nli  an OpenJev NLI cross-encoder checkpoint                                     needs: python, root, subfolder
 #   mlx_vlm      a vision-language model on mlx-vlm (images in, text out)                   needs: python, model  [image_tokens] [max_tokens]
+#   search       hybrid retrieval backend (embedder + reranker + the index)                  needs: python, index_dir  [db]
 #   command      anything else that speaks HTTP on a port; "{port}" is substituted           needs: command  [health] [kind]
 
 [backends.qwen3-coder]
@@ -203,3 +204,17 @@ model = "mlx-community/Qwen3.6-35B-A3B-4bit"
 aliases = ["qwen-vision"]
 est_mem_gb = 23
 ttl_s = 600
+
+# --- search (phase 11): hybrid retrieval over the Scala compiler / build sources --------------------------------------------------
+# Qwen3-Embedding-0.6B and Qwen3-Reranker-0.6B in one process (torch on MPS, .venv-jev), plus the index built by
+# pipelines/search (sync.py, embed.py; see its README). The backend reads the index and never writes it.
+
+[backends.scala-search]
+adapter = "search"
+description = "Search over scala/scala, the Scala 3 docs and scala/bug: BM25 plus Qwen3-Embedding vectors, reranked by Qwen3-Reranker. Returns passages with links, not answers."
+python = ".venv-jev/bin/python"
+index_dir = "pipelines/search"
+aliases = ["search", "scala-search"]
+est_mem_gb = 4
+start_timeout_s = 240
+ttl_s = 900

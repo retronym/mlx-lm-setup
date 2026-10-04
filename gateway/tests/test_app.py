@@ -1,10 +1,12 @@
-import asyncio, json, socket, tempfile, time, unittest
+import asyncio, json, socket, sqlite3, tempfile, time, unittest
 from pathlib import Path
 
 import httpx
 import uvicorn
 
 from gateway.app import create_app
+from gateway.catalog import parse
+from gateway.core import search_stats
 from gateway.supervisor import State, Supervisor
 from gateway.tests.test_supervisor import catalog, until
 
@@ -23,6 +25,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             "llm": {"kind": "llm", "aliases": ["org/some-model"], "flags": ["--ready-delay", "0.3"]},
             "dec": {"kind": "decision"},
             "nli": {"kind": "nli"},
+            "find": {"kind": "search"},
             "lms": {"kind": "score"},
             "voice": {"kind": "tts"},
             "ears": {"kind": "stt"},
@@ -158,6 +161,44 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         r = await self.http.post("/api/entail", json={"model": "llm", "premise": "p", "hypotheses": ["a"]})
         self.assertEqual(r.status_code, 400)                                          # llm is not an nli backend
 
+    async def test_search_routes_validate_and_pass_through(self):
+        r = await self.http.post("/api/search", json={"query": "eta expansion", "k": 3, "source": "bug", "rerank": False})
+        d = r.json()
+        self.assertEqual((r.status_code, d["backend"], len(d["results"]), d["reranked"]), (200, "find", 3, False))
+        self.assertEqual((d["echo"]["source"], d["echo"]["rerank"], d["echo"]["mode"]), ("bug", False, "hybrid"))
+        r = await self.http.post("/api/search", json={"query": "q", "bogus": 1})
+        self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_arguments"))
+        r = await self.http.post("/api/search", json={"query": ""})
+        self.assertEqual(r.status_code, 400)                                          # the backend's 400 is surfaced, not a 502
+        r = await self.http.post("/api/search", json={"query": 5})
+        self.assertEqual(r.status_code, 400)
+        r = await self.http.post("/api/search", json={"query": "q", "model": "llm"})
+        self.assertEqual(r.status_code, 400)                                          # llm is not a search backend
+
+    async def test_embeddings_are_openai_shaped_and_rerank_forwards(self):
+        r = await self.http.post("/v1/embeddings", json={"input": ["ab", "abcd"], "model": "find", "kind": "query"})
+        d = r.json()
+        self.assertEqual((r.status_code, d["object"], d["model"]), (200, "list", "fake-embed"))
+        self.assertEqual([(x["index"], x["embedding"]) for x in d["data"]], [(0, [2.0, 1.0]), (1, [4.0, 1.0])])
+        r = await self.http.post("/api/rerank", json={"query": "q", "documents": ["a", "b"]})
+        self.assertEqual((r.status_code, r.json()["scores"], r.headers["x-gateway-backend"]), (200, [1.0, 0.5], "find"))
+
+    async def test_search_status_reads_the_index_without_starting_anything(self):
+        r = await self.http.get("/api/search/status")
+        self.assertEqual((r.status_code, r.json()["indexed"]), (200, False))          # the test backend has no index
+        db = Path(self.tmp.name) / "s.db"
+        con = sqlite3.connect(db)
+        con.executescript("""CREATE TABLE chunks(rowid INTEGER PRIMARY KEY, source TEXT, hash TEXT, updated REAL);
+                             CREATE TABLE vec(rowid INTEGER PRIMARY KEY, hash TEXT); CREATE TABLE state(source TEXT, k TEXT, v TEXT);
+                             INSERT INTO chunks VALUES (1,'bug','h1',5),(2,'bug','h2',6),(3,'scalac','h3',7);
+                             INSERT INTO vec VALUES (1,'h1'),(2,'stale'); INSERT INTO state VALUES ('bug','since','2026-01-01');""")
+        con.commit(); con.close()
+        cat = parse({"backends": {"s": {"adapter": "search", "python": "py", "index_dir": self.tmp.name, "db": str(db), "est_mem_gb": 1}}}, Path("/base"))
+        d = search_stats(cat)
+        by = {s["source"]: s for s in d["sources"]}
+        self.assertEqual((by["bug"]["chunks"], by["bug"]["embedded"], by["bug"]["position"]), (2, 1, "2026-01-01"))   # a stale vector does not count
+        self.assertEqual((by["scalac"]["chunks"], by["scalac"]["embedded"]), (1, 0))
+
     async def test_score_routes_to_the_score_backend(self):
         r = await self.http.post("/api/score", json={"prompt": "p", "candidates": [" a", " bb"]})
         self.assertEqual((r.status_code, r.json()["logprobs"], r.headers["x-gateway-backend"]), (200, [-2.0, -3.0], "lms"))
@@ -187,7 +228,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_backends_status(self):
         r = await self.http.get("/api/backends")
         j = r.json()
-        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "lms", "voice", "ears", "bad"])
+        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "find", "lms", "voice", "ears", "bad"])
         self.assertEqual((j["gateway"]["memory_budget_gb"], j["gateway"]["resident_est_gb"], j["gateway"]["default_llm"]), (100, 0, "llm"))
         await self.http.post("/v1/chat/completions", json=self.chat())
         j = (await self.http.get("/api/backends")).json()

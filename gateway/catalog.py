@@ -39,7 +39,7 @@ class GatewaySettings:
 class BackendSpec:
     name: str
     adapter: str
-    kind: str                      # llm | vision | decision | nli | score | tts | stt | custom
+    kind: str                      # llm | vision | decision | nli | score | tts | stt | search | custom
     python: str | None
     est_mem_gb: float
     ttl_s: int
@@ -158,6 +158,12 @@ def _mlx_vlm(s: BackendSpec) -> list[str]:
             "--image-tokens", str(o.get("image_tokens", 0)), "--max-tokens", str(o.get("max_tokens", 1024))]
 
 
+def _search(s: BackendSpec) -> list[str]:
+    o = s.options
+    return [s.python, str(BACKENDS_DIR / "search_server.py"), "--index-dir", o["index_dir"],
+            "--db", o.get("db") or str(Path(o["index_dir"]) / "data" / "search.db"), "--port", str(s.port)]
+
+
 def _command(s: BackendSpec) -> list[str]:
     return [str(a).replace("{port}", str(s.port)) for a in s.options["command"]]
 
@@ -171,6 +177,7 @@ ADAPTERS: dict[str, Adapter] = {
                              _mlx_audio_tts, ("output_dir", "refs_dir")),
     "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
     "mlx_vlm": Adapter("vision", ("python", "model"), ("image_tokens", "max_tokens"), "/health", _mlx_vlm),
+    "search": Adapter("search", ("python", "index_dir"), ("db",), "/health", _search, ("index_dir", "db")),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
 COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",
