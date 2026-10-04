@@ -64,7 +64,7 @@ def tail(path, n=240):
     try:
         with open(path, "rb") as f:
             f.seek(0, 2); f.seek(max(0, f.tell() - 2000))
-            lines = [l for l in f.read().decode(errors="replace").replace("\r", "\n").splitlines() if l.strip() and "Loading weights" not in l]
+            lines = [l.strip() for l in f.read().decode(errors="replace").replace("\x00", "").replace("\r", "\n").splitlines() if l.strip() and "Loading weights" not in l]
         return lines[-1][:n] if lines else ""
     except OSError:
         return ""

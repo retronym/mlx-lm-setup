@@ -33,8 +33,12 @@ def wait_for_quota(log=print):
         time.sleep(wait)
 
 
+PAGE_LIMIT = 90               # GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
+
+
 def pages(path, log=print, **params):
-    """Yield the items of each page of a GitHub list endpoint, 100 per page, politely."""
+    """Yield the items of each page of a GitHub list endpoint, 100 per page, politely. Lists sorted by `updated` ascending are
+    re-anchored every PAGE_LIMIT pages at the last item's `updated_at` (the boundary items repeat once; the store skips them)."""
     page = 1
     while True:
         q = "&".join(f"{k}={v}" for k, v in {"per_page": 100, "page": page, **params}.items())
@@ -54,10 +58,14 @@ def pages(path, log=print, **params):
         yield items
         if len(items) < 100:
             return
-        page += 1
         time.sleep(0.2)
         if page % 25 == 0:
             wait_for_quota(log)
+        if page >= PAGE_LIMIT and "since" in params and items[-1].get("updated_at"):
+            params = {**params, "since": items[-1]["updated_at"]}
+            page = 1
+        else:
+            page += 1
 
 
 def gh_pages(path, **params):             # kept for callers that want a flat list
@@ -85,7 +93,9 @@ class GhIssues:
         return r[0].split(" ", 1)[1] if r else ""
 
     # ---- the three streams: each returns (items seen, [added, changed, deleted, unchanged]) ----
-    def _stream(self, store, key, path, since, limit, to_chunks, log, **params):
+    def _stream(self, store, key, path, explicit, limit, to_chunks, log, **params):
+        # each stream resumes from its own cursor; an explicit --since overrides all of them
+        since = explicit or store.get(self.name, key) or store.get(self.name, "since") or self.default_since
         seen, tot = 0, [0, 0, 0, 0]
         for page in pages(path, log, sort="updated", direction="asc", since=since, **params):
             for it in page[:limit - seen if limit else None]:
@@ -101,8 +111,6 @@ class GhIssues:
         return seen, tot
 
     def sync(self, store, since=None, limit=None, log=print):
-        explicit = since
-        since = since or store.get(self.name, "since_issues") or store.get(self.name, "since") or self.default_since
         titles = {}
 
         def issue(i):
@@ -137,7 +145,7 @@ class GhIssues:
             out.append(("review comments", self._stream(store, "since_reviews", f"repos/{self.repo}/pulls/comments", since, limit, review, log)))
         store.commit()
         for what, (n, t) in out:
-            log(f"{self.name} {what}: {n} touched since {since} -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
+            log(f"{self.name} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
 
     def reconcile(self, store, log=print):
         live = {i["number"] for p in pages(f"repos/{self.repo}/issues", log, state="all") for i in p}
