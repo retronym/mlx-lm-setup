@@ -1,0 +1,6 @@
+# The gateway's environment (.venv). Model backends have their own venvs; see README "Environments".
+mcp[cli]>=1.30,<2
+uvicorn>=0.54
+httpx>=0.28
+jsonschema>=4.26
+pyobjc-framework-Vision>=12; sys_platform == "darwin"
