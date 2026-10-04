@@ -315,6 +315,14 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             return FileResponse(WEB / name, media_type="text/html", headers=PAGE_HEADERS)
         return serve
 
+    VENDOR = {"marked.min.js", "purify.min.js"}               # fixed allow-list: no path traversal, same-origin scripts only
+
+    async def vendor(request: Request):
+        name = request.path_params["name"]
+        if name not in VENDOR:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(WEB / "vendor" / name, media_type="text/javascript", headers={"X-Content-Type-Options": "nosniff"})
+
     async def healthz(request: Request):
         return JSONResponse({"status": "ok"})
 
@@ -334,6 +342,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/", page("chat.html"), methods=["GET"]),
         Route("/chat", page("chat.html"), methods=["GET"]),
         Route("/admin", page("admin.html"), methods=["GET"]),
+        Route("/vendor/{name}", vendor, methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),
     ]
     mcp = build_mcp(catalog, sup, client, token)

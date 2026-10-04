@@ -40,7 +40,18 @@
   .msg.error { border-color: var(--bad); color: var(--bad); }
   .meta { font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
   .wait { color: var(--warn); font-size: 13px; }
-  .msg p { margin: 0 0 .6em; white-space: pre-wrap; } .msg p:last-child { margin-bottom: 0; }
+  .msg p { margin: 0 0 .6em; } .msg p:last-child { margin-bottom: 0; } .msg.assistant p.raw { white-space: pre-wrap; }
+  .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3, .md h4 { margin: 1em 0 .4em; line-height: 1.25; } .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3, .md h4 { font-size: 1.05em; }
+  .md ul, .md ol { margin: 0 0 .6em; padding-left: 1.5em; } .md li { margin: .15em 0; } .md li > p { margin: 0; }
+  .md blockquote { margin: .6em 0; padding: 0 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+  .md a { color: var(--accent); }
+  .md img { max-width: 100%; }
+  .md table { border-collapse: collapse; margin: .6em 0; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; } .md th { background: var(--user); text-align: left; }
+  .md :not(pre) > code { background: var(--user); padding: 1px 5px; border-radius: 4px; font: 13px ui-monospace, Menlo, monospace; }
+  .md pre code { font: inherit; background: none; padding: 0; }
   code.i { background: var(--user); padding: 1px 5px; border-radius: 4px; font: 13px ui-monospace, Menlo, monospace; }
   .code { position: relative; margin: .5em 0; }
   .code pre { margin: 0; background: var(--code-bg); color: var(--code-ink); padding: 12px; border-radius: 8px; overflow-x: auto; font: 13px/1.5 ui-monospace, Menlo, monospace; }
@@ -82,6 +93,8 @@
   </div>
 </footer>
 
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const store = {
@@ -115,15 +128,28 @@ function showState() {
 }
 $("model").addEventListener("change", () => { store.set("gwchat.model", $("model").value); showState(); });
 
-function render(text) {
+function renderPlain(text) {   // fallback when the markdown libs failed to load (vendor scripts failed to load)
   return text.split(/```/).map((seg, i) => {
     if (i % 2 === 0) {
-      return seg.split(/\n{2,}/).filter(p => p.trim()).map(p => `<p>${esc(p).replace(/`([^`\n]+)`/g, '<code class="i">$1</code>')}</p>`).join("");
+      return seg.split(/\n{2,}/).filter(p => p.trim()).map(p => `<p class="raw">${esc(p).replace(/`([^`\n]+)`/g, '<code class="i">$1</code>')}</p>`).join("");
     }
     const nl = seg.indexOf("\n");
     const lang = nl >= 0 ? seg.slice(0, nl).trim() : "", code = nl >= 0 ? seg.slice(nl + 1) : seg;
-    return `<div class="code"><span class="lang">${esc(lang)}</span><button data-copy>copy</button><div class="pre-wrap"><pre>${esc(code.replace(/\n$/, ""))}</pre></div></div>`;
+    return codeBlock(lang, code.replace(/\n$/, ""));
   }).join("");
+}
+const codeBlock = (lang, code) => `<div class="code"><span class="lang">${esc(lang)}</span><button data-copy>copy</button><div class="pre-wrap"><pre>${esc(code)}</pre></div></div>`;
+function render(text) {
+  if (!window.marked || !window.DOMPurify) return renderPlain(text);
+  const html = DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }), { ADD_ATTR: ["target"] });
+  const t = document.createElement("template"); t.innerHTML = html;
+  t.content.querySelectorAll("pre").forEach(pre => {
+    const code = pre.querySelector("code"), lang = (code?.className.match(/language-(\S+)/) || [])[1] || "";
+    const w = document.createElement("div"); w.innerHTML = codeBlock(lang, pre.textContent.replace(/\n$/, "")); pre.replaceWith(w.firstChild);
+  });
+  t.content.querySelectorAll("a[href]").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  const d = document.createElement("div"); d.className = "md"; d.appendChild(t.content);
+  return d.outerHTML;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-copy]"); if (!b) return;
