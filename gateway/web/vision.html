@@ -308,12 +308,12 @@ function drawProgress() {
   $("pfill").style.width = `${p.total ? 100 * p.done / p.total : 0}%`;
   const warm = p.durs.slice(p.cold ? 1 : 0), avg = warm.length ? warm.reduce((a, b) => a + b) / warm.length : (p.durs[0] || 0);
   const left = p.total - p.done, eta = left > 0 && avg ? Math.max(0, avg * left - (now - p.cur0) / 1000) : 0;
-  $("ptext").replaceChildren(
+  $("ptext").replaceChildren(...[
     el("span", {}, el("b", { textContent: `${p.done} / ${p.total}` }), document.createTextNode(" done")),
     el("span", { textContent: `elapsed ${fmt((now - p.t0) / 1000)}` }),
     eta ? el("span", { textContent: `~${fmt(eta)} left` }) : null,
     p.done < p.total ? el("span", { textContent: (loading ? `starting ${$("model").value} and loading its weights (about 10-20 s)… ` : "now: ") +
-                                                  `${p.label} · ${fmt((now - p.cur0) / 1000)}` }) : null);
+                                                  `${p.label} · ${fmt((now - p.cur0) / 1000)}` }) : null].filter(Boolean));
 }
 async function modelIsReady(name) {
   try { const d = await (await fetch("/api/backends")).json(); return d.backends.find(b => b.name === name)?.state === "ready"; }
