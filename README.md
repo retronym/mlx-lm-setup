@@ -138,6 +138,7 @@ The standalone server above is independent of the gateway. Claude Code now talks
 | `chat` | local LLM (default Qwen3-Coder); `message` or `messages`, optional `system` | no |
 | `decide` | typed decisions with probabilities from the decision model: one `question` + `options`, or several `questions` about one state | no |
 | `entail` | NLI: is each hypothesis entailed by / contradicted by / neutral to a premise | no |
+| `iterate` | `chat` with retries until the answer passes gates: JSON (+schema), regex, contains, length, NLI faithfulness to a source text; optional escalation model for the last try; no shell gate | no |
 | `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
 | `start_backend`, `stop_backend`, `set_backend_policy` | change what is running; TTL and pin | **yes** |
 
@@ -177,7 +178,7 @@ Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-jev` (
 
 ## Gateway (in progress)
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6 are built (catalog, supervisor, HTTP proxy, MCP tools, chat and admin sites, memory budget); the gated `iterate` tool, migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6 and 4b are built (catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget); migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 .venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM

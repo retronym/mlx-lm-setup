@@ -142,7 +142,7 @@ sequenceDiagram
 | 2 | Supervisor core: spawn / health / terminate, state machine, idle TTL, single-flight start, per-backend queue; CLI and unit tests with a fake backend | **DONE** |
 | 3 | HTTP proxy: `/v1/chat/completions` (streaming), `/api/decide`, `/api/entail` with lazy start | **DONE** |
 | 4 | MCP tools (table above); register in Claude Code with HTTP transport; retire `mlx-mcp-server` | **DONE** (review pause) |
-| 4b | `iterate` with restricted gates (schema, regex, contains, length) and an NLI faithfulness gate; no shell gate | TODO |
+| 4b | `iterate` with restricted gates (schema, regex, contains, length) and an NLI faithfulness gate; no shell gate | **DONE** |
 | 5 | Admin site and chat site served by the gateway; SSE events; token for mutating calls | **DONE** |
 | 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
@@ -254,4 +254,14 @@ Not catalog concerns: agent-harness token overhead, and model quality ranking (b
 
 ## Phases (continued)
 
-Phase 4b: `iterate` with restricted and NLI gates. Add after phase 4.
+Phase 4b: `iterate` with restricted and NLI gates (done, see findings below).
+
+## Phase 4b findings
+
+`gateway/gates.py` (gate specs, validation, checks), `gateway/iterate.py` (the retry loop, pure: chat and entail are injected), the `iterate` MCP tool in `gateway/mcp_server.py`; 90 tests in total (12 new, including the tool end to end against fake backends).
+
+- **Gates:** `json` (parses bare, fenced or embedded JSON; optional JSON Schema via `jsonschema`), `regex` (`match` or `absent`, multiline), `contains` (`all` / `any` / `none`), `length`, and `nli` (every sentence of the answer, minus code blocks, must be entailed by a caller-supplied `source` and not contradicted; thresholds `min_entailment` 0.5, `max_contradiction` 0.5). Specs are validated before any model runs (unknown keys and bad schemas are `invalid_arguments`). **No shell or code gate**: a gate can only read text.
+- **Loop:** cheap gates run first and the NLI gate (which may start OpenJev) only after they pass. On failure the model sees its last answer plus the failing messages (history does not grow beyond that), up to `max_attempts` (default 3, cap 6). `escalate_to` names another local LLM for the final attempt. Exhausting the attempts is a result, not an error: `passed: false`, the last text, per-attempt failures and a note telling the caller to take over.
+- **Regex safety:** patterns run in a child process with a 2 s kill, because `re` holds the GIL and a catastrophic pattern would freeze the whole gateway (tested with `(a+)+$`). Pattern length is capped at 500 chars.
+- **Live run** with the real models: a schema-gated JSON answer passed first try (4.4 s cold), and the NLI gate ran through OpenJev (1.3 s warm Qwen). A deliberately misleading prompt (asked to claim five retries where the source says three) made Qwen correct the request itself, and the NLI gate passed it, including a closing note whose "three attempts total (including the initial attempt)" is not in the source. **The NLI gate is a weak signal, as already documented for `entail`; use it to catch contradictions and invented sentences, not subtle drift.** Retries themselves were not triggered live; they are covered by the unit tests.
+- **Not done:** compact JSON tool output (still the FastMCP pretty-print default).

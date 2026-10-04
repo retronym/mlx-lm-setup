@@ -15,12 +15,17 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from . import auth
 from .catalog import Catalog
+from .gates import GateSpecError, parse_gates
+from .iterate import MAX_ATTEMPTS_CAP, run_iterate
 from .core import ApiError, compact_backend, map_errors, op_policy, op_start, op_stop, post_json, resolve, status_payload
 from .supervisor import Supervisor
 
 INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start on first use and stop when idle.
 - chat: a local LLM (default Qwen3-Coder). Good for bounded, checkable work: summaries, extraction, boilerplate, simple
   refactors. It can be wrong or hallucinate, so verify; keep design, review and judgment calls for yourself.
+- iterate: like chat, but the answer must pass gates (JSON/schema, regex, contains, length, and an NLI faithfulness check against a
+  source text); failures are fed back and the model retries. Use it for bounded jobs with a mechanical definition of "good".
+  If it still fails you get the last try plus which gates failed, and take over.
 - decide: typed decisions (choose among options, rate on a scale, yes/no) with probabilities, from a local decision model;
   nothing is generated. Good for classification, routing, triage, tagging.
 - entail: check claims against a source text with a local NLI model (entailment / contradiction / neutral). A weak signal.
@@ -90,6 +95,49 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         return {"text": (choice.get("message") or {}).get("content", ""), "model": meta["backend"],
                 "finish_reason": choice.get("finish_reason"), "usage": data.get("usage"),
                 "secs": round(time.monotonic() - t0, 2), "cold_start_s": meta["cold_start_s"]}
+
+    @mcp.tool()
+    async def iterate(gates: list[dict], message: str | None = None, messages: list[dict[str, str]] | None = None,
+                      model: str | None = None, system: str | None = None, max_attempts: int = 3, escalate_to: str | None = None,
+                      max_tokens: int = 1024, temperature: float = 0.3) -> dict:
+        """Ask a local LLM and retry until the answer passes every gate (or attempts run out). Failures are fed back to the model.
+        `gates` is a list of: {"type":"json","schema"?: JSON Schema}; {"type":"regex","pattern","mode"?:"match"|"absent","ignore_case"?};
+        {"type":"contains","all"?:[..],"any"?:[..],"none"?:[..],"ignore_case"?}; {"type":"length","min_chars"?,"max_chars"?};
+        {"type":"nli","source": text,"min_entailment"?:0.5,"max_contradiction"?:0.5} (every sentence of the answer must be supported by
+        `source`; runs last, uses the NLI model; a weak signal). No shell or code gates. `escalate_to` names another local LLM for the
+        final attempt. Returns passed, text, per-attempt failures. If passed is false the text is unverified: take over."""
+        if (message is None) == (messages is None):
+            raise ToolError("invalid_arguments: pass exactly one of `message` or `messages`")
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or not 1 <= max_attempts <= MAX_ATTEMPTS_CAP:
+            raise ToolError(f"invalid_arguments: max_attempts must be 1..{MAX_ATTEMPTS_CAP}")
+        try:
+            parsed = parse_gates(gates)
+        except GateSpecError as e:
+            raise ToolError(f"invalid_arguments: {e}") from None
+        msgs = [{"role": "user", "content": message}] if message is not None else list(messages or [])
+        if not msgs:
+            raise ToolError("invalid_arguments: `messages` is empty")
+        if system:
+            msgs = [{"role": "system", "content": system}, *msgs]
+        spec_for(model, "llm")
+        if escalate_to:
+            spec_for(escalate_to, "llm")
+        nli_spec = spec_for(None, "nli") if any(g.type == "nli" for g in parsed) else None
+
+        async def chat_fn(override: str | None, convo: list[dict]) -> tuple[str, dict]:
+            spec = spec_for(override or model, "llm")
+            t0 = time.monotonic()
+            data, meta = await call(spec, "/v1/chat/completions", {
+                "model": spec.options.get("model", spec.name), "messages": convo, "max_tokens": max_tokens,
+                "temperature": temperature, "stream": False})
+            choice = (data.get("choices") or [{}])[0]
+            return (choice.get("message") or {}).get("content", ""), {"model": meta["backend"], "secs": round(time.monotonic() - t0, 2)}
+
+        async def entail_fn(premise: str, hyps: list[str]) -> list[dict]:
+            data, _ = await call(nli_spec, "/entail", {"premise": premise, "hypotheses": hyps})
+            return [dict(zip(data["labels"], p)) for p in data["probs"]]
+
+        return await run_iterate(chat_fn, entail_fn, parsed, msgs, max_attempts, escalate_to)
 
     @mcp.tool()
     async def decide(state: str, question: str | None = None, options: list[str] | dict[str, str | None] | None = None,

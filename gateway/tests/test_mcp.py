@@ -66,7 +66,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "decide", "entail", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -99,6 +99,24 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("wrong_model_kind", text)
             err, _, text = await self.call(s, "chat", message="x", model="nope")
             self.assertIn("model_not_found", text)
+
+    async def test_iterate_through_mcp(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "iterate", message="hi", gates=[{"type": "regex", "pattern": "^echo:[0-9]$"}, {"type": "length", "min_chars": 3}])
+            self.assertFalse(err)
+            self.assertTrue(data["passed"])
+            self.assertEqual(data["text"], "echo:1")
+            err, data, _ = await self.call(s, "iterate", message="hi", gates=[{"type": "contains", "all": ["never"]}], max_attempts=2)
+            self.assertFalse(err)                                                        # exhausted attempts is a result, not an error
+            self.assertFalse(data["passed"])
+            self.assertEqual((len(data["attempts"]), data["text"]), (2, "echo:3"))     # retry carried assistant + feedback turns
+            err, data, _ = await self.call(s, "iterate", message="hi", gates=[{"type": "nli", "source": "hi hi hi"}])
+            self.assertTrue(data["passed"])                                              # fake NLI says entailment
+            for args in ({"message": "x", "gates": [{"type": "shell"}]}, {"message": "x", "gates": []},
+                         {"message": "x", "gates": [{"type": "length", "min_chars": 1}], "max_attempts": 99}):
+                err, _, text = await self.call(s, "iterate", **args)
+                self.assertTrue(err)
+                self.assertIn("invalid_arguments", text)
 
     async def test_decide_single_multi_and_top_k(self):
         async with self.client() as s:
