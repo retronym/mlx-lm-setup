@@ -68,8 +68,12 @@ def main():
                 body = {"text": data.decode("utf-8", errors="replace").strip()}
         if body is None:                                              # nothing given: let the user pick a region
             shot = os.path.join(tmp, "shot.png")
-            subprocess.run(["/usr/sbin/screencapture", "-i", "-x", shot])
-            if not os.path.exists(shot):
+            r = subprocess.run(["/usr/sbin/screencapture", "-i", "-x", shot], capture_output=True, text=True)
+            if "could not create image" in r.stderr:                  # what screencapture says without Screen Recording permission
+                print("Screen capture failed: the app running this (your terminal, or Shortcuts) needs Screen Recording permission in "
+                      "System Settings → Privacy & Security → Screen & System Audio Recording; then quit and reopen it.", file=sys.stderr)
+                return 1
+            if not os.path.exists(shot):                              # Escape pressed
                 print("_Cancelled._")
                 return 0
             body = {"image": shot}
