@@ -11,6 +11,7 @@
 - **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
 - **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
 - **See** (`look`, image parts on `/v1/chat/completions`, `/vision`): Gemma 4 or Qwen3.6 vision on the weights already on disk. Layout checks of film stills and screenshots (overlap, clipping, bad wraps), frames against their storyboard, tables and charts in PDF pages. Paste, drop or point at a directory; the page and the tool return a `flagged` list (PLAN.md, Vision).
+- **Translate** (`translate`, `/api/translate`, a macOS Shortcut): selected text or a screen region into English with a short summary. Screenshots are read by macOS's own OCR (no model load), so a warm translation takes 1–3 s ([pipelines/translate](pipelines/translate/README.md)).
 - **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland*, an NLI triage of scala/scala pull requests, and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
@@ -179,6 +180,7 @@ service/service.sh status              # the gateway must be running for Claude 
 | `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
 | `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
 | `look` | a vision model reads images, directories or PDF pages; presets `layout`, `storyboard`, `table`, `describe`; per-image `flagged` list | no |
+| `translate` | text or a screenshot into English with a summary; screenshots via macOS OCR, the vision model as fallback | no |
 | `narrate` | timed narration: scenes with `[[cue]]` markers in; per scene a clip, its duration, word timestamps and cue times out | no |
 | `voices` | the speech models, their preset voices and the saved reference voices | no |
 | `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
@@ -207,7 +209,7 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 |---|---|
 | `gateway/`, `gateway.toml` | the gateway: catalog, supervisor, HTTP app, MCP server, thin backend servers (`gateway/backends/`), sites (`gateway/web/`) |
 | `service/` | launchd service: `service.sh install / uninstall / restart / status / logs` |
-| `pipelines/` | what runs today, all as gateway clients: `emoji_book/`, `pr_triage/`, `dashboard_server.py` (whitelist-only localhost server for both pages), `gateway_client.py` |
+| `pipelines/` | what runs today, all as gateway clients: `emoji_book/`, `pr_triage/`, `translate/` (the Shortcut's client), `dashboard_server.py` (whitelist-only localhost server for both pages), `gateway_client.py` |
 | `examples/` | narrated films: `explainer/` (slides), `showcase/`, `safe-scala/` |
 | `experiments/` | benchmarks and earlier in-process iterations behind the choices above, kept for reference (`bench_llm_compare.py`: the head-to-head in the model guide) |
 | `ask.sh`, `serve.sh`, `register_mcp.sh` | one-shot client, a plain `mlx_lm.server` outside the gateway, MCP registration |
@@ -215,7 +217,7 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `PLAN.md` | the gateway's design and phase status, with findings per phase |
 | `data/`, `models/`, `corpus/`, `.venv*/` | generated or downloaded; git-ignored (logs in `data/logs/`) |
 
-Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev backend, the chunker and the fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
+Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx, and `pyobjc-framework-Vision` for OCR in `translate`), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev backend, the chunker and the fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
 
 ## Gateway
 

@@ -149,6 +149,7 @@ sequenceDiagram
 | 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; the repo tidy after phase 7: `pipelines/`, `experiments/`) |
 | 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | **DONE** |
 | 10 | Vision: Gemma 4 / Qwen3.6 vision via mlx-vlm, `look` MCP tool, image parts on `/v1/chat/completions`, `/vision` page, home page (see [Vision](#vision-phase-10)) | **DONE** |
+| 11 | Translate: `/api/translate`, `translate` MCP tool, macOS Vision OCR for screenshots, a client for a macOS Shortcut (see [Translate](#translate-phase-11)) | **DONE** |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -367,6 +368,32 @@ Ground truth: the Safe Scala film rendered from the tree before (`95d16ff`) and 
 - **Tables:** Table 2 of the Safe Scala paper (printed offline from the saved HTML) came back with all 14 numbers right but the two halves of the table mis-structured (10 s). Trust digits more than layout; check against the PDF text layer.
 - **Progress, after first use:** a 108-still batch took 7 minutes as one silent request. Now the page expands directories (`/api/look/expand`) and sends one request per image behind a progress bar (count, elapsed, time left, current image, a cold-start notice while the weights load), and the MCP tool sends a progress notification per image.
 - **Not done:** a stills-check script in the film kit (the `look` tool over a stills directory covers it); text serving from the mlx-vlm process; video input; Qwen pixel cap tuning.
+
+## Translate (phase 11)
+
+### Why
+
+A keyboard shortcut that translates the selected text, or a region of the screen, into English and shows the translation with a short summary. It is used ad hoc, so latency matters more than anything: an 18 GB model's cold start (~7–10 s) makes a hotkey feel broken.
+
+### Key decisions
+
+1. **Screenshots go through macOS Vision OCR first** (`VNRecognizeTextRequest`, the Live Text engine, via pyobjc in the gateway venv): on-device, 0.1–0.4 s, no model to load, 33 languages including CJK, Cyrillic, Arabic and Thai. The vision model is the fallback when OCR finds fewer than 4 characters or low confidence (stylised or vertical text, handwriting), or when the caller passes `mode: "vision"`.
+2. **Text goes to the text Gemma only if it is already resident, else to the vision Gemma.** The two do not fit side by side comfortably in the 28 GB budget, so routing to whichever is warm avoids evict-and-reload; when neither is loaded the vision Gemma is started, since it serves both routes and a later OCR miss then finds it warm.
+3. **Gated JSON** (`iterate` with a schema: `source_language`, `translation`, `summary`), so a malformed reply is retried rather than shown. The summary is dropped below 40 words of translation (deterministically, not left to the model). The response carries ready-to-show `markdown`.
+4. **The macOS Shortcut is three actions around a stdlib client** (`pipelines/translate/translate.py`) that sniffs stdin for text or image bytes (converting TIFF/HEIC with `sips`) and falls back to `screencapture -i`. The shortcut file is not shipped: `shortcuts sign` needs an iCloud sign-in and unsigned files cannot be imported, so the README says how to build it by hand.
+
+### Phase 11 findings
+
+| Input | Route | Total (warm) | OCR |
+|---|---|---|---|
+| French sentence (text), nothing loaded | text → vision Gemma | 9.4 s (6.6 s cold start) | – |
+| Japanese notice, 136 chars (screenshot) | ocr | 2.5 s | 0.38 s, confidence 1.0 |
+| German sentence (screenshot) | ocr | 1.1 s | 0.14 s |
+| Russian notice, 234 chars (screenshot) | ocr | 1.8 s | 0.09 s |
+| Japanese notice, `mode: vision` | vision | 5.6 s | – |
+
+- **OCR quality matched the vision model** on rendered Japanese, German and Russian; the translations were equivalent. OCR line breaks follow the screen layout, so the prompt tells the model to join lines that wrap mid-sentence.
+- **First English recognition in a process can take ~25 s** (twice: once on first ever use, once in the restarted gateway; never for Japanese, German or Russian, never again after). Probably Vision lazily loading its English language-correction assets. A warm-up at gateway start would hide it; not done.
 
 ## Phase 7 findings
 

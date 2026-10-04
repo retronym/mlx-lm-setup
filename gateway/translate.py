@@ -38,7 +38,8 @@ IterateFn = Callable[[str, list[dict], list[dict], int], Awaitable[dict]]
 
 
 def text_message(text: str, source: str) -> dict:
-    what = "the text below" + (" (recognised from a screenshot by OCR, so it may contain small recognition errors; fix obvious ones)" if source == "ocr" else "")
+    what = "the text below" + (" (recognised from a screenshot by OCR: it may contain small recognition errors, so fix obvious ones, and its line "
+                               "breaks follow the screen layout, so join lines that wrap mid-sentence into paragraphs)" if source == "ocr" else "")
     return {"role": "user", "content": f"{INSTRUCTIONS.format(what=what)}\n\n<text>\n{text}\n</text>"}
 
 
