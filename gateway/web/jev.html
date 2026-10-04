@@ -51,7 +51,7 @@
 
   <section>
     <h2>Options <span class="sp"></span>
-      <button id="magic" title="Ask a local LLM to propose options for this prompt">✨ Suggest options</button></h2>
+      <button id="magic" title="Ask a local LLM to propose options for the question (the prompt text is not sent)">✨ Suggest options</button></h2>
     <textarea id="options" spellcheck="false" placeholder="One option per line. Optionally “name: description”."></textarea>
     <div class="row">
       <label>kind <select id="qtype">
@@ -120,12 +120,12 @@ function extractList(text) {
   return text.split("\n").map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()).filter(Boolean);       // fall back to a bulleted/numbered list
 }
 $("magic").addEventListener("click", async () => {
-  const state = $("state").value.trim(), question = $("question").value.trim(), n = parseInt($("count").value, 10) || 8;
-  if (!state && !question) { $("magicstat").className = "status err"; $("magicstat").textContent = "Enter a prompt or a question first."; return; }
+  const question = $("question").value.trim(), n = parseInt($("count").value, 10) || 8;
+  if (!question) { $("magicstat").className = "status err"; $("magicstat").textContent = "Enter a question first."; return; }
   const score = $("qtype").value === "score";
-  const sys = "You write the answer options for a classifier that will score each option against a text. Reply with ONLY a JSON array of strings, no prose, no code fence."
+  const sys = "You write the answer options for a classifier that will score each option against a text, given only the question that will be asked about that text. Reply with ONLY a JSON array of strings, no prose, no code fence."
     + (score ? " The options are ordered scale levels from lowest to highest, each a short self-contained description." : " The options are distinct, mutually exclusive, short labels (1-4 words).");
-  const user = `Text:\n${state || "(none)"}\n\nQuestion: ${question || "(none: choose sensible categories for this text)"}\n\nGive exactly ${n} options as a JSON array of strings.`;
+  const user = `Question: ${question}\n\nGive exactly ${n} options as a JSON array of strings.`;
   const done = busy($("magic"), $("magicstat"), "Asking " + $("llm").value);
   try {
     const j = await api("/v1/chat/completions", { model: $("llm").value, stream: false, temperature: 0.4, max_tokens: 1024,
