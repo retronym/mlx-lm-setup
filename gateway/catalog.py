@@ -55,6 +55,7 @@ class BackendSpec:
     kv_gb: float | None = None
     overhead_gb: float | None = None
     context_tokens: int | None = None  # the context the KV figure was sized for (documentation, shown in the admin site)
+    description: str = ""              # one or two sentences for people choosing a model (shown in the chat model picker)
 
     def command(self) -> list[str]:
         return ADAPTERS[self.adapter].build(self)
@@ -142,7 +143,7 @@ ADAPTERS: dict[str, Adapter] = {
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
 COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",
-          "weights_gb", "kv_gb", "overhead_gb", "context_tokens"}
+          "weights_gb", "kv_gb", "overhead_gb", "context_tokens", "description"}
 # Flags the gateway sets itself; a catalog `args` list may not override them.
 RESERVED_FLAGS = {"mlx_lm": {"--model", "--host", "--port"}}
 
@@ -247,6 +248,9 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         env = b.get("env", {})
         if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
             raise CatalogError(f"backends.{name}.env: expected a table of strings")
+        description = b.get("description", "")
+        if not isinstance(description, str) or len(description) > 600:
+            raise CatalogError(f"backends.{name}.description: expected a string of at most 600 characters")
         args = b.get("args")
         if args is not None:
             if not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
@@ -260,7 +264,8 @@ def parse(data: dict, base_dir: Path) -> Catalog:
             python=python, est_mem_gb=float(est), ttl_s=ttl, pinned=pinned,
             health=opts.pop("health", ad.health) if adapter == "command" else ad.health,
             port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc, aliases=tuple(dict.fromkeys(aliases)),
-            weights_gb=part_vals.get("weights_gb"), kv_gb=part_vals.get("kv_gb"), overhead_gb=part_vals.get("overhead_gb"), context_tokens=ctx)
+            weights_gb=part_vals.get("weights_gb"), kv_gb=part_vals.get("kv_gb"), overhead_gb=part_vals.get("overhead_gb"), context_tokens=ctx,
+            description=description)
     pinned_gb = sum(sp.est_mem_gb for sp in specs.values() if sp.pinned)
     if pinned_gb > gs.memory_budget_gb:
         raise CatalogError(f"pinned backends need {pinned_gb} GB, more than the whole memory budget ({gs.memory_budget_gb} GB)")

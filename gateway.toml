@@ -28,6 +28,7 @@ default_llm = "qwen3-coder"
 
 [backends.qwen3-coder]
 adapter = "mlx_lm"
+description = "Code-tuned mixture-of-experts model (30B, 3B active). About 108 tok/s, no thinking mode. Its KV cache is large (96 KiB per token), so long contexts are costly: best for code-focused work at short context."
 python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
 model = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
 est_mem_gb = 17.5
@@ -35,6 +36,7 @@ ttl_s = 600
 
 [backends.openjev-4b]
 adapter = "openjev_nli"
+description = "Natural-language-inference model: given a source text and a claim, says entailed, contradicted or neutral. Not a chat model. A weak signal; use it as a gate."
 python = ".venv-jev/bin/python"
 root = "models/openjev"
 subfolder = "qwen3.5-4b-nli-v5"
@@ -43,6 +45,7 @@ ttl_s = 300
 
 [backends.jevstyle-2b]
 adapter = "jevstyle"
+description = "Decision model: scores a closed list of options (classify, route, tag, rate) in one pass, about 1 s, without generating text. Not a chat model."
 python = ".venv-mlxjev/bin/python"
 model_dir = "models/jevstyle-2b-mlx"
 precision = "8bit"
@@ -61,6 +64,7 @@ ttl_s = 900
 
 [backends.qwen3-6-35b-a3b]            # qwen3_5_moe, 20.4 GB weights at 4-bit; KV about 0.7 GB at 32768 tokens (fp16)
 adapter = "mlx_lm"
+description = "General mixture-of-experts model (35B, 3B active). About 104 tok/s, passed 5 of 6 benchmark tasks. Thinking is off by default (use the think profile for reasoning). Small KV cache, so good for long contexts."
 python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
 model = "mlx-community/Qwen3.6-35B-A3B-4bit"
 aliases = ["qwen3.6", "qwen36"]
@@ -73,6 +77,7 @@ args = ["--chat-template-args", '{"enable_thinking": false}']
 
 [backends.gemma-4-26b-a4b]            # gemma4, 15.6 GB weights at 4-bit; KV about 0.9 GB at 32768 tokens (fp16)
 adapter = "mlx_lm"
+description = "General mixture-of-experts model (26B, 4B active). About 85 tok/s but the most reliable in the benchmark (6 of 6) and the smallest in memory. Thinking is off by default. Small KV cache, so good for long contexts."
 python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
 model = "lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit"
 aliases = ["gemma4", "gemma"]

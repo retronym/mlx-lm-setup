@@ -21,7 +21,7 @@ from starlette.routing import Mount, Route
 
 from . import auth
 from .catalog import Catalog
-from . import discovery
+from . import discovery, modelinfo
 from .profiles import apply_defaults
 from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
@@ -229,6 +229,25 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(400, "invalid_parameter", "kv_bits must be one of 2, 3, 4, 5, 6, 8")
         return ctx, bits
 
+    disc_cache: dict = {"t": 0.0, "by_model": {}}
+
+    async def discovered_by_model() -> dict:
+        """Discovery results by model id, refreshed at most once a minute (the picker polls every few seconds)."""
+        if time.monotonic() - disc_cache["t"] > 60:
+            found = await asyncio.to_thread(discovery.scan, catalog, None, llm_only=True)
+            disc_cache.update(t=time.monotonic(), by_model={f.id: f for f in found})
+        return disc_cache["by_model"]
+
+    async def models_rich(request: Request):
+        """For the chat site's model picker: each LLM and profile with description, memory breakdown, thinking default,
+        context and KV cost, profile defaults, and live state. Read-only."""
+        snap = {s["name"]: s for s in sup().snapshot()}
+        try:
+            by = await discovered_by_model()
+        except Exception:                                            # noqa: BLE001  discovery is a nicety; never break the picker
+            by = {}
+        return JSONResponse({"models": modelinfo.build_entries(catalog, snap, by)})
+
     async def models_discovered(request: Request):
         """Read-only: MLX LLMs found on disk (HF cache, LM Studio) with sizes, KV estimates and catalog status."""
         ctx, bits = discovery_params(request)
@@ -305,6 +324,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),
+        Route("/api/models", handler(models_rich), methods=["GET"]),
         Route("/api/models/discovered", handler(models_discovered), methods=["GET"]),
         Route("/api/models/snippet", handler(models_snippet), methods=["GET"]),
         Route("/api/backends/{name}/start", handler(api_start), methods=["POST"]),
