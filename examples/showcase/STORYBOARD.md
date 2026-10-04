@@ -57,7 +57,7 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
 
 ### 0. Hook (0:00–0:12)
 
-- **Visual:** black. The narrator's waveform draws itself as the first sentence is spoken. The ledger fades in at the bottom right: `on this Mac: 0 · sent elsewhere: 0`. It ticks to 1 as the sentence ends.
+- **Visual:** black. The narrator's waveform draws itself as the first sentence is spoken. The ledger fades in at the bottom right: `on this Mac: 0 · by Claude: 0`. It ticks to 1 as the sentence ends.
 - **Narration:** "This voice wasn't made in a data centre. [[ledger]] Neither was the first draft of what it's saying, or the fact-check. Both happened on this Mac. We'll come back to how. First, why you'd want that."
 
 ### 1. Why local (0:12–1:05)
