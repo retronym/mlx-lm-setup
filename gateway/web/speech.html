@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Speech</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #c2410c; --hi: #fed7aa; --bad: #dc2626; --warn: #d97706; --good: #16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fb923c; --hi: #7c2d12; --bad: #f87171; --warn: #fbbf24; --good: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  textarea { width: 100%; resize: vertical; min-height: 110px; }
+  input[type=text] { width: 100%; }
+  .row { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  small, .hint { color: var(--muted); font-size: 12px; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  audio { width: 100%; margin: 4px 0 8px; }
+  .seg { display: flex; gap: 10px; padding: 4px 6px; border-radius: 6px; cursor: pointer; align-items: baseline; }
+  .seg:hover { background: var(--bg); } .seg.on { background: var(--hi); }
+  .seg time { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .words span { cursor: pointer; padding: 0 1px; border-radius: 3px; } .words span.on { background: var(--hi); }
+  .words { line-height: 2; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .samples button { font-size: 12px; padding: 1px 10px; border-radius: 12px; background: transparent; color: var(--muted); }
+  .samples button:hover { color: var(--ink); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local Models · Speech</h1>
+  <a href="/">Chat</a>
+  <a href="/jev">Decide</a>
+  <a href="/speech" style="color:var(--ink)">Speech</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <section>
+    <h2>Text</h2>
+    <textarea id="text" placeholder="What should it say? Any length: it is read sentence group by sentence group, and a blank line makes a longer pause."></textarea>
+    <div class="samples" id="samples"></div>
+    <div class="row">
+      <label>model <select id="model"></select></label>
+      <label id="voicebox">voice <select id="voice"></select></label>
+      <label id="speedbox">speed <input id="speed" type="number" min="0.5" max="2" step="0.05" value="1" style="width:70px"></label>
+      <label><input id="fresh" type="checkbox"> new take</label>
+    </div>
+    <div id="designbox" hidden>
+      <div class="row" style="align-items:flex-start"><label style="flex:1">voice description
+        <input type="text" id="instruct" value="A calm, warm female narrator in her thirties, clear and measured, with a gentle smile in her voice."></label></div>
+      <div class="row"><label>keep as reference voice <input type="text" id="saveas" placeholder="narrator" style="width:160px"></label>
+        <small>A designed voice is new on every take; keeping one lets the clone model narrate with it consistently.</small></div>
+    </div>
+    <div class="row">
+      <button class="primary" id="go">Speak</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="hint" id="mdesc" style="margin-top:6px"></div>
+  </section>
+  <section id="result" hidden>
+    <h2>Result <span id="meta" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <audio id="audio" controls></audio>
+    <div class="row" style="margin:0 0 8px"><a id="dl" download="speech.wav">download wav</a><span class="hint" id="path"></span></div>
+    <div id="segs"></div>
+  </section>
+  <section id="tsec" hidden>
+    <h2>Transcript with word timestamps <button id="tbtn">Transcribe</button><span class="status" id="tstatus"></span></h2>
+    <div class="words" id="words"><small>Whisper listens to the clip and returns every word with its time: what captions are built from, and a check that the clip says what you asked.</small></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id), esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const SAMPLES = [
+  ["Narration", "Phase nine adds a voice to the gateway. Claude can now narrate a video explainer entirely on this Mac.\n\nNothing leaves the machine."],
+  ["Numbers", "In 2026 the gateway served 1,204 requests in 3.5 hours, with a 28 GB memory budget."],
+  ["Long", "A decision model scores every option in a single forward pass. That makes classification cheap, fast and repeatable, because nothing is generated at all. Most pipelines here are plain code that calls a scorer.\n\nMemory, not speed, is the binding constraint."],
+];
+let models = [], last = null, url = null;
+const cur = () => models.find(m => m.model === $("model").value);
+const isDesign = m => m && !m.voices.length && !m.default_ref;                       // describes a voice instead of picking one
+
+async function init() {
+  $("samples").innerHTML = SAMPLES.map(([n], i) => `<button data-i="${i}">${esc(n)}</button>`).join("");
+  $("samples").onclick = e => { const b = e.target.closest("button"); if (b) { $("text").value = SAMPLES[b.dataset.i][1]; $("text").focus(); } };
+  try { models = (await (await fetch("/api/voices")).json()).models; } catch {}
+  if (!models.length) { $("status").className = "status err"; $("status").textContent = "No speech models in the catalog."; $("go").disabled = true; return; }
+  $("model").innerHTML = models.map(m => `<option>${esc(m.model)}</option>`).join("");
+  try { const s = localStorage.getItem("speech.model"); if (s && models.some(m => m.model === s)) $("model").value = s; } catch {}
+  pick();
+}
+function pick() {
+  const m = cur(); try { localStorage.setItem("speech.model", m.model); } catch {}
+  $("mdesc").textContent = m.description;
+  const opts = m.voices.length ? m.voices.map(v => [v, v]) : m.default_ref ? m.reference_clips.map(c => [c, c + " (reference clip)"]) : [];
+  $("voice").innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  const def = m.voices.length ? m.default_voice : m.default_ref; if (def) $("voice").value = def;
+  $("voicebox").hidden = !opts.length; $("designbox").hidden = !isDesign(m); $("speedbox").hidden = !m.voices.length;
+}
+$("model").onchange = pick;
+
+function body() {
+  const m = cur(), b = { model: m.model, text: $("text").value.trim() };
+  if (m.voices.length) { b.voice = $("voice").value; b.speed = parseFloat($("speed").value) || 1; }
+  else if (m.default_ref) b.ref_audio = $("voice").value;
+  else { b.instruct = $("instruct").value.trim(); if ($("saveas").value.trim()) b.save_as_voice = $("saveas").value.trim(); }
+  if ($("fresh").checked) b.fresh = true;
+  return b;
+}
+async function post(path, b) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j.error?.message || j.error || `HTTP ${r.status}`)); }
+  return r;
+}
+const fmt = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
+
+$("go").onclick = async () => {
+  const b = body(); if (!b.text) return;
+  $("go").disabled = true; $("status").className = "status wait";
+  const t0 = performance.now(), tick = setInterval(() => $("status").textContent = `Synthesising… ${((performance.now() - t0) / 1000).toFixed(0)}s (the model starts on first use)`, 250);
+  try {
+    const meta = await (await post("/api/speak", b)).json();
+    const { save_as_voice, ...plain } = b;                                                    // identical request: served from the clip cache
+    const blob = await (await post("/v1/audio/speech", { ...plain, input: plain.text })).blob();
+    if (url) URL.revokeObjectURL(url); url = URL.createObjectURL(blob);
+    last = meta; $("audio").src = url; $("dl").href = url; $("result").hidden = false; $("tsec").hidden = false;
+    $("words").innerHTML = `<small>Whisper listens to the clip and returns every word with its time: what captions are built from, and a check that the clip says what you asked.</small>`;
+    $("meta").textContent = `${meta.duration_s.toFixed(1)} s · ${meta.cached ? "cached" : `generated in ${meta.gen_s} s (${(1 / meta.rtf).toFixed(1)}x real time)`}` + (meta.saved_voice ? ` · saved as reference voice “${meta.saved_voice}”` : "");
+    $("path").textContent = meta.path;
+    $("segs").innerHTML = meta.segments.map((s, i) => `<div class="seg" data-i="${i}"><time>${fmt(s.start_s)}–${fmt(s.end_s)}</time><span>${esc(s.text)}</span></div>`).join("");
+    $("status").className = "status"; $("status").textContent = "";
+    if (b.save_as_voice) init2();
+    $("audio").play().catch(() => {});
+  } catch (e) { $("status").className = "status err"; $("status").textContent = String(e.message || e); }
+  finally { clearInterval(tick); $("go").disabled = false; }
+};
+async function init2() { try { models = (await (await fetch("/api/voices")).json()).models; pick(); } catch {} }   // a saved voice becomes a reference clip
+
+$("segs").onclick = e => { const s = e.target.closest(".seg"); if (s && last) { $("audio").currentTime = last.segments[s.dataset.i].start_s; $("audio").play(); } };
+$("words").onclick = e => { const w = e.target.closest("span[data-t]"); if (w) { $("audio").currentTime = parseFloat(w.dataset.t); $("audio").play(); } };
+$("audio").ontimeupdate = () => {
+  const t = $("audio").currentTime;
+  document.querySelectorAll(".seg").forEach((el, i) => el.classList.toggle("on", !!last && t >= last.segments[i].start_s && t < last.segments[i].end_s));
+  document.querySelectorAll(".words span[data-t]").forEach(el => el.classList.toggle("on", t >= +el.dataset.t && t < +el.dataset.e));
+};
+$("tbtn").onclick = async () => {
+  if (!last) return; $("tbtn").disabled = true; $("tstatus").className = "status wait"; $("tstatus").textContent = "Listening…";
+  try {
+    const j = await (await post("/api/transcribe", { path: last.path, words: true })).json();
+    $("words").innerHTML = j.words.map(w => `<span data-t="${w.start_s}" data-e="${w.end_s}" title="${fmt(w.start_s)}">${esc(w.word)}</span>`).join(" ");
+    $("tstatus").className = "status"; $("tstatus").textContent = `${j.words.length} words · ${j.secs} s`;
+  } catch (e) { $("tstatus").className = "status err"; $("tstatus").textContent = String(e.message || e); }
+  finally { $("tbtn").disabled = false; }
+};
+init();
+</script>
+</body>
+</html>

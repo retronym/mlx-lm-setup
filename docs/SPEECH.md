@@ -41,7 +41,7 @@ transcribe(path="<a clip path from speak>")                  # text + word times
 
 **Over HTTP**: `POST /v1/audio/speech` (OpenAI-compatible; returns `audio/wav`), `POST /api/speak` (JSON as above), `POST /api/transcribe`, `GET /api/voices`.
 
-**In the browser**: the chat site has a voice picker and a "▶ speak" button on every finished reply (reasoning and code blocks are skipped).
+**In the browser**: the speech page (`/speech`) takes text, a model and voice (or a voice description for the design model, with "keep as reference voice"), plays the result, lists the sentence-group timings (click to seek), and transcribes it into clickable word timestamps. The chat site has a voice picker and a "▶ speak" button on every finished reply (reasoning and code blocks are skipped).
 
 ## A designed voice is a recipe, then a clip
 

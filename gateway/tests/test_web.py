@@ -137,7 +137,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     # ---- pages ----------------------------------------------------------------------------------------------------------
     async def test_pages_are_served_with_a_tight_policy(self):
-        for path, marker in (("/", 'id="model"'), ("/chat", 'id="model"'), ("/jev", 'id="magic"'), ("/admin", "/api/events")):
+        for path, marker in (("/", 'id="model"'), ("/chat", 'id="model"'), ("/jev", 'id="magic"'), ("/speech", 'id="go"'), ("/admin", "/api/events")):
             r = await self.http.get(path)
             self.assertEqual((r.status_code, r.headers["content-type"].split(";")[0]), (200, "text/html"), path)
             self.assertIn(marker, r.text)
@@ -149,7 +149,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r.headers["referrer-policy"], "no-referrer")
 
     async def test_pages_load_nothing_from_other_origins(self):
-        for name in ("chat.html", "admin.html", "jev.html"):
+        for name in ("chat.html", "admin.html", "jev.html", "speech.html"):
             html = (WEB / name).read_text()
             self.assertEqual(re.findall(r"""(?:src|href)\s*=\s*["']https?://""", html), [], name)     # no remote scripts/styles
             self.assertNotRegex(html, r"""url\(\s*["']?https?://""", name)
