@@ -2,55 +2,21 @@
 
     python3 examples/showcase/narrate.py [--model clone] [--voice narrator] [--out data/showcase]
 
-Per scene: /api/speak (wav + duration), then /api/transcribe (word timestamps). `[[cue]]` markers in the narration are stripped
-before synthesis and resolved to the start time of the first spoken word after the marker, by aligning the script's words with
-Whisper's. Animations key off cue names, so re-recording a line re-times its scene. Also extracts the real data shown on screen
-(the Alice phrase, the triage ROC curves, model sizes) into data.json. Standard library only.
+The gateway's /api/narrate (the `narrate` MCP tool) does the work: it speaks each scene, transcribes it, and resolves the `[[cue]]`
+markers to the start time of the word after each one. This script adds what only a renderer needs: copies of the wavs, waveform
+peaks per video frame, the scene padding from script.json, and the real data shown on screen (the Alice phrase, the triage ROC
+curves, model sizes) in data.json. Standard library only.
 """
-import argparse, array, difflib, json, math, re, shutil, tomllib, urllib.request, wave
+import argparse, array, json, math, shutil, tomllib, urllib.request, wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CUE = re.compile(r"\[\[(\w+)\]\]")
 
 
 def post(base, path, body):
     req = urllib.request.Request(base + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=900) as r:
         return json.load(r)
-
-
-def norm(w):
-    return re.sub(r"[^a-z0-9]", "", w.lower())
-
-
-def split_cues(narration):
-    """-> (text without markers, {cue: index of the script word that follows it})"""
-    words, cues = [], {}
-    for tok in narration.split():
-        m = CUE.fullmatch(tok)
-        if m:
-            cues[m.group(1)] = len(words)
-        else:
-            words.append(tok)
-    return " ".join(words), words, cues
-
-
-def resolve(script_words, spoken, cues, duration):
-    """Map script word indices to spoken word start times via a sequence alignment of normalised words."""
-    a, b = [norm(w) for w in script_words], [norm(w["word"]) for w in spoken]
-    to_spoken = {}
-    for blk in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks():
-        for k in range(blk.size):
-            to_spoken[blk.a + k] = blk.b + k
-    out = {}
-    for name, i in cues.items():
-        j = next((to_spoken[k] for k in range(i, len(a)) if k in to_spoken), None)
-        if j is None:                                   # nothing aligned after the marker: interpolate by word position
-            out[name] = round(duration * i / max(len(a), 1), 3)
-        else:
-            out[name] = round(spoken[j]["start_s"], 3)
-    return out
 
 
 def peaks(path, fps=30):
@@ -101,7 +67,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--script", default=str(Path(__file__).with_name("script.json")))
     ap.add_argument("--gateway", default="http://127.0.0.1:8090")
-    ap.add_argument("--model", default="clone")
+    ap.add_argument("--model", default=None, help="speech model (default: the gateway's cloned narrator)")
     ap.add_argument("--voice", default=None, help="reference clip name for clone (default: narrator), or a Kokoro preset")
     ap.add_argument("--out", default=str(ROOT / "data/showcase"))
     ap.add_argument("--only", help="comma-separated scene ids to (re)narrate; others keep their previous timeline entry")
@@ -111,23 +77,23 @@ def main():
     old = {s["id"]: s for s in json.load(open(out / "timeline.json"))["scenes"]} if (out / "timeline.json").exists() else {}
     only = set(a.only.split(",")) if a.only else None
 
+    todo = [sc for sc in script["scenes"] if only is None or sc["id"] in only or sc["id"] not in old]
+    body = {"model": a.model, "scenes": [{"id": sc["id"], "text": sc["narration"]} for sc in todo]}
+    if a.voice:
+        body["voice" if a.model == "kokoro" else "ref_audio"] = a.voice
+    fresh = {r["id"]: r for r in post(a.gateway, "/api/narrate", body)["scenes"]} if todo else {}
     scenes = []
     for sc in script["scenes"]:
-        if only is not None and sc["id"] not in only and sc["id"] in old:
+        r = fresh.get(sc["id"])
+        if r is None:
             scenes.append(old[sc["id"]]); continue
-        text, script_words, cues = split_cues(sc["narration"])
-        body = {"model": a.model, "text": text, "name": f"showcase-{sc['id']}"}
-        if a.voice:
-            body["voice" if a.model == "kokoro" else "ref_audio"] = a.voice
-        clip = post(a.gateway, "/api/speak", body)
-        words = post(a.gateway, "/api/transcribe", {"path": clip["path"], "words": True})["words"]
-        shutil.copy(clip["path"], out / "audio" / f"{sc['id']}.wav")
-        times = resolve(script_words, words, cues, clip["duration_s"])
-        missing = [c for c in cues if c not in times]
-        print(f"{sc['id']:<10} {clip['duration_s']:6.2f}s {'(cached)' if clip.get('cached') else ''}  cues: {times}" + (f"  MISSING {missing}" if missing else ""), flush=True)
-        scenes.append({"id": sc["id"], "audio": f"audio/{sc['id']}.wav", "duration_s": clip["duration_s"], "lead_s": sc.get("lead", 0.3),
-                       "tail_s": sc.get("tail", 0.6), "text": text, "cues": times, "peaks": peaks(out / "audio" / f"{sc['id']}.wav"),
-                       "words": [{"w": w["word"], "s": round(w["start_s"], 3), "e": round(w["end_s"], 3)} for w in words]})
+        wav = out / "audio" / f"{sc['id']}.wav"
+        shutil.copy(r["path"], wav)
+        odd = [d for d in r["transcript_differs"] if not any(c.isdigit() for c in d["heard"])]
+        print(f"{sc['id']:<10} {r['duration_s']:6.2f}s {'(cached)' if r['cached'] else ''}  cues: {r['cues']}" + (f"  HEARD DIFFERENTLY: {odd}" if odd else ""), flush=True)
+        scenes.append({"id": sc["id"], "audio": f"audio/{sc['id']}.wav", "duration_s": r["duration_s"], "lead_s": sc.get("lead", 0.3),
+                       "tail_s": sc.get("tail", 0.6), "text": r["text"], "cues": r["cues"], "peaks": peaks(wav),
+                       "words": [{"w": w["word"], "s": round(w["start_s"], 3), "e": round(w["end_s"], 3)} for w in r["words"]]})
     (out / "timeline.json").write_text(json.dumps({"fps": 30, "scenes": scenes}, ensure_ascii=False, indent=1))
     extract_data(out)
     total = sum(s["lead_s"] + s["duration_s"] + s["tail_s"] for s in scenes)

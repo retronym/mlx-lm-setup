@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_narrate, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from .supervisor import Supervisor
 
@@ -224,15 +224,19 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return await forward(spec, "/transcribe", apply_defaults(body, prof))
 
     async def voices(request: Request):
-        """For the chat site's voice picker: each speech model with its preset voices and the named reference clips."""
-        out = []
-        for s in catalog.backends.values():
-            if s.kind == "tts":
-                refs = Path(s.options["refs_dir"]) if s.options.get("refs_dir") else None
-                clips = sorted(p.stem for p in refs.glob("*.wav")) if refs and refs.is_dir() else []
-                out.append({"model": s.name, "description": s.description, "default_voice": s.options.get("voice"),
-                            "voices": s.options.get("voices", []), "default_ref": s.options.get("ref_audio"), "reference_clips": clips})
-        return JSONResponse({"models": out})
+        """Each speech model with its preset voices and the named reference clips (chat site's voice picker, the voices tool)."""
+        return JSONResponse({"models": voices_listing(catalog)})
+
+    async def narrate(request: Request):
+        """Timed narration: {"scenes": [{id, text with [[cue]] markers}], "model"?, "voice"?, "ref_audio"?, "speed"?, "fresh"?}
+        -> per scene: clip path, duration, word timestamps, resolved cue times, and where the transcript differs from the script."""
+        body = await read_json(request)
+        try:
+            speed = float(body.get("speed", 1.0))
+        except (TypeError, ValueError):
+            raise ApiError(400, "invalid_arguments", "speed must be a number") from None
+        return JSONResponse(await run_narrate(catalog, sup(), client(), body.get("scenes"), model=body.get("model"), voice=body.get("voice"),
+                                              ref_audio=body.get("ref_audio"), speed=speed, fresh=bool(body.get("fresh"))))
 
     async def models(request: Request):
         snap = {s["name"]: s for s in sup().snapshot()}
@@ -361,6 +365,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/speak", handler(speak), methods=["POST"]),
         Route("/api/transcribe", handler(transcribe), methods=["POST"]),
         Route("/api/voices", handler(voices), methods=["GET"]),
+        Route("/api/narrate", handler(narrate), methods=["POST"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),

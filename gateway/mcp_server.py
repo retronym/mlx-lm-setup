@@ -17,7 +17,7 @@ from . import auth
 from .catalog import Catalog
 from .gates import GateSpecError, parse_gates
 from .iterate import MAX_ATTEMPTS_CAP, run_iterate
-from .core import ApiError, compact_backend, map_errors, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
+from .core import ApiError, compact_backend, default_narrator, map_errors, run_narrate, voices_listing, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
 from .profiles import apply_defaults
 from .supervisor import Supervisor
 
@@ -30,8 +30,15 @@ INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start o
 - decide: typed decisions (choose among options, rate on a scale, yes/no) with probabilities, from a local decision model;
   nothing is generated. Good for classification, routing, triage, tagging.
 - entail: check claims against a source text with a local NLI model (entailment / contradiction / neutral). A weak signal.
-- speak: text to speech with a local voice model; returns a wav file path, its duration and per-sentence-group timings (for
-  video explainers: script in, timed narration out). transcribe: speech to text with word timestamps (for captions).
+- Speech, for video explainers and anything else that needs a voice (all local; clips are wav files on disk):
+  - narrate: the tool for timed narration. Scenes of text with [[cue]] markers in; per scene a wav path, its duration, word
+    timestamps and the time of each cue out, so animations can be keyed to the word that motivates them. Defaults to the cloned
+    narrator voice, so every scene sounds the same. Write numbers as words; check `transcript_differs` for mispronunciations.
+  - voices: the speech models, their preset voices and the saved reference voices (with transcripts). Call it before choosing a voice.
+  - speak: one clip (any length) with per-sentence timings. transcribe: word timestamps for a clip from speak or narrate.
+  - A new narrator: speak(model="qwen3-tts-design", instruct="<description>", save_as_voice="<name>") once, then
+    narrate(..., ref_audio="<name>"). Voice design draws a different voice on every call, so never narrate scenes with it directly.
+    Cloning a real person's voice needs their consent.
 - backends_status: what is running, memory use and idle timers. start_backend / stop_backend / set_backend_policy change
   what is running and need the gateway token.
 A call that needs a model that is not running waits for it to start (seconds; the first call after idle is slower)."""
@@ -218,6 +225,29 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
                                       name=name, fresh=fresh or None, lang_code=lang_code, save_as_voice=save_as_voice).items() if v is not None}
         data, meta = await call(spec, "/speak", body, profile_for(model, "tts"))
         return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
+
+    @mcp.tool()
+    async def narrate(scenes: list[dict], model: str | None = None, voice: str | None = None, ref_audio: str | None = None,
+                      speed: float = 1.0, fresh: bool = False) -> dict:
+        """Timed narration for a video explainer. `scenes` = [{"id": "intro", "text": "Narration with [[cue]] markers. [[evict]] Like this."}].
+        Markers are removed before speaking; each cue's time is the start of the first spoken word after it (from Whisper word
+        timestamps aligned to the script). Returns per scene: `path` (wav), `duration_s`, `start_s` (if the scenes are played back
+        to back), `cues` {name: seconds into the clip}, `words` [{word, start_s, end_s}], `segments`, and `transcript_differs`
+        (where Whisper heard something other than the script: number formatting is expected, anything else may be mispronounced).
+        Default voice: the cloned narrator (the same voice in every scene); `model`, `voice` (a preset) or `ref_audio` (a saved
+        reference voice; see the voices tool) override it. Scenes are cached by text and voice, so re-running after editing one
+        scene only re-synthesises that scene; `fresh` forces new takes. Copy the wavs from `path` into your project."""
+        try:
+            return await run_narrate(catalog, get_supervisor(), get_client(), scenes, model=model, voice=voice, ref_audio=ref_audio,
+                                     speed=speed, fresh=fresh)
+        except ApiError as e:
+            raise fail(e) from None
+
+    @mcp.tool()
+    async def voices() -> dict:
+        """The local speech models, their preset voices, and the saved reference voices that cloning models can use (with the
+        transcript of each reference clip). `narrate` uses `default_narrator` unless told otherwise. Does not start anything."""
+        return {"models": voices_listing(catalog), "default_narrator": default_narrator(catalog)}
 
     @mcp.tool()
     async def transcribe(path: str, language: str | None = None, words: bool = True, model: str | None = None) -> dict:

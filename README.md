@@ -9,7 +9,7 @@
 - **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks). Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
 - **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide` and `/api/entail`.
 - **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
-- **Speak and listen** (`speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps, so Claude can narrate and caption a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
+- **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
 - **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland* and an NLI triage of scala/scala pull requests, both built as ordinary code around the scorers (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):

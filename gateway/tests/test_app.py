@@ -66,6 +66,16 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([m["model"] for m in r.json()["models"]], ["voice"])
         self.assertEqual(self.sup.rt["llm"].starts, 0)
 
+    async def test_narrate_route(self):
+        r = await self.http.post("/api/narrate", json={"scenes": [{"id": "s1", "text": "Hello, [[two]] world."}], "speed": 1.1})
+        self.assertEqual(r.status_code, 200)
+        sc = r.json()["scenes"][0]
+        self.assertEqual((sc["text"], sc["cues"], sc["duration_s"], sc["file"]), ("Hello, world.", {"two": 0.5}, 1.5, "fake.wav"))
+        r = await self.http.post("/api/narrate", json={"scenes": []})
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"))
+        r = await self.http.post("/api/narrate", json={"scenes": [{"text": "x"}], "speed": "fast"})
+        self.assertEqual(r.status_code, 400)
+
     async def test_models_lists_llm_backends_without_starting_anything(self):
         r = await self.http.get("/v1/models")
         self.assertEqual(r.status_code, 200)

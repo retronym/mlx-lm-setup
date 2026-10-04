@@ -26,9 +26,12 @@ The catalog's memory estimates are higher than the RSS figures (2.5 / 4.5 / 3 GB
 
 ## Using it
 
-**From Claude Code**: the `speak` and `transcribe` MCP tools.
+**From Claude Code**: the `narrate`, `voices`, `speak` and `transcribe` MCP tools. For an explainer, `narrate` is the one to use: it does the speaking, transcribing and timing in one call, so a session in any repo can produce timed narration without knowing anything else about this setup.
 
 ```
+narrate(scenes=[{"id": "intro", "text": "One evening, [[dup]] two copies of the same model."},
+                {"id": "fix", "text": "This is the fix."}])         # cloned narrator by default
+voices()                                                     # models, presets, saved reference voices (+ transcripts)
 speak(text="...", voice="bm_george")                         # Kokoro preset voice
 speak(text="...", model="clone", ref_audio="narrator")      # clone a reference clip (also the default for model="clone")
 speak(text="...", model="qwen3-tts-design",
@@ -39,7 +42,9 @@ transcribe(path="<a clip path from speak>")                  # text + word times
 
 `speak` returns `path` (absolute), `duration_s`, `sample_rate` and `segments` (`[{text, start_s, end_s}]` per sentence group). Text of any length works: it is split at sentence boundaries into groups of at most 300 characters (220 for Qwen3-TTS), synthesised group by group, and joined with a 0.15 s pause (0.45 s at a blank line). The same request returns the cached clip (`cached: true`); `fresh: true` forces a new take, which matters for the sampling models.
 
-**Over HTTP**: `POST /v1/audio/speech` (OpenAI-compatible; returns `audio/wav`), `POST /api/speak` (JSON as above), `POST /api/transcribe`, `GET /api/voices`.
+`narrate` takes scenes whose text has `[[cue]]` markers. It strips the markers, speaks each scene (by default with the first speech model that has a saved default reference voice, i.e. the cloned `narrator`), transcribes it, and aligns the script's words with Whisper's. It returns, per scene: `path`, `duration_s`, `start_s` (back to back), `cues` (`{name: seconds}`, the start of the first word after each marker), `words`, `segments`, and `transcript_differs`, where Whisper heard something other than the script. Number formatting ("thirty" heard as "30") and US spelling are expected there; anything else is worth a listen. Spacing-only differences ("M C P" heard as "MCP") are dropped. Scenes run one after another and are cached by text and voice, so editing one scene re-synthesises only that scene. The gateway only writes under its own `data/audio`, so callers copy the wavs from `path`.
+
+**Over HTTP**: `POST /v1/audio/speech` (OpenAI-compatible; returns `audio/wav`), `POST /api/speak` (JSON as above), `POST /api/transcribe`, `POST /api/narrate` (`{"scenes": [...], "model"?, "voice"?, "ref_audio"?, "speed"?, "fresh"?}`), `GET /api/voices`.
 
 **In the browser**: the speech page (`/speech`) takes text, a model and voice (or a voice description for the design model, with "keep as reference voice"), plays the result, lists the sentence-group timings (click to seek), and transcribes it into clickable word timestamps. The chat site has a voice picker and a "▶ speak" button on every finished reply (reasoning and code blocks are skipped).
 

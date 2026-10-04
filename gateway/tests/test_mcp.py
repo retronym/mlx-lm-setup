@@ -68,7 +68,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -152,6 +152,22 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             err, data, _ = await self.call(s, "transcribe", path="/x.wav")
             self.assertFalse(err)
             self.assertEqual([w["word"] for w in data["words"]], ["hello", "world"])
+
+    async def test_narrate_and_voices(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "narrate", scenes=[{"id": "one", "text": "Hello [[w]] world."}, {"id": "two", "text": "Hello world."}])
+            self.assertFalse(err)
+            self.assertEqual([x["id"] for x in data["scenes"]], ["one", "two"])
+            self.assertEqual((data["scenes"][0]["cues"], data["scenes"][1]["start_s"], data["total_s"]), ({"w": 0.5}, 1.5, 3.0))
+            self.assertEqual(data["scenes"][0]["transcript_differs"], [])
+            self.assertEqual((data["model"], data["stt_model"]), ("voice", "ears"))
+            err, _, text = await self.call(s, "narrate", scenes=[{"id": "a b", "text": "x"}])
+            self.assertTrue(err)
+            self.assertIn("invalid_arguments", text)
+            err, _, text = await self.call(s, "narrate", scenes=[{"id": "a", "text": "x"}], model="llm")
+            self.assertIn("wrong_model_kind", text)
+            err, data, _ = await self.call(s, "voices")
+            self.assertEqual(([m["model"] for m in data["models"]], data["default_narrator"]), (["voice"], None))
 
     async def test_entail(self):
         async with self.client() as s:

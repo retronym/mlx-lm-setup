@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import httpx
 
@@ -126,3 +127,52 @@ async def status_payload(catalog: Catalog, sup: Supervisor) -> dict:
         "port": g.port, "memory_budget_gb": mem["budget_gb"], "resident_est_gb": mem["resident_gb"], "free_est_gb": mem["free_gb"],
         "default_llm": g.default_llm, "system": await sup.system_status(),
         "pressure": {"enabled": g.pressure_eviction, "min_free_pct": g.min_free_pct, "swap_growth_gb": g.swap_growth_gb}}}
+
+
+# ---- speech helpers shared by the HTTP API and the MCP tools ----------------------------------------------------------------
+def voices_listing(catalog: Catalog) -> list[dict]:
+    """Each speech model with its preset voices and the named reference clips it can clone (with their transcripts)."""
+    out = []
+    for s in catalog.backends.values():
+        if s.kind != "tts":
+            continue
+        refs = Path(s.options["refs_dir"]) if s.options.get("refs_dir") else None
+        clips = sorted(refs.glob("*.wav")) if refs and refs.is_dir() else []
+        out.append({"model": s.name, "aliases": list(s.aliases), "description": s.description, "default_voice": s.options.get("voice"),
+                    "voices": s.options.get("voices", []), "default_ref": s.options.get("ref_audio"),
+                    "reference_clips": [p.stem for p in clips],
+                    "reference_transcripts": {p.stem: (p.with_suffix(".txt").read_text().strip() if p.with_suffix(".txt").exists() else None)
+                                              for p in clips}})
+    return out
+
+
+def default_narrator(catalog: Catalog) -> str | None:
+    """The speech model narration uses by default: the first one with a default reference clip that exists (a cloned narrator,
+    the same voice in every scene), else None (the catalog's default speech model)."""
+    for s in catalog.backends.values():
+        ref, refs = s.options.get("ref_audio"), s.options.get("refs_dir")
+        if s.kind == "tts" and ref and refs and (Path(refs) / f"{ref}.wav").exists():
+            return s.name
+    return None
+
+
+async def run_narrate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, scenes, *, model: str | None = None,
+                      voice: str | None = None, ref_audio: str | None = None, speed: float = 1.0, fresh: bool = False) -> dict:
+    from .narrate import NarrateError, narrate, parse_scenes
+    from .profiles import apply_defaults
+    try:
+        parsed = parse_scenes(scenes)
+    except NarrateError as e:
+        raise ApiError(400, "invalid_arguments", str(e)) from None
+    tts, prof = resolve_target(catalog, model or default_narrator(catalog), "tts")
+    stt = resolve(catalog, None, "stt")
+
+    async def post(spec, path, body):
+        r, _ = await post_json(sup, client, spec, path, body)
+        if r.status_code != 200:
+            raise ApiError(400 if 400 <= r.status_code < 500 else 502, "backend_error", f"{spec.name} returned {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+    voice_args = {k: v for k, v in dict(voice=voice, ref_audio=ref_audio, speed=speed, fresh=fresh or None).items() if v is not None}
+    res = await narrate(parsed, lambda b: post(tts, "/speak", apply_defaults(b, prof)), lambda b: post(stt, "/transcribe", b), voice_args)
+    return {**res, "model": tts.name, "stt_model": stt.name}
