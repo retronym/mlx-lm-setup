@@ -29,6 +29,7 @@ ALLOWED: dict[str, dict[str, tuple[type, ...]]] = {
     "decision": {"temperature": _NUM},
     "nli": {},
     "score": {},
+    "search": {},
 }
 
 

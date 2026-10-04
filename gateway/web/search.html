@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Search</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706;
+          --scalac: #4f46e5; --docs: #0d9488; --bug: #be185d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24;
+            --scalac: #818cf8; --docs: #2dd4bf; --bug: #f472b6; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  input, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 6px 18px; }
+  @media (prefers-color-scheme: dark) { button.primary { color: #1c1917; } }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  #q { flex: 1; min-width: 220px; font-size: 17px; padding: 8px 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font-size: 12px; border-radius: 999px; color: var(--muted); padding: 2px 10px; text-align: left; }
+  .chips button:hover { color: var(--ink); }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .hit { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .hit.scalac { --c: var(--scalac); } .hit.scala3docs { --c: var(--docs); } .hit.bug { --c: var(--bug); }
+  .top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
+  .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; width: 1.6em; }
+  .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 4px; padding: 0 5px; }
+  .badge.closed { color: var(--muted); border-color: var(--line); text-transform: none; font-weight: 500; }
+  a.title { color: var(--ink); font-weight: 600; text-decoration: none; word-break: break-word; } a.title:hover { text-decoration: underline; color: var(--accent); }
+  .scores { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .url { color: var(--muted); font-size: 12px; word-break: break-all; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
+  pre.open { max-height: none; }
+  #index { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  #index span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
+  #empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local Models · Search</h1>
+  <a href="/">Home</a>
+  <a href="/chat">Chat</a>
+  <a href="/jev">Decide</a>
+  <a href="/speech">Speech</a>
+  <a href="/vision">Vision</a>
+  <a href="/translate">Translate</a>
+  <a href="/search" style="color:var(--ink)">Search</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <form class="row" id="form">
+    <input id="q" type="search" placeholder="Ask about the Scala compiler, library or build tools…" autocomplete="off" autofocus>
+    <button class="primary" id="go">Search</button>
+    <span class="status" id="status"></span>
+  </form>
+  <div class="row">
+    <label>in <select id="source"><option value="">everything</option><option value="scalac">scala/scala code and spec</option>
+      <option value="scala3docs">Scala 3 docs</option><option value="bug">scala/bug issues</option></select></label>
+    <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
+    <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
+    <label><input type="checkbox" id="open"> hide closed issues</label>
+    <label>top <select id="k"><option>5</option><option selected>8</option><option>15</option><option>30</option></select></label>
+  </div>
+  <div class="chips" id="samples"></div>
+  <div id="index" class="meta"></div>
+  <div class="meta" id="meta"></div>
+  <div id="results"><div id="empty">Results appear here: passages with links back to GitHub, not generated answers.</div></div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SAMPLES = [
+  "where is eta expansion of by-name parameters handled",
+  "where does the backend decide to emit invokedynamic for lambdas",
+  "Future callbacks leak memory when one future never completes",
+  "where are implicit scope and shadowing resolved",
+  "what does the spec say about overloading resolution",
+  "how does Scala 3 treat opaque types",
+  "NoSuchMethodError after upgrading with incremental compilation",
+];
+$("samples").replaceChildren(...SAMPLES.map(s => Object.assign(document.createElement("button"), { type: "button", textContent: s, onclick: () => { $("q").value = s; go(); } })));
+
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+for (const id of ["source", "mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
+for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
+
+function status(msg, cls = "") { $("status").textContent = msg; $("status").className = `status ${cls}`; }
+const COLOR = { scalac: "var(--scalac)", scala3docs: "var(--docs)", bug: "var(--bug)" };
+const LABEL = { scalac: "scala/scala", scala3docs: "Scala 3 docs", bug: "scala/bug" };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+fetch("/api/search/status").then(r => r.json()).then(d => {
+  if (!d.indexed) { $("index").textContent = `No index yet at ${d.db}. Build it with pipelines/search/sync.py and embed.py.`; return; }
+  $("index").replaceChildren(...d.sources.map(s => {
+    const e = el("span", "", `${LABEL[s.source] || s.source}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
+    e.style.setProperty("--c", COLOR[s.source] || "var(--muted)"); e.title = `${s.description} · synced to ${s.position || "?"}`; return e;
+  }));
+}).catch(() => {});
+
+function render(d) {
+  $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
+    const box = el("div", `hit ${h.source}`);
+    const top = el("div", "top");
+    top.append(el("span", "n", i + 1), el("span", "badge", LABEL[h.source] || h.source));
+    if (h.state === "closed") top.append(el("span", "badge closed", "closed"));
+    const a = el("a", "title", h.title); a.rel = "noopener noreferrer"; a.target = "_blank";
+    if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
+    top.append(a);
+    const sc = [h.rerank != null ? `rerank ${h.rerank.toFixed(2)}` : null, h.bm25 ? `keyword #${h.bm25}` : null, h.vec ? `vector #${h.vec}` : null].filter(Boolean).join(" · ");
+    top.append(el("span", "scores", sc));
+    const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
+    box.append(top, el("div", "url", h.url), pre);
+    return box;
+  }) : [el("div", "", "No results.")]));
+  $("meta").textContent = [`${d.results.length} results`, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
+                           d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null].filter(Boolean).join(" · ");
+}
+
+let aborter = null, timer = null;
+async function go() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  if (aborter) aborter.abort();
+  aborter = new AbortController();
+  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked };
+  if ($("source").value) body.source = $("source").value;
+  const t0 = performance.now();
+  clearInterval(timer);
+  const tick = () => { const s = (performance.now() - t0) / 1000; status(s > 3 ? `searching… ${s.toFixed(0)} s (the first query loads the models)` : "searching…", "wait"); };
+  tick(); timer = setInterval(tick, 500);
+  $("go").disabled = true;
+  try {
+    const r = await fetch("/api/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: aborter.signal });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+    render(d); status("");
+    history.replaceState(null, "", `#${encodeURIComponent(q)}`);
+  } catch (e) {
+    if (e.name !== "AbortError") status(e.message, "err");
+  } finally {
+    clearInterval(timer); $("go").disabled = false;
+  }
+}
+$("form").onsubmit = e => { e.preventDefault(); go(); };
+if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
+</script>
+</body>
+</html>

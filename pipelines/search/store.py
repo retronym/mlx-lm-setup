@@ -10,6 +10,11 @@ from pathlib import Path
 DB = Path(__file__).parent / "data" / "search.db"
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|_")
 
+# An issue is "closed" by its own state; a comment takes the state of its issue (looked up at query time, so closing an issue
+# needs no rewrite of its comments). `c` is the chunks row.
+STATE_SQL = ("COALESCE(json_extract(c.meta, '$.state'), (SELECT json_extract(i.meta, '$.state') FROM chunks i "
+             "WHERE i.id = c.source || ':issue:' || json_extract(c.meta, '$.number')))")
+
 
 def fts_text(s):
     """Index text plus its camelCase / snake_case parts, so `typedApply` is found by `typed apply`."""
@@ -36,6 +41,7 @@ class Store:
     def __init__(self, path=DB):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
         self.db = sqlite3.connect(path)
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS chunks(rowid INTEGER PRIMARY KEY, id TEXT UNIQUE, source TEXT, doc TEXT, title TEXT,

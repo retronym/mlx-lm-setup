@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_look, run_narrate, run_translate, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -291,6 +291,35 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         return JSONResponse(await run_translate(catalog, sup(), client(), **body))
 
+    async def search(request: Request):
+        """{"query", "k"? (1..50, default 8), "source"? (scalac | scala3docs | bug), "mode"? (hybrid | bm25 | vec), "rerank"? (default true),
+        "open_only"? (hide closed issues)} -> {results: [{source, title, url, text, state?, bm25?, vec?, rerank?}], timing_ms, ...}."""
+        body = await read_json(request)
+        known = {"query", "k", "source", "mode", "rerank", "open_only", "model"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        if not isinstance(body.get("query"), str):
+            raise ApiError(400, "invalid_arguments", "`query` must be a string")
+        return JSONResponse(await run_search(catalog, sup(), client(), **body))
+
+    async def search_status(request: Request):
+        return JSONResponse(search_stats(catalog, request.query_params.get("model")))
+
+    async def embeddings(request: Request):
+        """OpenAI-compatible embeddings: {"input": str | [str], "model"?} -> {data: [{embedding, index}], model, usage}. Documents are
+        embedded as-is; add "kind": "query" for the retrieval-instruction form used for search queries."""
+        body = await read_json(request)
+        out = await run_embed(catalog, sup(), client(), {k: v for k, v in body.items() if k in ("input", "kind")}, body.get("model"))
+        return JSONResponse({"object": "list", "model": out["model"], "data": [{"object": "embedding", "index": i, "embedding": e}
+                                                                              for i, e in enumerate(out["embeddings"])],
+                             "usage": {"prompt_tokens": 0, "total_tokens": 0}})
+
+    async def rerank(request: Request):
+        """{"query", "documents": [str], "model"?} -> {scores: [P(document answers the query)], model}."""
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "search")
+        return await forward(spec, "/rerank", apply_defaults(body, prof))
+
     async def look_expand(request: Request):
         """{"images": [...]} -> the same list with directories replaced by their image files, so a client can send one request per
         image and show progress. Nothing is read beyond the directory listing."""
@@ -445,6 +474,10 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/narrate", handler(narrate), methods=["POST"]),
         Route("/api/look", handler(look), methods=["POST"]),
         Route("/api/translate", handler(translate), methods=["POST"]),
+        Route("/api/search", handler(search), methods=["POST"]),
+        Route("/api/search/status", handler(search_status), methods=["GET"]),
+        Route("/api/rerank", handler(rerank), methods=["POST"]),
+        Route("/v1/embeddings", handler(embeddings), methods=["POST"]),
         Route("/api/look/expand", handler(look_expand), methods=["POST"]),
         Route("/api/vision/presets", handler(vision_presets), methods=["GET"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
@@ -465,6 +498,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/speech", page("speech.html"), methods=["GET"]),
         Route("/vision", page("vision.html"), methods=["GET"]),
         Route("/translate", page("translate.html"), methods=["GET"]),
+        Route("/search", page("search.html"), methods=["GET"]),
         Route("/admin", page("admin.html"), methods=["GET"]),
         Route("/vendor/{name}", vendor, methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),

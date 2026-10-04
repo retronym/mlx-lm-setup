@@ -36,3 +36,18 @@ $PY pipelines/search/test_lifecycle.py     # add / edit / rename / delete on a s
 ## Reranking (`--rerank`)
 
 `rerank.py` scores the top 30 documents (after fusion and one-hit-per-document) with Qwen3-Reranker-0.6B, a yes/no relevance judgement per (query, text) pair. Six hand-picked queries, judged by eye: it clearly helps on "where is X implemented" (for the invokedynamic query the top 5 changed from two issues and incidental hits to `Delambdafy.mkLambdaMetaFactoryCall`, `genInvokeDynamicLambda` and `addLambdaDeserialize`) and keeps code, docs and issues together in one list for concept queries (implicit shadowing: issue, issue, Scala 3 doc, `Implicits.LocalShadower`). On duplicate-issue queries it only reshuffles an already good top 3. It can also demote a good hit (`EtaExpansion.expand` fell out of the top 5 for the eta-expansion query), so a real evaluation set is the next step before making it the default.
+
+## In the gateway
+
+The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py`) keeps the embedder and reranker warm and reads this index (never writes it). It is exposed as:
+
+| Surface | What |
+|---|---|
+| `/search` | page: sample questions, source / method / rerank / open-issues-only controls, per-hit links, keyword and vector ranks, rerank scores |
+| MCP `search` | `query`, `k`, `source`, `mode`, `rerank`, `open_only`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
+| `POST /api/search` | the same as JSON |
+| `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |
+| `POST /api/rerank` | `{"query", "documents": [...]}` -> relevance scores |
+| `GET /api/search/status` | chunks and embedded chunks per source, last sync position; reads the SQLite file, starts nothing |
+
+The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.

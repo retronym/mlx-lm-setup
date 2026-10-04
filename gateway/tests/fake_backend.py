@@ -83,6 +83,18 @@ class H(BaseHTTPRequestHandler):
             return self._json([one(q) for q in req["questions"]])
         if self.path == "/entail":
             return self._json({"labels": ["contradiction", "entailment", "neutral"], "probs": [[0, 1, 0] for _ in req["hypotheses"]]})
+        if self.path == "/search":
+            if not req.get("query"):
+                return self._err(400, {"error": "ValueError: query must be a non-empty string"})
+            hits = [{"source": req.get("source") or "scalac", "title": f"hit {i} for {req['query']}", "url": "https://github.com/scala/scala", "doc": "d",
+                     "state": None, "labels": None, "text": "x" * 900, "truncated": False, "bm25": i + 1, "rerank": 0.9} for i in range(req.get("k", 8))]
+            return self._json({"query": req["query"], "mode": req.get("mode", "hybrid"), "reranked": req.get("rerank", True), "results": hits,
+                               "timing_ms": {"total": 7}, "echo": req})
+        if self.path == "/embed":
+            texts = [req["input"]] if isinstance(req["input"], str) else req["input"]
+            return self._json({"model": "fake-embed", "dim": 2, "embeddings": [[float(len(t)), 1.0] for t in texts], "kind": req.get("kind", "document")})
+        if self.path == "/rerank":
+            return self._json({"model": "fake-rerank", "scores": [1.0 / (1 + i) for i in range(len(req["documents"]))]})
         if self.path == "/score":
             return self._json({"logprobs": [-float(len(c)) for c in req["candidates"]], "echo": req})
         if self.path == "/speak":

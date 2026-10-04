@@ -6,7 +6,7 @@ import json, os, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 import numpy as np, torch
 from transformers import AutoModel, AutoTokenizer
-from store import Store
+from store import Store, STATE_SQL
 
 MODEL = os.environ.get("EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 TASK = "Given a question or code snippet about the Scala compiler, standard library or build tools, retrieve the most relevant source code, documentation or issue text"
@@ -66,7 +66,8 @@ _cache = {}
 
 
 def _matrix(st, model):
-    key = (model, st.db.execute("SELECT count(*), max(rowid) FROM vec").fetchone(), st.db.total_changes)
+    """All vectors of `model` as one matrix, reloaded when the database file changes (the sync and embed passes are other processes)."""
+    key = (model, st.path.stat().st_mtime_ns)
     if _cache.get("key") != key:
         rows = st.db.execute("SELECT rowid, v FROM vec WHERE model=?", (model,)).fetchall()
         _cache.update(key=key, ids=np.array([r[0] for r in rows]), m=np.vstack([np.frombuffer(r[1], dtype=np.float16) for r in rows]))
@@ -78,7 +79,7 @@ def vector_search(st, emb, q, k, source=None, open_only=False):
     s = m @ emb.query(q).astype(np.float16)
     if source or open_only:
         ok = {r[0] for r in st.db.execute(
-            "SELECT rowid FROM chunks WHERE (? IS NULL OR source=?) AND (? = 0 OR json_extract(meta,'$.state') IS NOT 'closed')",
+            f"SELECT rowid FROM chunks c WHERE (? IS NULL OR source=?) AND (? = 0 OR {STATE_SQL} IS NOT 'closed')",
             (source, source, int(open_only)))}
         s = np.where(np.isin(ids, list(ok)), s, -np.inf)
     top = np.argsort(-s)[:k]
