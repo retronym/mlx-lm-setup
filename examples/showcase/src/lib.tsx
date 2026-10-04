@@ -20,8 +20,10 @@ export type Props = { timeline: { fps: number; scenes: SceneT[] }; data: Data };
 
 export const SceneCtx = createContext<SceneT | null>(null);
 export const DataCtx = createContext<Data | null>(null);
+export const AllScenesCtx = createContext<SceneT[]>([]);
 export const useScene = () => useContext(SceneCtx)!;
 export const useData = () => useContext(DataCtx)!;
+export const useAllScenes = () => useContext(AllScenesCtx);
 
 /** Frame (relative to the scene) at which a narration cue is spoken. */
 export const useCue = () => {

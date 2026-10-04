@@ -1,7 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { Captions } from "./Captions";
-import { DataCtx, Props, SceneCtx, SceneT, sceneFrames } from "./lib";
+import { AllScenesCtx, DataCtx, Props, SceneCtx, SceneT, sceneFrames } from "./lib";
 import { C } from "./theme";
 import { Cold } from "./scenes/Cold";
 import { Title } from "./scenes/Title";
@@ -31,7 +31,7 @@ export const Film: React.FC<Props> = ({ timeline, data }) => {
   let at = 0;
   const starts = timeline.scenes.map(s => { const a = at; at += sceneFrames(s); return a; });
   return (
-    <DataCtx.Provider value={data}>
+    <DataCtx.Provider value={data}><AllScenesCtx.Provider value={timeline.scenes}>
       <AbsoluteFill style={{ background: C.bg, overflow: "hidden" }}>
         <AbsoluteFill style={{ background: `radial-gradient(ellipse 80% 70% at 50% 40%, ${C.bg2} 0%, ${C.bg} 70%)` }} />
         {timeline.scenes.map((s, i) => {
@@ -49,6 +49,6 @@ export const Film: React.FC<Props> = ({ timeline, data }) => {
         })}
         <Captions scenes={timeline.scenes} starts={starts} />
       </AbsoluteFill>
-    </DataCtx.Provider>
+    </AllScenesCtx.Provider></DataCtx.Provider>
   );
 };
