@@ -146,7 +146,7 @@ sequenceDiagram
 | 5 | Admin site and chat site served by the gateway; SSE events; token for mutating calls | **DONE** |
 | 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
-| 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | TODO |
+| 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; repo tidy deferred until after phase 7, which touches the workers) |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -260,8 +260,18 @@ Phase 4b: `iterate` with restricted and NLI gates (done, see findings below).
 
 `gateway/gates.py` (gate specs, validation, checks), `gateway/iterate.py` (the retry loop, pure: chat and entail are injected), the `iterate` MCP tool in `gateway/mcp_server.py`; 90 tests in total (12 new, including the tool end to end against fake backends).
 
-- **Gates:** `json` (parses bare, fenced or embedded JSON; optional JSON Schema via `jsonschema`), `regex` (`match` or `absent`, multiline), `contains` (`all` / `any` / `none`), `length`, and `nli` (every sentence of the answer, minus code blocks, must be entailed by a caller-supplied `source` and not contradicted; thresholds `min_entailment` 0.5, `max_contradiction` 0.5). Specs are validated before any model runs (unknown keys and bad schemas are `invalid_arguments`). **No shell or code gate**: a gate can only read text.
+- **Gates:** `json` (parses bare, fenced or embedded JSON; optional JSON Schema via `jsonschema`), `regex` (`match` or `absent`; `^`/`$` anchor the whole answer unless `multiline`: a live run showed per-line anchors letting a looping 2,390-char answer pass), `contains` (`all` / `any` / `none`), `length`, and `nli` (every sentence of the answer, minus code blocks, must be entailed by a caller-supplied `source` and not contradicted; thresholds `min_entailment` 0.5, `max_contradiction` 0.5). Specs are validated before any model runs (unknown keys and bad schemas are `invalid_arguments`). **No shell or code gate**: a gate can only read text.
 - **Loop:** cheap gates run first and the NLI gate (which may start OpenJev) only after they pass. On failure the model sees its last answer plus the failing messages (history does not grow beyond that), up to `max_attempts` (default 3, cap 6). `escalate_to` names another local LLM for the final attempt. Exhausting the attempts is a result, not an error: `passed: false`, the last text, per-attempt failures and a note telling the caller to take over.
 - **Regex safety:** patterns run in a child process with a 2 s kill, because `re` holds the GIL and a catastrophic pattern would freeze the whole gateway (tested with `(a+)+$`). Pattern length is capped at 500 chars.
 - **Live run** with the real models: a schema-gated JSON answer passed first try (4.4 s cold), and the NLI gate ran through OpenJev (1.3 s warm Qwen). A deliberately misleading prompt (asked to claim five retries where the source says three) made Qwen correct the request itself, and the NLI gate passed it, including a closing note whose "three attempts total (including the initial attempt)" is not in the source. **The NLI gate is a weak signal, as already documented for `entail`; use it to catch contradictions and invented sentences, not subtle drift.** Retries themselves were not triggered live; they are covered by the unit tests.
+- **Fixed after the first live retry run:** the regex gate was per-line (see above), and a retry echoed the model's whole failed answer back, which let a looping answer reinforce itself (Qwen degenerated into hundreds of lines on retries 2-4); the echo is now truncated to 1,500 chars.
 - **Not done:** compact JSON tool output (still the FastMCP pretty-print default).
+
+## Phase 8 findings
+
+`service/service.sh` (install, uninstall, restart, status, logs) and `service/run.sh` (the launchd entry point); a per-user LaunchAgent `com.retronym.local-models-gateway`, generated from the repo path (nothing hard-coded to a user).
+
+- **Behaviour:** starts at login, `KeepAlive` on unsuccessful exit with a 15 s throttle (so a second-instance exit code 2 cannot spin), 30 s `ExitTimeOut` so a `bootout` SIGTERM lets the gateway stop every backend first. `install` refuses if a hand-started gateway holds the lock.
+- **Log rotation:** launchd does not rotate, so `run.sh` rotates `.gateway/logs/gateway.out` at start (5 MB, 3 kept) and appends. It only rotates on restart; a gateway that runs for weeks grows its log between restarts (info-level access lines), acceptable for now.
+- **Verified:** installed, answered a chat request, then `kill -9` of the gateway: launchd respawned it within the throttle (runs = 2, new pid) and the supervisor's orphan reaper cleaned up the Qwen backend the kill had left (no `mlx_lm` process afterwards). Reboot survival itself was not tested (needs a login cycle); `RunAtLoad` is set.
+- **Deferred:** the repo tidy (benches and logs out of the root). The workers and benches use relative `data/` paths, so moving them is best done together with phase 7.

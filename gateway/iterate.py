@@ -10,6 +10,7 @@ from typing import Awaitable, Callable
 from .gates import EntailFn, Gate, run_gate
 
 MAX_ATTEMPTS_CAP = 6
+ECHO_CHARS = 1500          # how much of a failed answer is shown back to the model; a long or looping answer would reinforce itself
 # (model override or None for the default, messages) -> (text, info)
 ChatFn = Callable[[str | None, list[dict]], Awaitable[tuple[str, dict]]]
 
@@ -47,7 +48,7 @@ async def run_iterate(chat: ChatFn, entail: EntailFn | None, gates: list[Gate], 
                          "failures": [r["message"] for r in results if r["ok"] is False]})
         if passed:
             break
-        convo = [*messages, {"role": "assistant", "content": text}, {"role": "user", "content": feedback(results)}]
+        convo = [*messages, {"role": "assistant", "content": text[:ECHO_CHARS] + ("\n[truncated]" if len(text) > ECHO_CHARS else "")}, {"role": "user", "content": feedback(results)}]
     passed = bool(attempts) and attempts[-1]["passed"]
     return {"passed": passed, "text": text, "attempts": attempts,
             "gates": [{"gate": r["gate"], "ok": r["ok"]} for r in results],

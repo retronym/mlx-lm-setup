@@ -34,7 +34,9 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await ok({"type": "json"}, "plain text"))[0])
 
     async def test_regex_and_contains_and_length(self):
-        self.assertTrue((await ok({"type": "regex", "pattern": r"^def \w+\("}, "x\ndef f(a):"))[0])      # multiline
+        self.assertFalse((await ok({"type": "regex", "pattern": r"^def \w+\("}, "x\ndef f(a):"))[0])     # anchors the whole answer
+        self.assertTrue((await ok({"type": "regex", "pattern": r"^def \w+\(", "multiline": True}, "x\ndef f(a):"))[0])
+        self.assertFalse((await ok({"type": "regex", "pattern": "^(violet|indigo)$", "ignore_case": True}, "Red\nViolet\n"))[0])
         self.assertFalse((await ok({"type": "regex", "pattern": "TODO", "mode": "absent"}, "a TODO b"))[0])
         self.assertTrue((await ok({"type": "regex", "pattern": "todo", "ignore_case": True}, "a TODO b"))[0])
         self.assertTrue((await ok({"type": "contains", "all": ["a", "b"], "none": ["z"]}, "ab"))[0])
@@ -84,6 +86,13 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         convo = calls[1][1]
         self.assertEqual([m["role"] for m in convo], ["user", "assistant", "user"])
         self.assertIn("not valid JSON", convo[2]["content"])
+
+    async def test_long_failed_answer_is_truncated_in_feedback(self):
+        chat, calls = self.make_chat(["y" * 5000, "ok"])
+        await run_iterate(chat, None, parse_gates([{"type": "length", "max_chars": 10}]), [{"role": "user", "content": "q"}])
+        echoed = calls[1][1][1]["content"]
+        self.assertLess(len(echoed), 1600)
+        self.assertTrue(echoed.endswith("[truncated]"))
 
     async def test_gives_up_and_returns_last_try(self):
         chat, calls = self.make_chat(["x"])

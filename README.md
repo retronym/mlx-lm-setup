@@ -178,7 +178,7 @@ Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-jev` (
 
 ## Gateway (in progress)
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6 and 4b are built (catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget); migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6, 4b and 8 are built (catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service via `service/service.sh install`); migrating the workers comes next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 .venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM

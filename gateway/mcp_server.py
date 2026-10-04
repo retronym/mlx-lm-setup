@@ -101,7 +101,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
                       model: str | None = None, system: str | None = None, max_attempts: int = 3, escalate_to: str | None = None,
                       max_tokens: int = 1024, temperature: float = 0.3) -> dict:
         """Ask a local LLM and retry until the answer passes every gate (or attempts run out). Failures are fed back to the model.
-        `gates` is a list of: {"type":"json","schema"?: JSON Schema}; {"type":"regex","pattern","mode"?:"match"|"absent","ignore_case"?};
+        `gates` is a list of: {"type":"json","schema"?: JSON Schema}; {"type":"regex","pattern","mode"?:"match"|"absent","ignore_case"?,"multiline"?} (^/$ anchor the whole answer);
         {"type":"contains","all"?:[..],"any"?:[..],"none"?:[..],"ignore_case"?}; {"type":"length","min_chars"?,"max_chars"?};
         {"type":"nli","source": text,"min_entailment"?:0.5,"max_contradiction"?:0.5} (every sentence of the answer must be supported by
         `source`; runs last, uses the NLI model; a weak signal). No shell or code gates. `escalate_to` names another local LLM for the

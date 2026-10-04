@@ -38,7 +38,7 @@ class Gate:
 
 _KEYS = {
     "json": {"type", "schema"},
-    "regex": {"type", "pattern", "mode", "ignore_case"},
+    "regex": {"type", "pattern", "mode", "ignore_case", "multiline"},
     "contains": {"type", "all", "any", "none", "ignore_case"},
     "length": {"type", "min_chars", "max_chars"},
     "nli": {"type", "source", "min_entailment", "max_contradiction"},
@@ -123,15 +123,15 @@ def extract_json(text: str):
     raise ValueError("no valid JSON found")
 
 
-async def _regex_search(pattern: str, text: str, ignore_case: bool) -> bool | None:
-    """Run in a child process so a catastrophic pattern is killed after REGEX_TIMEOUT_S instead of freezing the gateway (`re`
+async def _regex_search(pattern: str, text: str, ignore_case: bool, multiline: bool) -> bool | None:
+    """`re.search` over the whole answer (`^`/`$` anchor the answer, not each line, unless `multiline`). Run in a child process so a catastrophic pattern is killed after REGEX_TIMEOUT_S instead of freezing the gateway (`re`
     holds the GIL, so a thread would not help). Returns None on timeout."""
     code = ("import re,sys,json;a=json.load(sys.stdin);"
-            "print(1 if re.search(a['p'],a['t'],(re.I if a['i'] else 0)|re.M) else 0)")
+            "print(1 if re.search(a['p'],a['t'],(re.I if a['i'] else 0)|(re.M if a['m'] else 0)) else 0)")
     proc = await asyncio.create_subprocess_exec(sys.executable, "-c", code, stdin=asyncio.subprocess.PIPE,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(json.dumps({"p": pattern, "t": text, "i": ignore_case}).encode()),
+        out, _ = await asyncio.wait_for(proc.communicate(json.dumps({"p": pattern, "t": text, "i": ignore_case, "m": multiline}).encode()),
                                         REGEX_TIMEOUT_S)
     except asyncio.TimeoutError:
         proc.kill()
@@ -172,7 +172,7 @@ async def run_gate(gate: Gate, text: str, entail: EntailFn | None = None) -> tup
                 return False, f"the JSON does not match the schema: {shown}"
         return True, "ok"
     if t == "regex":
-        hit = await _regex_search(s["pattern"], text, bool(s.get("ignore_case")))
+        hit = await _regex_search(s["pattern"], text, bool(s.get("ignore_case")), bool(s.get("multiline")))
         if hit is None:
             return False, "regex gate timed out (pattern too expensive)"
         want = s.get("mode", "match") == "match"
