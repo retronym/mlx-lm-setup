@@ -124,66 +124,9 @@ python -m gateway admin              # admin site, authenticated (opens your bro
 
 The standalone server above is independent of the gateway. Claude Code now talks to the **gateway's own MCP server** (the third-party `mlx-mcp-server` was retired: unregistered, uninstalled; its vetting notes remain in [docs/FINDINGS.md](docs/FINDINGS.md)).
 
-### Gateway MCP tools
+### Gateway
 
-```bash
-mise run service-status                # the gateway must be running for Claude Code to connect
-./register_mcp.sh                      # claude mcp add --transport http ... with the token header; restart Claude Code after
-```
-
-| Tool | What | Token |
-|---|---|---|
-| `chat` | local LLM (default Qwen3-Coder); `message` or `messages`, optional `system` | no |
-| `decide` | typed decisions with probabilities from the decision model: one `question` + `options`, or several `questions` about one state | no |
-| `entail` | NLI: is each hypothesis entailed by / contradicted by / neutral to a premise | no |
-| `iterate` | `chat` with retries until the answer passes gates: JSON (+schema), regex, contains, length, NLI faithfulness to a source text; optional escalation model for the last try; no shell gate | no |
-| `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
-| `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
-| `look` | a vision model reads images, directories or PDF pages; presets `layout`, `storyboard`, `table`, `describe`; per-image `flagged` list | no |
-| `search` | hybrid BM25 + Qwen3-Embedding search, reranked by Qwen3-Reranker, over the indexed Scala compiler, docs and issue sources; `source`, `mode`, `rerank`, `open_only` | no |
-| `translate` | text or a screenshot into English with a summary; screenshots via macOS OCR, the vision model as fallback | no |
-| `narrate` | timed narration: scenes with `[[cue]]` markers in; per scene a clip, its duration, word timestamps and cue times out | no |
-| `voices` | the speech models, their preset voices and the saved reference voices | no |
-| `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
-| `start_backend`, `stop_backend`, `set_backend_policy` | change what is running; TTL and pin | **yes** |
-
-State-changing tools need the token in the `Authorization: Bearer` header (the registration script adds it; the token lives in `.gateway/token`, mode 0600, created on first run; `python -m gateway token` prints it). Inference and status are open on localhost. `.venv/bin/python -m gateway.live_check` exercises every tool against a running gateway with the real models.
-
-## What we measured (headlines)
-
-| Question | Answer |
-|---|---|
-| Qwen3-Coder-30B speed and memory | ~103 tok/s generation, 17.2 GB peak. Good at gated extraction, boilerplate, long-file summaries; unreliable at open-ended review (hallucinated a bug). |
-| Why was OpenJev 4B NLI slow (33 s per 343 emoji)? | Qwen3.5's linear-attention layers fall back to pure PyTorch on MPS: 96% of time in copies, cost independent of model size. |
-| What fixed it? | A model that scores all options in one pass on native MLX: Jev-Style 2B, 0.9 s for all 346 emoji (37x faster). |
-| Group pruning of emoji candidates | Bad idea: loses half of the good answers. |
-| Whole-chapter context | Worse (collapses onto chapter gist, 2x slower). A 15-before / 5-after word window is free and better. |
-| Glyph-only emoji options vs names | Not better for the 2B model; some glyph knowledge exists (🍆 rank 203 → 5). |
-| LLM next-token emoji scoring | Knows slang (💀 🐐 🔥 🤡 👻); noisier on narrative. Fusion with the decision model: slang top-1 13/22 (Jev alone) and 15/22 (LLM alone) → 17–18/22 fused. |
-| Memory | Before the gateway: LLM + an in-process copy for the emoji worker + decision model + browsers → 6 of 7 GB swap and a thrashing machine. Now every model is a budgeted backend and idle ones are evicted. |
-
-Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
-
-## Files
-
-| Path | What |
-|---|---|
-| `gateway/`, `gateway.toml` | the gateway: catalog, supervisor, HTTP app, MCP server, thin backend servers (`gateway/backends/`), sites (`gateway/web/`) |
-| `service/` | launchd service: `service.sh install / uninstall / restart / status / logs` (also `mise run service-*`) |
-| `mise.toml`, `requirements.txt` | `mise run setup / test / build / translate-app / service-*`; the gateway venv's dependencies (CI runs `test` on macOS) |
-| `pipelines/` | what runs today, all as gateway clients: `search/` (index builder and dashboard), `pr_triage/`, `emoji_book/`, `translate/` (the Shortcut's client), `dashboard_server.py` (whitelist-only localhost server for the triage and book pages), `gateway_client.py` |
-| `examples/` | narrated films: `explainer/` (slides), `showcase/`, `safe-scala/` |
-| `experiments/` | benchmarks and earlier in-process iterations behind the choices above, kept for reference (`bench_llm_compare.py`: the head-to-head in the model guide) |
-| `ask.sh`, `serve.sh`, `register_mcp.sh` | one-shot client, a plain `mlx_lm.server` outside the gateway, MCP registration |
-| `docs/` | `FINDINGS.md` (long-form log of what was tried), `MODEL_GUIDE.md` (which model when), `SPEECH.md` |
-| `PLAN.md` | the gateway's design and phase status, with findings per phase |
-| `data/`, `models/`, `corpus/`, `.venv*/` | generated or downloaded; git-ignored (logs in `data/logs/`) |
-
-Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx, and `pyobjc-framework-Vision` for OCR in `translate`; `mise run setup`), `.venv-vlm` (mlx-vlm, for the vision backends), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev and search backends, the search indexer, the emoji chunker and fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
-
-## Gateway
-
-Starts models on demand, passivates idle ones, and fronts them with one API. All phases in [PLAN.md](PLAN.md) are done: catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service, speech, vision, translate, search, and the pipelines as clients. **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+The gateway supervises one process per model: it starts a backend on first request, stops it after its idle TTL, and keeps the resident set inside a memory budget (28 GB by default). When a start would not fit, it evicts the least recently used idle backend; busy and pinned backends are never evicted. A pressure monitor also evicts an idle backend when macOS reports low free memory or growing swap. Design and per-phase measurements: [PLAN.md](PLAN.md).
 
 ```bash
 curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
@@ -191,15 +134,24 @@ curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
 curl localhost:8090/api/backends                 # state, idle countdown, memory estimate per backend, system free memory and swap
 ```
 
-Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `mlx_lm_score`, `mlx_vlm`, `jevstyle`, `openjev_nli`, `search`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). The catalog has these features for managing models:
+### Configuring models
 
-- **Memory as parts**: give `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost.
-- **Argument passthrough**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
-- **Profiles**: `[profiles.<name>]` is a named virtual model on an existing backend with request defaults (sampling, a token cap, `chat_template_kwargs` such as `enable_thinking`, a system prompt). Fill-only: whatever the client sends wins. No second process.
-- **Model picker details**: give each backend a `description`; the chat page's dropdown (and `GET /api/models`) then shows, per model and profile, what it is, memory breakdown, thinking default, context limit and KV cost, the defaults a profile applies, and live load/idle state.
-- **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio) with size, KV cost and mlx-lm support; `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
+Backends are declared in `gateway.toml`; adding a model is a `[backends.<name>]` table using one of the adapters (`mlx_lm`, `mlx_lm_score`, `mlx_vlm`, `jevstyle`, `openjev_nli`, `search`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). Per backend:
 
-Tests (no models needed, they use a fake backend; CI runs them on macOS): `mise run test` (creates `.venv` from `requirements.txt`), or `.venv/bin/python -m unittest discover -s gateway/tests -t .`; against the real models: `.venv/bin/python -m gateway.live_check`.
+- **Memory**: `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost. `ttl_s` and `pinned` control passivation.
+- **Arguments**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
+- **Profiles**: `[profiles.<name>]` is a named virtual model on an existing backend with request defaults (sampling, token cap, `chat_template_kwargs` such as `enable_thinking`, a system prompt). Client values win; no second process.
+- **Description**: shown in the chat page's model picker and `GET /api/models` with memory breakdown, thinking default, context limit and KV cost.
+- **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio); `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
+
+### Tests
+
+No models needed (a fake backend); CI runs them on macOS.
+
+```bash
+mise run test        # creates .venv from requirements.txt
+.venv/bin/python -m gateway.live_check     # against the real models
+```
 
 ## Next
 
