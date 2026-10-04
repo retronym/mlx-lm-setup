@@ -3,6 +3,7 @@ import { CalculateMetadataFunction, Composition, staticFile } from "remotion";
 import { Film, filmFrames } from "./Film";
 import { Props } from "./lib";
 import { FPS, H, W } from "./theme";
+import { TeamSketch } from "./sketches/Team";
 
 const load: CalculateMetadataFunction<Props> = async () => {
   const [timeline, data] = await Promise.all(["timeline.json", "data.json"].map(f => fetch(staticFile(f)).then(r => r.json())));
@@ -19,6 +20,7 @@ const loadScene = (id: string): CalculateMetadataFunction<Props> => async () => 
 
 export const Root: React.FC = () => (
   <>
+    <Composition id="sketch-team" component={TeamSketch} width={W} height={H} fps={FPS} durationInFrames={1} />
     <Composition id="Showcase" component={Film} width={W} height={H} fps={FPS} durationInFrames={1}
                  defaultProps={{ timeline: { fps: FPS, scenes: [] }, data: null as never }} calculateMetadata={load} />
     {SCENES.map(id => (
