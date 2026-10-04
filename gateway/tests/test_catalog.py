@@ -72,7 +72,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_shipped_gateway_toml_is_valid(self):
         c = load(Path(__file__).resolve().parents[2] / "gateway.toml")
-        self.assertEqual(set(c.backends), {"qwen3-coder", "openjev-4b", "jevstyle-2b"})
+        self.assertLessEqual({"qwen3-coder", "openjev-4b", "jevstyle-2b"}, set(c.backends))   # the catalog grows; don't pin the set
         self.assertEqual(c.gateway.port, 8090)
 
     def test_defaults_and_overrides(self):

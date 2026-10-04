@@ -49,24 +49,28 @@ precision = "8bit"
 est_mem_gb = 3
 ttl_s = 900
 
-# --- candidates (commented out; repos, sizes and architecture support verified against Hugging Face and mlx-lm 0.32) -------
-# Source: a r/LocalLLM thread on 48 GB Apple-silicon Macs recommends MoE models over dense ones (MoE: ~3-4B active, 40-50 tok/s
-# reported on an M4 Pro; dense 27-31B: 8-15 tok/s). Not benchmarked here yet. est_mem_gb = weights + headroom for KV at modest
-# context; a long context (hundreds of K tokens) adds many GB on top.
-#
-# [backends.qwen3-6-35b-a3b]            # 35B MoE, 3B active, model_type qwen3_5_moe, 20.4 GB at 4-bit
-# adapter = "mlx_lm"
-# python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
-# model = "mlx-community/Qwen3.6-35B-A3B-4bit"
-# est_mem_gb = 23
-# ttl_s = 600
-#
-# [backends.gemma-4-26b-a4b]            # 26B MoE, 4B active, model_type gemma4, 15.6 GB (QAT 4-bit)
-# adapter = "mlx_lm"
-# python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
-# model = "lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit"
-# est_mem_gb = 18
-# ttl_s = 600
-#
-# Not candidates on this machine: DeepSeek-V4-Flash is 151.5 GB at 4-bit (the thread calls it "smallish"); Qwen3.8-27B / Qwen3.6-27B
-# are dense (16.1 GB, reported 8-12 tok/s, long thinking).
+# --- added 2026-10-04 after a head-to-head (bench_llm_compare.py; see docs/MODEL_GUIDE.md) -------------------------------
+# Both are MoE models, verified against Hugging Face and mlx-lm 0.32. est_mem_gb = measured peak at ~6k context plus KV headroom
+# for ~32K context (weights alone understate it). Long contexts cost more KV: Qwen3.6 and Gemma 4 are cheap (~20 KiB per token,
+# hybrid attention) while Qwen3-Coder is expensive (96 KiB per token), see the guide before raising context.
+# NOTE: Qwen3.6 THINKS BY DEFAULT (its chat template opens a <think> block); send chat_template_kwargs {"enable_thinking": false}
+# for quick tasks, or it will spend hundreds to thousands of tokens reasoning first. Gemma 4 thinks only when asked.
+
+[backends.qwen3-6-35b-a3b]            # 35B MoE, 3B active, model_type qwen3_5_moe, 20.4 GB at 4-bit, measured peak 21.5 GB
+adapter = "mlx_lm"
+python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
+model = "mlx-community/Qwen3.6-35B-A3B-4bit"
+aliases = ["qwen3.6", "qwen36"]
+est_mem_gb = 22.5
+ttl_s = 600
+
+[backends.gemma-4-26b-a4b]            # 26B MoE, 4B active, model_type gemma4, 15.6 GB (QAT 4-bit), measured peak 16.0 GB
+adapter = "mlx_lm"
+python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
+model = "lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit"
+aliases = ["gemma4", "gemma"]
+est_mem_gb = 17
+ttl_s = 600
+
+# Not candidates on this machine: DeepSeek-V4-Flash is 151.5 GB at 4-bit (a thread called it "smallish"); Qwen3.8-27B and
+# Qwen3.6-27B are dense (16.1 GB at 4-bit, reported 8-12 tok/s, long thinking).
