@@ -136,7 +136,7 @@ def _mlx_audio_tts(s: BackendSpec) -> list[str]:
     o = s.options
     cmd = [s.python, str(BACKENDS_DIR / "tts_server.py"), "--model", o["model"], "--port", str(s.port),
            "--output-dir", o["output_dir"], "--refs-dir", o["refs_dir"]]
-    for flag, key in (("--voice", "voice"), ("--lang-code", "lang_code"), ("--max-chars", "max_chars")):
+    for flag, key in (("--voice", "voice"), ("--lang-code", "lang_code"), ("--max-chars", "max_chars"), ("--ref-audio", "ref_audio")):
         if key in o:
             cmd += [flag, str(o[key])]
     return cmd
@@ -156,7 +156,7 @@ ADAPTERS: dict[str, Adapter] = {
     "mlx_lm": Adapter("llm", ("python", "model"), ("args",), "/v1/models", _mlx_lm),
     "jevstyle": Adapter("decision", ("python", "model_dir"), ("precision",), "/health", _jevstyle, ("model_dir",)),
     "openjev_nli": Adapter("nli", ("python", "root", "subfolder"), (), "/health", _openjev_nli, ("root",)),
-    "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "output_dir", "refs_dir"), "/health",
+    "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "ref_audio", "output_dir", "refs_dir"), "/health",
                              _mlx_audio_tts, ("output_dir", "refs_dir")),
     "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),

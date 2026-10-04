@@ -231,7 +231,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
                 refs = Path(s.options["refs_dir"]) if s.options.get("refs_dir") else None
                 clips = sorted(p.stem for p in refs.glob("*.wav")) if refs and refs.is_dir() else []
                 out.append({"model": s.name, "description": s.description, "default_voice": s.options.get("voice"),
-                            "voices": s.options.get("voices", []), "reference_clips": clips})
+                            "voices": s.options.get("voices", []), "default_ref": s.options.get("ref_audio"), "reference_clips": clips})
         return JSONResponse({"models": out})
 
     async def models(request: Request):

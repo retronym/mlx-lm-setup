@@ -205,16 +205,17 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
     @mcp.tool()
     async def speak(text: str, voice: str | None = None, model: str | None = None, speed: float = 1.0, instruct: str | None = None,
                     ref_audio: str | None = None, ref_text: str | None = None, name: str | None = None, fresh: bool = False,
-                    lang_code: str | None = None) -> dict:
+                    lang_code: str | None = None, save_as_voice: str | None = None) -> dict:
         """Turn text into speech with a local text-to-speech model and write a wav file. Returns `path` (absolute), `duration_s`,
         `sample_rate` and `segments` ([{text, start_s, end_s}] per sentence group, for timing captions and cuts). Any text length
         works (it is split at sentence boundaries; a blank line makes a longer pause). `voice` is a preset (see GET /api/voices),
         `speed` 0.5..2. Cloning models take `ref_audio`, the name of a clip in data/voices (data/voices/<name>.wav, transcript in
         <name>.txt or `ref_text`); voice-design models take `instruct`, a description of the voice. The same request returns the
-        cached clip (`cached: true`); `fresh` forces a new take. `name` prefixes the file name. Starts the model if needed."""
+        cached clip (`cached: true`); `fresh` forces a new take. `name` prefixes the file name. `save_as_voice` keeps the clip as a named reference voice in data/voices (with a voice-design model
+        this makes a designed voice reusable: design once, then narrate with the cloning model and `ref_audio`). Starts the model if needed."""
         spec = spec_for(model, "tts")
         body = {k: v for k, v in dict(text=text, voice=voice, speed=speed, instruct=instruct, ref_audio=ref_audio, ref_text=ref_text,
-                                      name=name, fresh=fresh or None, lang_code=lang_code).items() if v is not None}
+                                      name=name, fresh=fresh or None, lang_code=lang_code, save_as_voice=save_as_voice).items() if v is not None}
         data, meta = await call(spec, "/speak", body, profile_for(model, "tts"))
         return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
 

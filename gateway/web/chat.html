@@ -55,6 +55,8 @@
   .msg.assistant { background: var(--panel); border: 1px solid var(--line); }
   .msg.error { border-color: var(--bad); color: var(--bad); }
   .meta { font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .meta button.speak { font-size: 11px; padding: 0 7px; margin-left: 8px; background: transparent; color: var(--muted); border-radius: 10px; }
+  .meta button.speak:hover { color: var(--ink); }
   .wait { color: var(--warn); font-size: 13px; }
   details.think { margin-bottom: 8px; border-left: 2px solid var(--line); padding-left: 10px; color: var(--muted); font-size: 13px; }
   details.think summary { cursor: pointer; font-size: 12px; user-select: none; }
@@ -91,6 +93,7 @@
   <h1>Local Models</h1>
   <label>model <select id="model"></select></label>
   <span class="chip" id="state">…</span>
+  <label id="voicebox" hidden>voice <select id="voice"></select></label>
   <button id="clear">New chat</button>
   <span style="flex:1"></span>
   <a href="/jev">Decide</a>
@@ -332,6 +335,7 @@ async function send() {
     meta.textContent = `${model} · ${ntok} tok` + (genS > 0.05 ? ` · ${(ntok / genS).toFixed(0)} tok/s` : "") +
       (tFirst ? ` · first token ${((tFirst - t0) / 1000).toFixed(2)}s` : "") + (coldSecs ? ` · cold start ${coldSecs}s` : "") +
       (usage?.prompt_tokens ? ` · prompt ${usage.prompt_tokens} tok` : "");
+    if (voices.length && out) meta.appendChild(Object.assign(document.createElement("button"), { className: "speak", textContent: "▶ speak", title: "Read this aloud with the selected local voice" }));
     el.appendChild(meta);
   } catch (e) {
     if (e.name === "AbortError") { cancelAnimationFrame(raf); paint(); if (out) history.push({ role: "assistant", content: out }); el.insertAdjacentHTML("beforeend", `<div class="meta">stopped</div>`); }
@@ -340,6 +344,43 @@ async function send() {
     cancelAnimationFrame(raf); clearInterval(ticker); controller = null; $("send").textContent = "Send"; loadModels();
   }
 }
+
+// ---- read aloud: the selected local voice via /v1/audio/speech (the speech model starts on first use) ----
+let voices = [], player = null, playingBtn = null;
+async function loadVoices() {
+  try {
+    const j = await (await fetch("/api/voices")).json();
+    voices = [];
+    for (const m of j.models) {
+      if (m.voices.length) for (const v of m.voices) voices.push({ model: m.model, label: `${m.model} · ${v}`, body: { voice: v }, first: v === m.default_voice });
+      if (m.default_ref) for (const c of m.reference_clips) voices.push({ model: m.model, label: `${m.model} · ${c}`, body: { ref_audio: c }, first: false });
+    }
+    const sel = $("voice"); sel.innerHTML = voices.map((v, i) => `<option value="${i}">${esc(v.label)}</option>`).join("");
+    const def = voices.findIndex(v => v.first); if (def >= 0) sel.value = String(def);
+    try { const saved = localStorage.getItem("voice"); if (saved) { const i = voices.findIndex(v => v.label === saved); if (i >= 0) sel.value = String(i); } } catch {}
+    $("voicebox").hidden = !voices.length;
+  } catch {}
+}
+$("voice").addEventListener("change", () => { try { localStorage.setItem("voice", voices[$("voice").value]?.label || ""); } catch {} });
+function plainText(msg) {                                   // what a person would read: no reasoning, code blocks or meta line
+  const c = msg.cloneNode(true); c.querySelectorAll("details.think, .code, .meta, pre").forEach(n => n.remove());
+  document.body.appendChild(c); c.style.cssText = "position:absolute;left:-9999px;width:600px"; const t = c.innerText; c.remove();   // innerText needs layout to keep paragraph breaks
+  return t.replace(/\n{3,}/g, "\n\n").trim();
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button.speak"); if (!b) return;
+  if (player) { player.pause(); player = null; if (playingBtn) playingBtn.textContent = "▶ speak"; const same = playingBtn === b; playingBtn = null; if (same) return; }
+  const v = voices[$("voice").value]; if (!v) return;
+  const text = plainText(b.closest(".msg")); if (!text) return;
+  b.textContent = "… synthesizing"; playingBtn = b;
+  try {
+    const r = await fetch("/v1/audio/speech", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: v.model, input: text, ...v.body }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error?.message || j.error || `HTTP ${r.status}`); }
+    const url = URL.createObjectURL(await r.blob()); const a = new Audio(url); player = a;
+    a.onended = a.onerror = () => { URL.revokeObjectURL(url); if (player === a) { player = null; playingBtn = null; } b.textContent = "▶ speak"; };
+    b.textContent = "■ stop"; await a.play();
+  } catch (err) { b.textContent = "▶ speak"; b.title = String(err.message || err); player = null; playingBtn = null; alert("Speech failed: " + (err.message || err)); }
+});
 
 // "following" is a latch the user controls: scrolling away from the bottom turns it off, scrolling back to the bottom turns it on.
 // Content growth never changes it, so streaming can't drag the view away from where the user parked it.
@@ -369,7 +410,7 @@ function seedSamples(box) {
 seedSamples(document.querySelector("#empty .samples"));
 $("clear").addEventListener("click", () => { controller?.abort(); history = [];
   $("log").innerHTML = `<div class="empty" id="empty">New chat.<div class="samples"></div></div>`; seedSamples(document.querySelector("#empty .samples")); });
-loadModels(); setInterval(loadModels, 3000);
+loadModels(); setInterval(loadModels, 3000); loadVoices();
 </script>
 </body>
 </html>

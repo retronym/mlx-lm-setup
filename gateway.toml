@@ -137,3 +137,30 @@ model = "mlx-community/whisper-large-v3-turbo-asr-fp16"
 est_mem_gb = 3
 ttl_s = 300
 aliases = ["stt"]
+
+# Qwen3-TTS comes in three flavours, all Apache 2.0, one catalog entry each (each is ~3 GB at 8-bit):
+#   qwen3-tts-design  describe a voice in words (`instruct`); every call draws a NEW voice, so keep one with `save_as_voice`
+#   qwen3-tts-clone   clone a voice from a short reference clip (`ref_audio` = a clip in data/voices, ideally 5-15 s, with its transcript)
+# The usual workflow: design a narrator once with save_as_voice="narrator", then narrate every scene with the clone model.
+
+[backends.qwen3-tts-design]
+adapter = "mlx_audio_tts"
+description = "Voice design (Qwen3-TTS 1.7B): describe the narrator in words (age, tone, pace) and get that voice. A new voice on every call, so save a good one as a named reference and narrate with qwen3-tts-clone."
+python = ".venv-audio/bin/python"
+model = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-8bit"
+lang_code = "english"
+est_mem_gb = 4.5
+ttl_s = 600
+max_chars = 220
+
+[backends.qwen3-tts-clone]
+adapter = "mlx_audio_tts"
+description = "Voice cloning (Qwen3-TTS 1.7B): speaks in the voice of a short reference clip kept in data/voices. Consistent across scenes, so this is the narrator model once a voice has been chosen."
+python = ".venv-audio/bin/python"
+model = "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
+lang_code = "english"
+ref_audio = "narrator"            # default reference clip: data/voices/narrator.wav (+ narrator.txt)
+est_mem_gb = 4.5
+ttl_s = 600
+max_chars = 220
+aliases = ["clone"]
