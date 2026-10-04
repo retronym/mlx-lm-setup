@@ -30,6 +30,7 @@ from typing import AsyncIterator
 import httpx
 
 from .catalog import BackendSpec, Catalog
+from .memory import macos_probe
 
 
 class State(str, enum.Enum):
@@ -56,6 +57,10 @@ class BackendUnavailable(GatewayError):
     """The backend failed recently and is in its retry backoff window."""
 
 
+class InsufficientMemory(GatewayError):
+    """Starting the backend would exceed the memory budget and nothing can be evicted (busy or pinned backends hold it)."""
+
+
 @dataclass
 class Runtime:
     spec: BackendSpec
@@ -76,6 +81,7 @@ class Runtime:
     started_wall: float | None = None
     start_secs: float | None = None
     transition: asyncio.Task | None = None
+    admitted: bool = False      # a STARTING backend only holds budget once admitted
     sem: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
 
     @property
@@ -85,7 +91,7 @@ class Runtime:
 
 class Supervisor:
     def __init__(self, catalog: Catalog, state_dir: str | Path | None = None, *, reap_interval: float = 1.0,
-                 health_interval: float = 0.25, grace_s: float = 10.0, clock=time.monotonic):
+                 health_interval: float = 0.25, grace_s: float = 10.0, clock=time.monotonic, memory_probe=None):
         self.catalog = catalog
         sd = state_dir or catalog.gateway.state_dir or (catalog.base_dir / ".gateway")
         self.state_dir = Path(sd)
@@ -102,6 +108,12 @@ class Supervisor:
         self._http: httpx.AsyncClient | None = None
         self._reaper: asyncio.Task | None = None
         self._watchers: set[asyncio.Task] = set()
+        self._probe = memory_probe or macos_probe
+        self._admission = asyncio.Lock()
+        self._pressure: asyncio.Task | None = None
+        self._swap_samples: deque[tuple[float, float]] = deque()
+        self._last_pressure_evict = -1e9
+        self.last_system: dict = {}
 
     # ---- events ---------------------------------------------------------------------------------------------------
     def emit(self, kind: str, backend: str, **kw) -> None:
@@ -135,6 +147,8 @@ class Supervisor:
         """The idle reaper starts on first use, so a supervisor can never silently skip passivation."""
         if self._reaper is None or self._reaper.done():
             self._reaper = asyncio.create_task(self._reap_loop(), name="idle-reaper")
+        if self.catalog.gateway.pressure_eviction and (self._pressure is None or self._pressure.done()):
+            self._pressure = asyncio.create_task(self._pressure_loop(), name="pressure-monitor")
 
     async def shutdown(self) -> None:
         if self._reaper:
@@ -142,6 +156,11 @@ class Supervisor:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._reaper
             self._reaper = None
+        if self._pressure:
+            self._pressure.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._pressure
+            self._pressure = None
         for name in list(self.rt):
             with contextlib.suppress(Exception):
                 await self.stop(name, force=True)
@@ -243,7 +262,7 @@ class Supervisor:
                 "idle_s": None if idle is None else round(idle, 1),
                 "ttl_left_s": (None if idle is None or b.ttl_s == 0 or b.pinned else max(0.0, round(b.ttl_s - idle, 1))),
                 "pending": b.pending, "in_flight": b.in_flight, "requests": b.requests, "starts": b.starts,
-                "passivations": b.passivations, "last_start_s": b.start_secs, "last_error": b.last_error,
+                "passivations": b.passivations, "holds_memory": self._holds(b), "last_start_s": b.start_secs, "last_error": b.last_error,
                 "uptime_s": round(time.time() - b.started_wall, 1) if b.started_wall and b.state is State.READY else None,
             })
         return out
@@ -264,6 +283,8 @@ class Supervisor:
         t0 = self.clock()
         proc = None
         try:
+            await self._admit(b)                              # memory budget: may evict idle backends or wait for room
+            t0 = self.clock()
             log = open(self.state_dir / "logs" / f"{name}.log", "ab")
             log.write(f"\n--- start {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n".encode())
             log.flush()
@@ -297,8 +318,13 @@ class Supervisor:
                 await self._kill_group(proc, b.pgid)
             self._remove_pidfile(b)
             b.proc = b.pgid = None
+            b.admitted = False
             if isinstance(e, asyncio.CancelledError):
                 b.state = State.STOPPED
+                raise
+            if isinstance(e, InsufficientMemory):             # not the backend's fault: no FAILED state, no backoff
+                b.state = State.STOPPED
+                self.emit("rejected", name, reason=str(e).splitlines()[0])
                 raise
             b.state = State.FAILED
             b.fail_count += 1
@@ -321,6 +347,7 @@ class Supervisor:
         rc = await proc.wait()
         if b.proc is proc and b.state is State.READY:
             b.state = State.STOPPED
+            b.admitted = False
             b.last_error = f"crashed (exit code {rc})"
             self.emit("crashed", b.spec.name, code=rc)
             self._remove_pidfile(b)
@@ -345,6 +372,7 @@ class Supervisor:
             await self._kill_group(b.proc, b.pgid)
         self._remove_pidfile(b)
         b.proc = b.pgid = None
+        b.admitted = False
         b.state = State.STOPPED
         b.passivations += 1
         self.emit("stopped", name, reason=reason)
@@ -362,6 +390,96 @@ class Supervisor:
                 await proc.wait()
         with contextlib.suppress(ProcessLookupError, PermissionError):   # stragglers (grandchildren) that outlived the leader
             os.killpg(pgid, signal.SIGKILL)
+
+    # ---- memory budget: admission control + LRU eviction ----------------------------------------------------------
+    def _holds(self, r: Runtime) -> bool:
+        """Does this backend occupy budget right now? A PASSIVATING backend still does until its process has exited."""
+        return r.state in (State.READY, State.PASSIVATING) or (r.state is State.STARTING and r.admitted)
+
+    def resident_gb(self, exclude: Runtime | None = None) -> float:
+        return sum(r.spec.est_mem_gb for r in self.rt.values() if r is not exclude and self._holds(r))
+
+    def _evictable(self, exclude: Runtime | None) -> list[Runtime]:
+        """Idle, unpinned, READY backends, least recently used first."""
+        return sorted((r for r in self.rt.values() if r is not exclude and r.state is State.READY and not r.pinned
+                       and r.pending == 0 and r.in_flight == 0), key=lambda r: r.last_used)
+
+    def memory_status(self) -> dict:
+        g = self.catalog.gateway
+        res = self.resident_gb()
+        return {"budget_gb": g.memory_budget_gb, "resident_gb": res, "free_gb": max(0.0, g.memory_budget_gb - res)}
+
+    async def system_status(self) -> dict:
+        """Fresh reading of what macOS says (free-memory percentage, swap)."""
+        try:
+            return {**await asyncio.to_thread(self._probe), "ts": time.time()}
+        except Exception:                                    # noqa: BLE001
+            return {}
+
+    async def _admit(self, b: Runtime) -> None:
+        """Reserve budget for ``b`` before it is spawned. Evicts idle backends (LRU) until it fits; waits for passivating
+        ones to really exit; fails with InsufficientMemory after ``room_timeout_s`` if busy or pinned backends hold the room.
+        The check-and-reserve step is serialized so two concurrent starts cannot both claim the same free memory."""
+        g = self.catalog.gateway
+        need, budget = b.spec.est_mem_gb, g.memory_budget_gb
+        deadline = self.clock() + g.room_timeout_s
+        announced = False
+        while True:
+            victim = None
+            async with self._admission:
+                resident = self.resident_gb(exclude=b)
+                if resident + need <= budget + 1e-9:
+                    b.admitted = True
+                    return
+                ev = self._evictable(b)
+                if ev:
+                    victim = ev[0]
+                    self._begin_terminate(victim, f"evicted: making room for {b.spec.name} "
+                                                  f"({need:g} GB needed, {resident:g} of {budget:g} GB in use)")
+            if victim is not None:
+                with contextlib.suppress(GatewayError):
+                    await asyncio.shield(victim.transition)  # wait until the memory is really returned
+                continue
+            if not announced:
+                announced = True
+                self.emit("waiting_for_memory", b.spec.name, need_gb=need, in_use_gb=resident, budget_gb=budget)
+            if self.clock() >= deadline:
+                holders = ", ".join(f"{r.spec.name} ({'pinned' if r.pinned else 'busy' if r.pending or r.in_flight else r.state.value})"
+                                    for r in self.rt.values() if r is not b and self._holds(r)) or "nothing"
+                raise InsufficientMemory(f"cannot start {b.spec.name} ({need:g} GB): {resident:g} of {budget:g} GB budget is held "
+                                         f"by {holders}, and none of it can be evicted right now")
+            await asyncio.sleep(0.05)
+
+    async def _pressure_loop(self) -> None:
+        """If macOS reports memory pressure (low free percentage, or swap growing) while backends are idle, evict the LRU one."""
+        g = self.catalog.gateway
+        while True:
+            await asyncio.sleep(g.pressure_interval_s)
+            p = await self.system_status()
+            if not p:
+                continue
+            self.last_system = p
+            now = self.clock()
+            used = p.get("swap_used_gb")
+            if used is not None:
+                self._swap_samples.append((now, used))
+                while self._swap_samples and now - self._swap_samples[0][0] > g.pressure_window_s:
+                    self._swap_samples.popleft()
+            reason = None
+            free = p.get("free_pct")
+            if g.min_free_pct and free is not None and free < g.min_free_pct:
+                reason = f"only {free}% memory free (limit {g.min_free_pct}%)"
+            elif used is not None and len(self._swap_samples) >= 2:
+                growth = used - self._swap_samples[0][1]
+                if growth >= g.swap_growth_gb:
+                    reason = f"swap grew {growth:.1f} GB in {now - self._swap_samples[0][0]:.0f}s"
+            if reason and now - self._last_pressure_evict >= 2 * g.pressure_interval_s:     # cooldown: let memory settle
+                victims = self._evictable(None)
+                if victims:
+                    self._begin_terminate(victims[0], f"pressure: {reason}")
+                    self._last_pressure_evict = now
+                    self._swap_samples.clear()
+                    self.emit("pressure", victims[0].spec.name, reason=reason)
 
     # ---- idle reaper ----------------------------------------------------------------------------------------------
     async def _reap_loop(self) -> None:

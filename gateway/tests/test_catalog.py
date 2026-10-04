@@ -59,6 +59,9 @@ class CatalogTests(unittest.TestCase):
             ({"gateway__host": "0.0.0.0"}, "loopback"),
             ({"gateway__default_llm": "b"}, "must name an llm backend"),
             ({"gateway__typo": 1}, "unknown keys"),
+            ({"gateway__room_timeout_s": 0}, "room_timeout_s must be a positive number"),
+            ({"gateway__min_free_pct": 100}, "min_free_pct must be an integer"),
+            ({"gateway__pressure_eviction": "yes"}, "pressure_eviction must be true or false"),
             ({"backends__a__start_timeout_s": 0}, "start_timeout_s must be > 0"),
             ({"backends__a__concurrency": 0}, "concurrency must be >= 1"),
         ]:
@@ -95,6 +98,16 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(CatalogError) as cm:
             parse(bad(**{"backends__b__aliases": ["a"]}), BASE)
         self.assertIn("used by both", str(cm.exception))
+
+    def test_pinned_backends_cannot_exceed_the_budget(self):
+        d = bad(**{"gateway__memory_budget_gb": 12, "backends__a__pinned": True, "backends__c__pinned": True})   # a (10) + c (9) + d (1, pinned in the fixture)
+        with self.assertRaises(CatalogError) as cm:
+            parse(d, BASE)
+        self.assertIn("pinned backends need 20", str(cm.exception))
+
+    def test_pressure_settings_have_sane_defaults(self):
+        g = parse(OK, BASE).gateway
+        self.assertEqual((g.room_timeout_s, g.pressure_eviction, g.swap_growth_gb, g.min_free_pct), (20.0, True, 1.0, 12))
 
     def test_invalid_toml(self):
         with tempfile.TemporaryDirectory() as t:

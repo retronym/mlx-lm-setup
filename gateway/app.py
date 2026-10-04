@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from .catalog import Catalog
-from .supervisor import BackendUnavailable, GatewayError, StartFailed, State, Supervisor, UnknownBackend
+from .supervisor import BackendUnavailable, GatewayError, InsufficientMemory, StartFailed, State, Supervisor, UnknownBackend
 
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]", "::1"}
 COLD_HEADER_THRESHOLD_S = 0.05
@@ -134,6 +134,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
     def map_errors(e: Exception) -> ApiError:
         if isinstance(e, BackendUnavailable):
             return ApiError(503, "backend_unavailable", str(e), {"Retry-After": "5"})
+        if isinstance(e, InsufficientMemory):
+            return ApiError(503, "insufficient_memory", str(e), {"Retry-After": "10"})
         if isinstance(e, StartFailed):
             return ApiError(503, "backend_start_failed", str(e))
         if isinstance(e, UnknownBackend):
@@ -213,11 +215,11 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             for s in catalog.backends.values() if s.kind == "llm"]})
 
     async def backends(request: Request):
-        snap = sup().snapshot()
-        resident = sum(s["est_mem_gb"] for s in snap if s["state"] in (State.READY.value, State.STARTING.value))
-        return JSONResponse({"backends": snap, "gateway": {
-            "port": catalog.gateway.port, "memory_budget_gb": catalog.gateway.memory_budget_gb,
-            "resident_est_gb": resident, "default_llm": catalog.gateway.default_llm}})
+        mem = sup().memory_status()
+        return JSONResponse({"backends": sup().snapshot(), "gateway": {
+            "port": catalog.gateway.port, "memory_budget_gb": mem["budget_gb"], "resident_est_gb": mem["resident_gb"],
+            "free_est_gb": mem["free_gb"], "default_llm": catalog.gateway.default_llm,
+            "system": await sup().system_status()}})
 
     async def healthz(request: Request):
         return JSONResponse({"status": "ok"})

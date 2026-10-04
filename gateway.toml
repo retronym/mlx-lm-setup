@@ -8,6 +8,18 @@ backend_port_base = 18101    # backends get 18101, 18102, ... in catalog order
 memory_budget_gb = 28        # resident backends may not exceed this (macOS, JVM, sbt need the rest)
 default_llm = "qwen3-coder"
 
+# Memory policy (defaults shown). The budget uses each backend's declared est_mem_gb, because Metal memory is invisible to
+# per-process RSS. Starting a backend that would not fit evicts idle backends, least recently used first; busy and pinned
+# backends are never evicted (a start waits up to room_timeout_s for room, then fails with 503 insufficient_memory).
+# The pressure monitor is the reality check: if macOS reports low free memory or swap growing while backends are idle, the
+# least recently used idle backend is evicted even though the budget says it fits.
+# room_timeout_s      = 20
+# pressure_eviction   = true
+# pressure_interval_s = 5     # sample interval
+# pressure_window_s   = 30    # swap growth is measured over this window
+# swap_growth_gb      = 1.0   # evict if swap grew by this much within the window
+# min_free_pct        = 12    # evict if free memory (kern.memorystatus_level) falls below this; 0 disables
+
 # --- built-in adapters -------------------------------------------------------------------------------
 #   mlx_lm       any mlx-community model, served by `mlx_lm.server` (OpenAI-compatible)      needs: python, model
 #   jevstyle     a Jev-Style decision model in MLX format                                    needs: python, model_dir  [precision]

@@ -156,5 +156,49 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({b["name"]: b["state"] for b in j["backends"]}["llm"], "ready")
 
 
+class BudgetHttpTests(unittest.IsolatedAsyncioTestCase):
+    """Memory budget as seen by HTTP clients (budget 10 GB, backends 6 GB each)."""
+
+    async def start_gateway(self, backends):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.port = free_port()
+        self.cat = catalog(backends, port=self.port, memory_budget_gb=10, room_timeout_s=0.4, default_llm="x")
+        self.sup = Supervisor(self.cat, state_dir=Path(self.tmp.name) / "state", reap_interval=0.05, health_interval=0.05, grace_s=0.5)
+        self.server = uvicorn.Server(uvicorn.Config(create_app(self.cat, supervisor=self.sup), host="127.0.0.1", port=self.port,
+                                                    log_level="warning", lifespan="on"))
+        self.task = asyncio.create_task(self.server.serve())
+        while not self.server.started:
+            await asyncio.sleep(0.02)
+        self.http = httpx.AsyncClient(base_url=f"http://127.0.0.1:{self.port}", trust_env=False, timeout=30)
+
+    async def asyncTearDown(self):
+        await self.http.aclose()
+        self.server.should_exit = True
+        await self.task
+        await self.sup.shutdown()
+        self.tmp.cleanup()
+
+    def chat(self, model):
+        return {"model": model, "messages": [{"role": "user", "content": "hi"}]}
+
+    async def test_second_model_evicts_the_first_and_status_shows_it(self):
+        await self.start_gateway({"x": {"kind": "llm", "est_mem_gb": 6}, "y": {"kind": "llm", "est_mem_gb": 6}})
+        self.assertEqual((await self.http.post("/v1/chat/completions", json=self.chat("x"))).status_code, 200)
+        self.assertEqual((await self.http.post("/v1/chat/completions", json=self.chat("y"))).status_code, 200)   # evicts x
+        j = (await self.http.get("/api/backends")).json()
+        self.assertEqual({b["name"]: b["state"] for b in j["backends"]}, {"x": "stopped", "y": "ready"})
+        self.assertEqual((j["gateway"]["resident_est_gb"], j["gateway"]["free_est_gb"]), (6.0, 4.0))
+        self.assertIn("free_pct", j["gateway"]["system"])
+
+    async def test_pinned_backend_makes_the_other_a_503_with_retry_after(self):
+        await self.start_gateway({"x": {"kind": "llm", "est_mem_gb": 6, "pinned": True}, "y": {"kind": "llm", "est_mem_gb": 6}})
+        self.assertEqual((await self.http.post("/v1/chat/completions", json=self.chat("x"))).status_code, 200)
+        r = await self.http.post("/v1/chat/completions", json=self.chat("y"))
+        self.assertEqual((r.status_code, r.json()["error"]["type"]), (503, "insufficient_memory"))
+        self.assertIn("x (pinned)", r.json()["error"]["message"])
+        self.assertEqual(r.headers["retry-after"], "10")
+        self.assertEqual(self.sup.rt["x"].state, State.READY)                          # the pinned one is untouched
+
+
 if __name__ == "__main__":
     unittest.main()

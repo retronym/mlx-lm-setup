@@ -13,7 +13,7 @@ _next_port = [19200]
 def catalog(backends: dict, **gateway):
     base = _next_port[0]
     _next_port[0] += 10
-    d = {"gateway": {"backend_port_base": base, "memory_budget_gb": 100, **gateway}, "backends": {}}
+    d = {"gateway": {"backend_port_base": base, "memory_budget_gb": 100, "pressure_eviction": False, **gateway}, "backends": {}}
     for name, opts in backends.items():
         opts = dict(opts)
         flags = opts.pop("flags", [])

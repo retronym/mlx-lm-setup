@@ -25,6 +25,12 @@ class GatewaySettings:
     memory_budget_gb: float = 28.0
     default_llm: str | None = None
     state_dir: str | None = None      # logs + pidfiles; default <catalog dir>/.gateway
+    room_timeout_s: float = 20.0      # how long a start may wait for memory (busy or pinned backends) before 503
+    pressure_eviction: bool = True    # evict the LRU idle backend when macOS reports memory pressure
+    pressure_interval_s: float = 5.0  # how often to sample system memory
+    pressure_window_s: float = 30.0   # swap growth is measured over this window
+    swap_growth_gb: float = 1.0       # evict if swap grew by at least this much within the window
+    min_free_pct: int = 12            # evict if macOS free-memory percentage drops below this (0 disables)
 
 
 @dataclass(frozen=True)
@@ -118,10 +124,19 @@ def _check_type(name: str, key: str, value: Any, types: tuple[type, ...]) -> Non
 
 def parse(data: dict, base_dir: Path) -> Catalog:
     g = data.get("gateway", {})
-    unknown = set(g) - {"host", "port", "backend_port_base", "memory_budget_gb", "default_llm", "state_dir"}
+    unknown = set(g) - {"host", "port", "backend_port_base", "memory_budget_gb", "default_llm", "state_dir", "room_timeout_s",
+                        "pressure_eviction", "pressure_interval_s", "pressure_window_s", "swap_growth_gb", "min_free_pct"}
     if unknown:
         raise CatalogError(f"[gateway]: unknown keys {sorted(unknown)}")
     gs = GatewaySettings(**g)
+    for key in ("memory_budget_gb", "room_timeout_s", "pressure_interval_s", "pressure_window_s", "swap_growth_gb"):
+        v = getattr(gs, key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+            raise CatalogError(f"[gateway].{key} must be a positive number")
+    if isinstance(gs.min_free_pct, bool) or not isinstance(gs.min_free_pct, int) or not 0 <= gs.min_free_pct < 100:
+        raise CatalogError("[gateway].min_free_pct must be an integer in 0..99")
+    if not isinstance(gs.pressure_eviction, bool):
+        raise CatalogError("[gateway].pressure_eviction must be true or false")
     if gs.host not in ("127.0.0.1", "localhost", "::1"):
         raise CatalogError("[gateway].host must be a loopback address (the gateway is localhost-only)")
     raw = data.get("backends", {})
@@ -187,6 +202,9 @@ def parse(data: dict, base_dir: Path) -> Catalog:
             python=python, est_mem_gb=float(est), ttl_s=ttl, pinned=pinned,
             health=opts.pop("health", ad.health) if adapter == "command" else ad.health,
             port=gs.backend_port_base + i, options=opts, env=env, start_timeout_s=start_timeout, concurrency=conc, aliases=tuple(dict.fromkeys(aliases)))
+    pinned_gb = sum(sp.est_mem_gb for sp in specs.values() if sp.pinned)
+    if pinned_gb > gs.memory_budget_gb:
+        raise CatalogError(f"pinned backends need {pinned_gb} GB, more than the whole memory budget ({gs.memory_budget_gb} GB)")
     seen: dict[str, str] = {}
     for n, sp in specs.items():                       # every name and alias must be unique across the catalog
         for key in (n, *sp.aliases):
