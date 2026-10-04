@@ -84,29 +84,13 @@ flowchart TB
 
 ## Pipelines
 
-### PR triage: OpenJev on scala/scala
+### PR triage
 
-Typed yes/no questions about each merged PR (title, changed files, start of the description; no diff), scored against the labels maintainers actually applied. 300 PRs, 1.24 s each, AUROC 0.80 to 0.99 but badly calibrated at the default threshold; see the findings log.
-
-```mermaid
-flowchart LR
-  GH["gh pr list<br/>(read-only)"] --> PRS["data/prs.json"] --> TRI["jev_triage.py<br/>6 hypotheses per PR<br/>/api/entail · OpenJev 4B"] --> RES["data/results.jsonl"] --> DASH["dashboard.html<br/>precision, recall, AUROC<br/>live, threshold slider"]
-```
-
-```bash
-gh pr list -R scala/scala --state merged --limit 300 --json number,title,body,labels,files,mergedAt,author > data/prs.json
-python3 pipelines/dashboard_server.py &                  # http://127.0.0.1:8766/
-python3 pipelines/pr_triage/jev_triage.py --fresh
-```
+Typed yes/no questions about each merged scala/scala PR, scored by the NLI model against the labels maintainers applied (AUROC 0.80 to 0.99, badly calibrated at the default threshold), with a live precision/recall dashboard. See [pipelines/pr_triage](pipelines/pr_triage/README.md).
 
 ### Search indexer
 
-`pipelines/search/` builds the SQLite index (chunks, FTS5, embeddings) over scala/scala, scala/scala3, the Scala 3 docs, scala/bug and scala/scala pull requests that the gateway's `search` backend serves. Syncs are incremental and resumable (rate-limit-aware GitHub paging); a progress dashboard runs on :8767. See its [README](pipelines/search/README.md).
-
-```bash
-.venv-jev/bin/python pipelines/search/sync.py && .venv-jev/bin/python pipelines/search/embed.py
-python3 pipelines/search/dashboard.py        # http://127.0.0.1:8767/
-```
+Builds the SQLite index (chunks, FTS5, embeddings) over the Scala compiler, Scala 3, its docs, scala/bug and scala/scala PRs that the gateway's `search` backend serves; incremental and resumable, with a progress dashboard. See [pipelines/search](pipelines/search/README.md).
 
 ### Emoji book
 
