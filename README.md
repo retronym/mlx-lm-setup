@@ -29,7 +29,7 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 ## Screenshots
 
 ### Home
-![img.png](img.png)
+![img_9.png](img_9.png)
 ### Chat
 ![img_1.png](img_1.png)
 ### Decide
