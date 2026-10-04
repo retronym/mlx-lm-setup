@@ -41,7 +41,7 @@
   .name { font-weight: 600; } .num { font-variant-numeric: tabular-nums; }
   .st { font-weight: 600; white-space: nowrap; } .st.ready { color: var(--good); } .st.starting, .st.passivating { color: var(--warn); } .st.failed { color: var(--bad); } .st.stopped { color: var(--muted); }
   .ttl { width: 120px; } .ttlbar { height: 5px; background: var(--track); border-radius: 3px; margin-top: 4px; width: 120px; } .ttlbar i { display: block; height: 100%; background: var(--muted); border-radius: 3px; }
-  input[type=number] { width: 74px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+  input[type=number], input[type=password] { width: 74px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
   button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 11px; cursor: pointer; }
   button:hover:not(:disabled) { border-color: var(--muted); } button:disabled { opacity: .45; cursor: default; }
   .err td { color: var(--bad); font-size: 12px; padding-top: 0; }
@@ -85,7 +85,8 @@
     <a href="/vision">Vision ↗</a>
     <a href="/translate">Translate ↗</a>
   </header>
-  <div class="card" id="banner">Read-only: starting, stopping and policy changes need the gateway token. Open this page with <code>python -m gateway admin</code>.</div>
+  <div class="card" id="banner">Read-only: starting, stopping and policy changes need the gateway token. Open this page with <code>python -m gateway admin</code>, or paste the output of <code>python -m gateway token</code>:
+    <input type="password" id="tokin" style="width:260px" placeholder="gateway token" autocomplete="off"> <button id="tokgo">Use token</button></div>
 
   <div class="grid2">
     <div class="card">
@@ -130,22 +131,33 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// ---- token: arrives once in the URL fragment (never sent to a server), kept for this tab only ----
+// ---- token: arrives in the URL fragment (never sent to a server) or is pasted in the banner; kept in localStorage so every tab
+// and later visit (Home tile, Chat's Admin link, a bookmark) is authenticated too ----
 let token = null;
-try {
+const store = { get: () => { try { return localStorage.getItem("gwtoken"); } catch { return null; } },
+                set: t => { try { t ? localStorage.setItem("gwtoken", t) : localStorage.removeItem("gwtoken"); } catch {} } };
+function setToken(t) {
+  token = t || null; store.set(token);
+  $("auth").textContent = token ? "authenticated" : "read-only";
+  $("auth").className = "chip " + (token ? "ok" : "warn");
+  $("banner").style.display = token ? "none" : "block";
+  if (last) update(last);
+}
+let last = null;
+{
   const t = new URLSearchParams(location.hash.slice(1)).get("token");
-  if (t) { sessionStorage.setItem("gwtoken", t); history.replaceState(null, "", location.pathname); }
-  token = sessionStorage.getItem("gwtoken");
-} catch {}
-$("auth").textContent = token ? "authenticated" : "read-only";
-$("auth").className = "chip " + (token ? "ok" : "warn");
-$("banner").style.display = token ? "none" : "block";
+  if (t) history.replaceState(null, "", location.pathname);
+  setToken(t || store.get());
+}
+$("tokgo").onclick = () => { const v = $("tokin").value.trim(); if (v) { $("tokin").value = ""; setToken(v); } };
+$("tokin").onkeydown = e => { if (e.key === "Enter") $("tokgo").click(); };
 
 function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.className = bad ? "bad" : ""; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", bad ? 7000 : 2500); }
 async function act(name, what, body) {
   try {
     const r = await fetch(`/api/backends/${encodeURIComponent(name)}/${what}`, { method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
     const j = await r.json();
+    if (r.status === 401) setToken(null);                                        // stale token (e.g. state dir reset): back to read-only
     if (!r.ok) toast(`${what} ${name}: ${j.error?.message || r.status}`, true); else toast(`${what} ${name}: ok`);
   } catch (e) { toast(`${what} ${name}: ${e.message}`, true); }
 }
@@ -179,6 +191,7 @@ function ensureRow(b, idx) {
 }
 
 function update(snap) {
+  last = snap;
   const g = snap.gateway, bs = snap.backends;
   if (!order.length) order = bs.map(b => b.name);
   // memory stack
