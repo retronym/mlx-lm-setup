@@ -23,8 +23,9 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_narrate, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_look, run_narrate, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
+from . import vision
 from .supervisor import Supervisor
 
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]", "::1"}
@@ -187,9 +188,34 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return wrapped
 
     # ---- routes ----
+    def has_images(messages) -> bool:
+        return isinstance(messages, list) and any(isinstance(m, dict) and isinstance(m.get("content"), list) and
+                                                  any(isinstance(p, dict) and p.get("type") == "image_url" for p in m["content"]) for m in messages)
+
+    async def vision_completion(spec, prof, body: dict) -> Response:
+        """A vision backend answers whole (no token streaming); a client that asked for a stream gets it as one SSE chunk."""
+        stream = bool(body.pop("stream", False))
+        body.pop("stream_options", None)
+        body = apply_defaults({**body, "messages": await asyncio.to_thread(vision.inline_messages, body.get("messages"))}, prof)
+        resp = await forward(spec, "/v1/chat/completions", body)
+        if not stream or resp.status_code != 200:
+            return resp
+        d = json.loads(resp.body)
+        msg = d["choices"][0]["message"]
+        chunk = {"id": d["id"], "object": "chat.completion.chunk", "created": d["created"], "model": d["model"],
+                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": msg.get("content", "")}, "finish_reason": d["choices"][0]["finish_reason"]}],
+                 "usage": d.get("usage")}
+        return Response(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n", media_type="text/event-stream",
+                        headers={k: v for k, v in resp.headers.items() if k.lower().startswith("x-gateway")})
+
     async def chat_completions(request: Request):
         body = await read_json(request)
+        vt = vision_target(catalog, body.get("model"))
+        if vt is not None:
+            return await vision_completion(*vt, body)
         spec, prof = target(body.get("model"), "llm")
+        if has_images(body.get("messages")):
+            raise ApiError(400, "model_not_vision", f"{spec.name} does not take images; use a vision model: {', '.join(vision_models(catalog)) or 'none in the catalog'}")
         body = apply_defaults(body, prof)                                  # profile defaults fill only what the client omitted
         body = {**body, "model": spec.options.get("model", spec.name)}     # mlx_lm.server may try to load a different model id
         return await forward(spec, "/v1/chat/completions", body, stream=bool(body.get("stream")))
@@ -244,12 +270,28 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_narrate(catalog, sup(), client(), body.get("scenes"), model=body.get("model"), voice=body.get("voice"),
                                               ref_audio=body.get("ref_audio"), speed=speed, fresh=bool(body.get("fresh"))))
 
+    async def look(request: Request):
+        """{"images": [path | data URI | "x.pdf#page=N" | directory], "prompt" | "preset", "context"?, "each"?, "gates"?, "model"?,
+        "image_tokens"?, "max_tokens"?, "max_attempts"?} -> the answer (and parsed JSON), or per-image results when `each`."""
+        body = await read_json(request)
+        known = {"images", "prompt", "preset", "context", "system", "each", "gates", "image_tokens", "max_attempts", "model", "max_tokens", "temperature"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        if not isinstance(body.get("images"), list):
+            raise ApiError(400, "invalid_arguments", "`images` must be a list")
+        return JSONResponse(await run_look(catalog, sup(), client(), **body))
+
+    async def vision_presets(request: Request):
+        return JSONResponse({"models": [{"name": s.name, "description": s.description, "image_tokens": s.options.get("image_tokens")}
+                                        for s in catalog.backends.values() if s.kind == "vision"],
+                             "presets": {k: {kk: v[kk] for kk in ("title", "prompt", "gates", "image_tokens", "each")} for k, v in vision.PRESETS.items()}})
+
     async def models(request: Request):
         snap = {s["name"]: s for s in sup().snapshot()}
         return JSONResponse({"object": "list", "data": [
             {"id": s.name, "object": "model", "owned_by": "local", "aliases": list(s.aliases),
-             "state": snap[s.name]["state"], "ready": snap[s.name]["state"] == "ready"}
-            for s in catalog.backends.values() if s.kind == "llm"] + [
+             "state": snap[s.name]["state"], "ready": snap[s.name]["state"] == "ready", **({"vision": True} if s.kind == "vision" else {})}
+            for s in catalog.backends.values() if s.kind in ("llm", "vision")] + [
             {"id": p.name, "object": "model", "owned_by": "local", "profile_of": p.backend, "description": p.description,
              "aliases": list(p.aliases), "state": snap[p.backend]["state"], "ready": snap[p.backend]["state"] == "ready"}
             for p in catalog.profiles.values() if catalog.backends[p.backend].kind == "llm"]})
@@ -372,6 +414,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/transcribe", handler(transcribe), methods=["POST"]),
         Route("/api/voices", handler(voices), methods=["GET"]),
         Route("/api/narrate", handler(narrate), methods=["POST"]),
+        Route("/api/look", handler(look), methods=["POST"]),
+        Route("/api/vision/presets", handler(vision_presets), methods=["GET"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/score", handler(score), methods=["POST"]),
@@ -383,10 +427,11 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/backends/{name}/stop", handler(api_stop), methods=["POST"]),
         Route("/api/backends/{name}/policy", handler(api_policy), methods=["POST"]),
         Route("/api/events", events, methods=["GET"]),
-        Route("/", page("chat.html"), methods=["GET"]),
+        Route("/", page("home.html"), methods=["GET"]),
         Route("/chat", page("chat.html"), methods=["GET"]),
         Route("/jev", page("jev.html"), methods=["GET"]),
         Route("/speech", page("speech.html"), methods=["GET"]),
+        Route("/vision", page("vision.html"), methods=["GET"]),
         Route("/admin", page("admin.html"), methods=["GET"]),
         Route("/vendor/{name}", vendor, methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),

@@ -24,6 +24,7 @@ default_llm = "qwen3-coder"
 #   mlx_lm       any mlx-community model, served by `mlx_lm.server` (OpenAI-compatible)      needs: python, model
 #   jevstyle     a Jev-Style decision model in MLX format                                    needs: python, model_dir  [precision]
 #   openjev_nli  an OpenJev NLI cross-encoder checkpoint                                     needs: python, root, subfolder
+#   mlx_vlm      a vision-language model on mlx-vlm (images in, text out)                   needs: python, model  [image_tokens] [max_tokens]
 #   command      anything else that speaks HTTP on a port; "{port}" is substituted           needs: command  [health] [kind]
 
 [backends.qwen3-coder]
@@ -177,3 +178,28 @@ python = "/opt/homebrew/opt/mlx-lm/libexec/bin/python"
 model = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
 est_mem_gb = 18
 ttl_s = 300
+
+# --- vision (phase 10) ------------------------------------------------------------------------------------------------------
+# The Gemma 4 and Qwen3.6 checkpoints above already contain their vision towers (mlx_lm ignores them); mlx-vlm serves the same
+# files with images, so nothing new is downloaded. A second process means a second copy of the weights: with the text backend
+# idle, starting the vision one evicts it (as with qwen3-coder-score). One venv: .venv-vlm (mlx-vlm, pypdfium2, python 3.13).
+# Memory: measured peaks 17.0 GB (Gemma, 1120 image tokens) and 21.5 GB (Qwen3.6) on 1080p stills. See PLAN.md "Vision".
+
+[backends.gemma-4-vision]
+adapter = "mlx_vlm"
+description = "Gemma 4 26B reading images: layout checks of film stills and screenshots, tables and figures in PDFs. The default vision model: in the spike it found more layout defects than Qwen3.6 at full resolution (see PLAN.md)."
+python = ".venv-vlm/bin/python"
+model = "lmstudio-community/gemma-4-26B-A4B-it-QAT-MLX-4bit"
+aliases = ["vision", "gemma-vision"]
+image_tokens = 1120         # 70..1120 per image; 1120 keeps 1080p small print legible
+est_mem_gb = 18
+ttl_s = 600
+
+[backends.qwen3-6-vision]
+adapter = "mlx_vlm"
+description = "Qwen3.6 35B reading images. A second opinion: in the spike it caught different layout defects than Gemma."
+python = ".venv-vlm/bin/python"
+model = "mlx-community/Qwen3.6-35B-A3B-4bit"
+aliases = ["qwen-vision"]
+est_mem_gb = 23
+ttl_s = 600

@@ -39,7 +39,7 @@ class GatewaySettings:
 class BackendSpec:
     name: str
     adapter: str
-    kind: str                      # llm | decision | nli | score | tts | stt | custom
+    kind: str                      # llm | vision | decision | nli | score | tts | stt | custom
     python: str | None
     est_mem_gb: float
     ttl_s: int
@@ -152,6 +152,12 @@ def _mlx_audio_stt(s: BackendSpec) -> list[str]:
             "--audio-dir", o["output_dir"], "--refs-dir", o["refs_dir"]]
 
 
+def _mlx_vlm(s: BackendSpec) -> list[str]:
+    o = s.options
+    return [s.python, str(BACKENDS_DIR / "vision_server.py"), "--model", o["model"], "--port", str(s.port),
+            "--image-tokens", str(o.get("image_tokens", 0)), "--max-tokens", str(o.get("max_tokens", 1024))]
+
+
 def _command(s: BackendSpec) -> list[str]:
     return [str(a).replace("{port}", str(s.port)) for a in s.options["command"]]
 
@@ -164,6 +170,7 @@ ADAPTERS: dict[str, Adapter] = {
     "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "ref_audio", "output_dir", "refs_dir"), "/health",
                              _mlx_audio_tts, ("output_dir", "refs_dir")),
     "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
+    "mlx_vlm": Adapter("vision", ("python", "model"), ("image_tokens", "max_tokens"), "/health", _mlx_vlm),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
 COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",
@@ -258,6 +265,11 @@ def parse(data: dict, base_dir: Path) -> Catalog:
                 opts[k] = str(_resolve(base_dir, opts[k]))
         if "voices" in opts and not (isinstance(opts["voices"], list) and all(isinstance(v, str) and v for v in opts["voices"])):
             raise CatalogError(f"backends.{name}.voices: expected a list of non-empty strings")
+        for k in ("image_tokens", "max_tokens"):
+            if k in opts:
+                _check_type(name, k, opts[k], (int,))
+                if opts[k] < 0:
+                    raise CatalogError(f"backends.{name}.{k} must be >= 0")
         if adapter == "command":
             cmd = opts["command"]
             if not (isinstance(cmd, list) and cmd and all(isinstance(a, str) for a in cmd)):

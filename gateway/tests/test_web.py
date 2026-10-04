@@ -137,7 +137,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     # ---- pages ----------------------------------------------------------------------------------------------------------
     async def test_pages_are_served_with_a_tight_policy(self):
-        for path, marker in (("/", 'id="model"'), ("/chat", 'id="model"'), ("/jev", 'id="magic"'), ("/speech", 'id="go"'), ("/admin", "/api/events")):
+        for path, marker in (("/", 'id="panels"'), ("/chat", 'id="model"'), ("/vision", 'id="drop"'), ("/jev", 'id="magic"'), ("/speech", 'id="go"'), ("/admin", "/api/events")):
             r = await self.http.get(path)
             self.assertEqual((r.status_code, r.headers["content-type"].split(";")[0]), (200, "text/html"), path)
             self.assertIn(marker, r.text)

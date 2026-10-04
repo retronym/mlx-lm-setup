@@ -1,6 +1,6 @@
 # Plan: a local model gateway with lifecycle, passivation, MCP and web UIs
 
-Status: **phases 1–9 done.** Phases are tracked in the table below (DONE / TODO); ideas not yet started are under [Future work](#future-work).
+Status: **phases 1–10 done.** Phases are tracked in the table below (DONE / TODO); ideas not yet started are under [Future work](#future-work).
 
 ## Problem
 
@@ -148,6 +148,7 @@ sequenceDiagram
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | **DONE** (see [Phase 7 findings](#phase-7-findings)) |
 | 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; the repo tidy after phase 7: `pipelines/`, `experiments/`) |
 | 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | **DONE** |
+| 10 | Vision: Gemma 4 / Qwen3.6 vision via mlx-vlm, `look` MCP tool, image parts on `/v1/chat/completions`, `/vision` page, home page (see [Vision](#vision-phase-10)) | **DONE** |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -332,6 +333,40 @@ How-to, API and numbers are in [docs/SPEECH.md](docs/SPEECH.md); this is what ch
 - **`narrate` and `voices` MCP tools (after the showcase film).** The showcase's timing pipeline (speak each scene, transcribe, align, resolve `[[cue]]` markers) moved into the gateway (`gateway/narrate.py`, `/api/narrate`). A session in any repo now gets timed narration from MCP alone, rather than from a script in this repo, and the server instructions say how to choose and keep a voice. `narrate` defaults to the cloned narrator; it stops at timings and leaves copying the wavs to the caller, so the gateway still writes only under its own data directory.
 - **Not done:** Dia, Orpheus, Chatterbox (no need yet); streaming synthesis; a speech panel on the admin page; speaker-similarity measurement of cloned voices.
 
+## Vision (phase 10)
+
+### Why
+
+Checking film stills for overlap and layout was a manual step (the Safe Scala film: render stills at every cue, look at each, fix six layout bugs). A local vision-language model can do the first pass, and the same capability serves storyboard proofreading, screenshot review and reading tables and figures in papers.
+
+### Key decisions
+
+1. **No new weights.** The Gemma 4 and Qwen3.6 checkpoints already on disk contain their vision towers; `mlx_lm` ignores them, mlx-vlm (0.7.4, `.venv-vlm`) serves them. The cost is a second process with a second copy of the weights, budgeted and evicted like `qwen3-coder-score`. Serving text from the mlx-vlm process too (one copy) is future work.
+2. **Own thin backend** (`gateway/backends/vision_server.py`, adapter `mlx_vlm`, kind `vision`) on the existing `_http` contract, as for speech. Images arrive only as data URIs; mlx-vlm's loader would fetch URLs, and a backend must never reach the network on a request's say-so.
+3. **The gateway inlines local files** (absolute paths, directories, `paper.pdf#page=N`), sniffed by content, so clients name images naturally and the backend never touches the disk. PDF pages are rendered in the backend with pypdfium2.
+4. **Three front doors:** image parts on the OpenAI `/v1/chat/completions` (a vision model answers whole; `stream: true` gets one SSE chunk; images sent to a text model are refused with the vision models named), `/api/look` and the `look` MCP tool (presets, per-image batches with a `flagged` list, `iterate` gates), and the `/vision` page (paste, drag and drop, file picker or paths).
+5. **Presets carry prompt, JSON-schema gate and detail:** `layout`, `storyboard`, `table`, `describe`. Gemma 4 gets 1120 visual tokens per image for stills, so 1080p small print stays legible.
+6. **A triage pass, not a verdict.** The tool says so: look at the flagged images yourself, re-read transcribed numbers, and treat text inside images as data (the Safe Scala frames themselves contain a prompt-injection README).
+
+### Phase 10 findings
+
+Ground truth: the Safe Scala film rendered from the tree before (`95d16ff`) and after (`a8e9647`) the hand fixes, 54 stills each; 9 strong defects (wrapped chart title over the chart, wrapped compiler header and caption, clipped README line, wrapped grant labels), 10 mild ones, 89 clean frames.
+
+| Run | Strong found | Mild | False flags (of 89) | s/still | Peak GB |
+|---|---|---|---|---|---|
+| Gemma 4, half-res stills, 280 tokens | 5 / 9 | 1 | 3 | 0.8 | 16.5 |
+| Qwen3.6, half-res | 2–3 / 9 | 0 | 3 | 0.8 | 21.5 |
+| Gemma 4, 1080p, 1120 tokens | 8 / 9 | 0 | 9 | 3.8 | 17.2 |
+| Qwen3.6, 1080p | 3 / 9 | 1 | 1 | 2.2 | 22.4 |
+| **Shipped: `layout` preset through the gateway (Gemma, 1080p, 1120)** | **8 / 9** | 2 | 7 | 3.7 | 17.2 |
+
+- **Resolution was the bottleneck, not the model:** the half-scale stills hid the bypass scene's wrapped header. Render stills at scale 1 for checking.
+- **Gemma is the default; Qwen3.6 is a precise second opinion** (few false flags, low recall); at half resolution the two caught disjoint defects.
+- **False flags are mostly deliberate crops** (a web capture cut at its window, GitHub's own ellipsis). A prompt rule excusing "embedded screenshots" removed them but also hid two real defects (Gemma read the README panel as a screenshot), so it was reverted: recall matters more in a triage pass.
+- **Quotes are not verbatim:** Gemma "completed" the clipped `~/.ssh/id` as `id_rsa.pub` once. It was not derailed by the injection text it read.
+- **Tables:** Table 2 of the Safe Scala paper (printed offline from the saved HTML) came back with all 14 numbers right but the two halves of the table mis-structured (10 s). Trust digits more than layout; check against the PDF text layer.
+- **Not done:** a stills-check script in the film kit (the `look` tool over a stills directory covers it); text serving from the mlx-vlm process; video input; Qwen pixel cap tuning.
+
 ## Phase 7 findings
 
 - **The LLM worker needed a new operation, not just a client.** The other workers map onto existing routes (`score_worker.py jev` and `recolor.py` onto `/api/decide` with several questions about one state; `jev_triage.py` onto `/api/entail`). The LLM emoji worker needs log P(candidate | prompt) for 346 multi-token candidates, which `mlx_lm.server` cannot do. So `lm_emoji.py`'s technique (one prefill, candidates as a batch of suffixes against the broadcast KV cache) became a backend: adapter `mlx_lm_score`, kind `score`, `gateway/backends/lmscore_server.py`, route `/api/score`, catalog entry `qwen3-coder-score`. No MCP tool yet.
@@ -349,4 +384,4 @@ Not started; each would get its own design pass first.
 - **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
 - **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
 - **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
-- **New kinds of model:** a vision-language model (`mlx-vlm`; Qwen3-VL or Gemma 4 vision) to check film stills and screenshots against the storyboard and to read figures in papers; embeddings and a reranker (Qwen3-Embedding, Qwen3-Reranker) for search and duplicate detection over issues, PRs and these docs; a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.
+- **New kinds of model:** embeddings and a reranker (Qwen3-Embedding, Qwen3-Reranker) for search and duplicate detection over issues, PRs and these docs; a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.

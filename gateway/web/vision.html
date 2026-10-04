@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Vision</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #c2410c; --hi: #fed7aa; --bad: #dc2626; --warn: #d97706; --good: #16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fb923c; --hi: #7c2d12; --bad: #f87171; --warn: #fbbf24; --good: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  textarea { width: 100%; resize: vertical; }
+  #prompt { min-height: 120px; font: 13px/1.45 ui-monospace, Menlo, monospace; }
+  #context { min-height: 54px; }
+  .row { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  small, .hint { color: var(--muted); font-size: 12px; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  /* the tray: paste, drop or pick */
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 14px; text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; }
+  #drop:hover, #drop:focus { border-color: var(--muted); outline: none; }
+  #drop kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .tray { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+  .item { position: relative; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .item img, .item .ph { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #0002; }
+  .item .ph { display: flex; align-items: center; justify-content: center; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); padding: 6px; word-break: break-all; text-align: center; }
+  .item .cap { font-size: 11px; color: var(--muted); padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; gap: 4px; align-items: center; }
+  .item .cap input { width: 46px; padding: 0 4px; font-size: 11px; }
+  .item .x { position: absolute; top: 4px; right: 4px; padding: 0 7px; font-size: 13px; line-height: 20px; border-radius: 10px; background: var(--panel); opacity: .85; }
+  #overlay { position: fixed; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 4px dashed var(--accent); display: none;
+             align-items: center; justify-content: center; font-size: 22px; font-weight: 650; color: var(--accent); z-index: 10; pointer-events: none; }
+  body.dragging #overlay { display: flex; }
+  /* results */
+  .res { display: grid; grid-template-columns: minmax(180px, 320px) 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .res:first-child { border-top: 0; }
+  .res img, .res .ph { width: 100%; border-radius: 6px; cursor: zoom-in; border: 1px solid var(--line); }
+  .res .ph { aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); cursor: default; word-break: break-all; padding: 6px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 650; padding: 0 8px; border-radius: 9px; border: 1px solid currentColor; margin-right: 6px; }
+  .badge.ok { color: var(--good); } .badge.bad { color: var(--bad); } .badge.err { color: var(--warn); } .badge.run { color: var(--muted); }
+  .issues { margin: 6px 0 0; padding-left: 18px; } .issues li { margin: 2px 0; }
+  .kind { font: 11px ui-monospace, Menlo, monospace; color: var(--accent); }
+  .where { font-weight: 600; }
+  details { margin-top: 6px; } summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0 0; max-height: 360px; overflow: auto; }
+  table.t { border-collapse: collapse; font-size: 13px; margin-top: 6px; } table.t td, table.t th { border: 1px solid var(--line); padding: 2px 8px; text-align: left; }
+  #summary { font-size: 13px; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; } dialog::backdrop { background: #000c; }
+  dialog img { max-width: 96vw; max-height: 96vh; display: block; }
+  @media (max-width: 640px) { .res { grid-template-columns: 1fr; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="overlay">Drop images or PDFs</div>
+<header>
+  <h1>Local Models · Vision</h1>
+  <a href="/">Home</a>
+  <a href="/chat">Chat</a>
+  <a href="/jev">Decide</a>
+  <a href="/speech">Speech</a>
+  <a href="/vision" style="color:var(--ink)">Vision</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <section>
+    <h2>Images <span class="hint" id="count" style="text-transform:none;letter-spacing:0;font-weight:400"></span>
+      <button id="clear" style="margin-left:auto;font-size:12px;padding:0 8px" hidden>clear</button></h2>
+    <div id="drop" tabindex="0">Paste (<kbd>⌘V</kbd>) a screenshot or copied image, drop files anywhere on the page, or click to choose.
+      PNG, JPEG, WebP, GIF, PDF.</div>
+    <input type="file" id="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" hidden>
+    <div class="row">
+      <input type="text" id="path" placeholder="or a local path the gateway can read: /abs/stills/  ·  /abs/shot.png  ·  /abs/paper.pdf#page=3" style="flex:1;min-width:240px">
+      <button id="addpath">Add path</button>
+    </div>
+    <div class="tray" id="tray"></div>
+  </section>
+  <section>
+    <h2>Ask</h2>
+    <div class="row" style="margin-top:0">
+      <label>preset <select id="preset"></select></label>
+      <label>model <select id="model"></select></label>
+      <label>detail <select id="tokens">
+        <option value="">preset default</option><option value="280">280 tokens/image</option><option value="560">560</option><option value="1120">1120 (small print)</option></select></label>
+      <label title="One request per image (a batch of stills); otherwise all images go in one request"><input type="checkbox" id="each"> one request per image</label>
+    </div>
+    <div class="row"><textarea id="prompt" spellcheck="false"></textarea></div>
+    <div class="row"><textarea id="context" placeholder="Context (optional): the storyboard text for this frame, what the figure should show, or what to look for"></textarea></div>
+    <div class="row">
+      <button class="primary" id="go">Look</button>
+      <button id="stop" hidden>Stop</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="hint" id="mdesc" style="margin-top:6px"></div>
+  </section>
+  <section id="results" hidden>
+    <h2>Results <span id="summary" style="text-transform:none;letter-spacing:0;font-weight:400"></span>
+      <button id="copy" style="margin-left:auto;font-size:12px;padding:0 8px">copy JSON</button></h2>
+    <div id="list"></div>
+  </section>
+</main>
+<dialog id="zoom"><img id="zoomimg" alt=""></dialog>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); for (const k of kids) if (k != null) e.append(k); return e; };
+let presets = {}, items = [], results = [], aborter = null, promptEdited = false;
+
+// ---- the tray ----------------------------------------------------------------------------------------------------------
+// item: {kind: "data", url, name, mime, page?} (pasted, dropped, picked) or {kind: "path", path} (read by the gateway)
+const ACCEPT = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
+function readFile(f) {
+  return new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(f); });
+}
+async function addFiles(files, how) {
+  let added = 0, skipped = [];
+  for (const f of files) {
+    if (!ACCEPT.has(f.type)) { skipped.push(f.name || f.type || "item"); continue; }
+    const url = await readFile(f);
+    items.push({ kind: "data", url, mime: f.type, name: f.name && f.name !== "image.png" ? f.name : `${how} ${new Date().toLocaleTimeString()}`, page: f.type === "application/pdf" ? 1 : undefined });
+    added++;
+  }
+  renderTray();
+  if (skipped.length) status(`skipped (not an image or PDF): ${skipped.join(", ")}`, "err");
+  else if (added) status("");
+}
+function addPath(p) {
+  p = p.trim();
+  if (!p) return;
+  if (!p.startsWith("/") && !p.startsWith("~") && !p.startsWith("file://")) { status("a path must be absolute (the gateway reads it)", "err"); return; }
+  items.push({ kind: "path", path: p });
+  renderTray();
+}
+function ref(it) {
+  if (it.kind === "path") return it.path;
+  return it.mime === "application/pdf" ? `${it.url}#page=${it.page || 1}` : it.url;
+}
+function thumb(it, cls) {
+  if (it.kind === "data" && it.mime !== "application/pdf") return el("img", { src: it.url, alt: it.name, className: cls || "" });
+  if (it.kind === "path") return el("div", { className: "ph", title: it.path }, el("div", {}, el("b", { textContent: it.path.split("/").filter(Boolean).pop() || it.path }),
+                                                                                     el("div", { textContent: "read by the gateway" })));
+  return el("div", { className: "ph", textContent: `PDF · ${it.name}` });
+}
+function renderTray() {
+  const tray = $("tray"); tray.replaceChildren();
+  items.forEach((it, i) => {
+    const cap = el("div", { className: "cap", title: it.kind === "path" ? it.path : it.name }, el("span", { textContent: it.kind === "path" ? it.path.split("/").filter(Boolean).pop() || it.path : it.name }));
+    if (it.mime === "application/pdf") {
+      const pg = el("input", { type: "number", min: 1, value: it.page, title: "page" });
+      pg.onchange = () => { it.page = Math.max(1, parseInt(pg.value) || 1); };
+      cap.prepend(el("span", { textContent: "p." }), pg);
+    }
+    const x = el("button", { className: "x", textContent: "×", title: "remove" });
+    x.onclick = () => { items.splice(i, 1); renderTray(); };
+    tray.append(el("div", { className: "item" }, thumb(it), cap, x));
+  });
+  $("count").textContent = items.length ? `${items.length}` : "";
+  $("clear").hidden = !items.length;
+}
+
+// paste: images (screenshots, copied images, copied files) anywhere; a pasted absolute path outside a text field becomes a path item
+document.addEventListener("paste", async e => {
+  const dt = e.clipboardData; if (!dt) return;
+  const files = [...dt.files].length ? [...dt.files] : [...dt.items].filter(i => i.kind === "file").map(i => i.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); await addFiles(files, "pasted"); return; }
+  const inField = ["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName);
+  const text = dt.getData("text/plain").trim();
+  if (!inField && text && /^(\/|~|file:\/\/)/.test(text) && !text.includes("\n")) { e.preventDefault(); addPath(text); }
+});
+// drag and drop: files anywhere on the page (from Finder or another page); a dropped file:// link or path becomes a path item
+let depth = 0;
+const hasFiles = e => [...(e.dataTransfer?.types || [])].some(t => t === "Files" || t === "text/uri-list" || t === "text/plain");
+document.addEventListener("dragenter", e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; document.body.classList.add("dragging"); });
+document.addEventListener("dragover", e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
+document.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; document.body.classList.remove("dragging"); } });
+document.addEventListener("drop", async e => {
+  e.preventDefault(); depth = 0; document.body.classList.remove("dragging");
+  const dt = e.dataTransfer;
+  if (dt.files.length) return addFiles([...dt.files], "dropped");
+  const uri = (dt.getData("text/uri-list") || dt.getData("text/plain")).trim().split("\n")[0];
+  if (/^(\/|file:\/\/)/.test(uri)) addPath(decodeURI(uri));
+  else if (uri.startsWith("data:image/")) { items.push({ kind: "data", url: uri, mime: uri.slice(5, uri.indexOf(";")), name: "dropped image" }); renderTray(); }
+  else if (uri) status("dropped a link: web images are not fetched; save it and drop the file", "err");
+});
+$("drop").onclick = () => $("file").click();
+$("drop").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } };
+$("file").onchange = async () => { await addFiles([...$("file").files], "picked"); $("file").value = ""; };
+$("addpath").onclick = () => { addPath($("path").value); $("path").value = ""; };
+$("path").onkeydown = e => { if (e.key === "Enter") $("addpath").click(); };
+$("clear").onclick = () => { items = []; renderTray(); };
+
+// ---- presets and models --------------------------------------------------------------------------------------------------
+function status(msg, cls = "") { $("status").textContent = msg; $("status").className = "status " + cls; }
+function applyPreset() {
+  const p = presets[$("preset").value];
+  if (p) { $("prompt").value = p.prompt.replace("{context}", ""); $("each").checked = !!p.each; promptEdited = false; }
+  else if (!promptEdited) $("prompt").value = "";
+}
+$("prompt").oninput = () => { promptEdited = true; };
+$("preset").onchange = applyPreset;
+$("model").onchange = () => { $("mdesc").textContent = $("model").selectedOptions[0]?.title || ""; };
+fetch("/api/vision/presets").then(r => r.json()).then(d => {
+  presets = d.presets;
+  for (const [k, p] of Object.entries(presets)) $("preset").append(el("option", { value: k, textContent: p.title }));
+  $("preset").append(el("option", { value: "", textContent: "Free prompt" }));
+  for (const m of d.models) $("model").append(el("option", { value: m.name, textContent: m.name, title: m.description }));
+  if (!d.models.length) status("no vision model in the catalog (gateway.toml)", "err");
+  $("model").onchange(); applyPreset();
+}).catch(e => status(`could not load presets: ${e}`, "err"));
+
+// ---- run -----------------------------------------------------------------------------------------------------------------
+function request(images) {
+  const name = $("preset").value, p = presets[name];
+  const edited = p && $("prompt").value.trim() !== p.prompt.replace("{context}", "").trim();
+  const body = { images, model: $("model").value || undefined, each: false };
+  if (p && !edited) body.preset = name;
+  else { body.prompt = $("prompt").value; if (p) body.gates = p.gates; }       // an edited preset keeps its gates
+  const ctx = $("context").value.trim(); if (ctx) body.context = ctx;
+  if ($("tokens").value) body.image_tokens = parseInt($("tokens").value);
+  else if (edited && p) body.image_tokens = p.image_tokens;
+  return body;
+}
+async function post(body) {
+  const r = await fetch("/api/look", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: aborter.signal });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+  return d;
+}
+function verdict(j) {
+  if (!j || typeof j !== "object") return null;
+  if (j.ok === true || j.matches === true) return "ok";
+  if (j.ok === false || j.matches === false) return "bad";
+  return null;
+}
+function renderJson(j) {
+  const box = el("div");
+  if (Array.isArray(j.issues) && j.issues.length) {
+    const ul = el("ul", { className: "issues" });
+    for (const i of j.issues) ul.append(el("li", {}, el("span", { className: "kind", textContent: (i.kind || "?") + " " }), el("span", { className: "where", textContent: i.where || "" }),
+                                           i.detail ? document.createTextNode(" — " + i.detail) : null));
+    box.append(ul);
+  }
+  for (const k of ["missing", "different", "extra"]) if (Array.isArray(j[k]) && j[k].length) {
+    box.append(el("div", { className: "hint", textContent: k }));
+    const ul = el("ul", { className: "issues" }); j[k].forEach(s => ul.append(el("li", { textContent: typeof s === "string" ? s : JSON.stringify(s) }))); box.append(ul);
+  }
+  if (Array.isArray(j.rows)) {
+    if (j.caption) box.append(el("div", { className: "hint", textContent: j.caption }));
+    const t = el("table", { className: "t" });
+    if (Array.isArray(j.columns)) t.append(el("tr", {}, ...j.columns.map(c => el("th", { textContent: String(c) }))));
+    for (const row of j.rows) t.append(el("tr", {}, ...(Array.isArray(row) ? row : Object.values(row || {})).map(c => el("td", { textContent: c == null ? "" : String(c) }))));
+    box.append(t);
+    if (j.notes) box.append(el("div", { className: "hint", textContent: j.notes }));
+  }
+  return box;
+}
+function renderResult(r) {
+  const v = r.error ? "err" : r.pending ? "run" : (verdict(r.json) || (r.passed === false ? "err" : null));
+  const label = { ok: "ok", bad: "flagged", err: r.error ? "error" : "unverified", run: "looking…" }[v];
+  const pic = r.items.length === 1 ? thumb(r.items[0]) : el("div", { className: "tray", style: "margin:0" }, ...r.items.map(it => thumb(it)));
+  pic.querySelectorAll?.("img").forEach(im => im.onclick = () => { $("zoomimg").src = im.src; $("zoom").showModal(); });
+  if (pic.tagName === "IMG") pic.onclick = () => { $("zoomimg").src = pic.src; $("zoom").showModal(); };
+  const meta = el("div", { className: "hint" }, label ? el("span", { className: "badge " + v, textContent: label }) : null,
+                  document.createTextNode([r.items.map(it => it.kind === "path" ? it.path.split("/").filter(Boolean).pop() : it.name).join(", "), r.secs != null ? `${r.secs} s` : "",
+                                           r.attempts && r.attempts.length > 1 ? `${r.attempts.length} attempts` : ""].filter(Boolean).join(" · ")));
+  const body = el("div", {}, meta);
+  if (r.error) body.append(el("div", { className: "status err", textContent: r.error }));
+  if (r.json) body.append(renderJson(r.json));
+  if (r.text != null) {
+    if (!r.json) body.append(el("pre", { textContent: r.text }));
+    else { const d = el("details", {}, el("summary", { textContent: "raw answer" }), el("pre", { textContent: r.text })); body.append(d); }
+  }
+  if (r.sub) for (const s of r.sub) body.append(renderResult(s));      // a directory: its images, one result each
+  return el("div", { className: "res" }, pic, body);
+}
+function renderResults() {
+  $("results").hidden = !results.length;
+  $("list").replaceChildren(...results.map(renderResult));
+  const all = results.flatMap(r => r.sub || [r]);
+  const n = k => all.filter(r => (r.error ? "err" : verdict(r.json)) === k).length;
+  $("summary").textContent = all.length ? `${all.length} · ${n("bad")} flagged · ${n("ok")} ok${n("err") ? ` · ${n("err")} errors` : ""}` : "";
+}
+$("go").onclick = async () => {
+  if (!items.length) return status("add an image first: paste, drop, pick or give a path", "err");
+  if (!$("prompt").value.trim()) return status("write a prompt or pick a preset", "err");
+  aborter = new AbortController();
+  $("go").disabled = true; $("stop").hidden = false;
+  const groups = $("each").checked ? items.map(it => [it]) : [items.slice()];
+  results = groups.map(g => ({ items: g, pending: true })); renderResults();
+  const t0 = performance.now();
+  try {
+    for (const [i, r] of results.entries()) {
+      status(`looking at ${i + 1} of ${results.length}… (the first call may start the model)`, "wait");
+      try {
+        const body = request(r.items.map(ref));
+        if ($("each").checked && r.items[0].kind === "path") body.each = true;    // a directory path expands on the gateway
+        const d = await post(body);
+        if (d.results && d.results.length === 1) Object.assign(r, d.results[0], { secs: d.secs });           // a single file, not a directory
+        else if (d.results) Object.assign(r, { sub: d.results.map(s => ({ ...s, items: [{ kind: "path", path: s.image }] })), secs: d.secs });
+        else Object.assign(r, d);
+      } catch (e) {
+        if (e.name === "AbortError") { r.error = "stopped"; break; }
+        r.error = e.message;
+      } finally { r.pending = false; renderResults(); }
+    }
+    status(`done in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  } finally {
+    results.forEach(r => { if (r.pending) { r.pending = false; r.error = "stopped"; } });
+    renderResults();
+    $("go").disabled = false; $("stop").hidden = true; aborter = null;
+  }
+};
+$("stop").onclick = () => aborter?.abort();
+$("copy").onclick = async () => {
+  const strip = r => ({ images: r.items?.map(it => it.kind === "path" ? it.path : it.name), json: r.json, text: r.text, error: r.error, secs: r.secs, sub: r.sub?.map(strip) });
+  await navigator.clipboard.writeText(JSON.stringify(results.map(strip), null, 2));
+  status("results copied");
+};
+$("zoom").onclick = () => $("zoom").close();
+</script>
+</body>
+</html>
