@@ -13,17 +13,36 @@ A decision guide for the gateway's catalog on this machine (M5 Pro, 48 GB, gatew
 | Code-focused work where its code training matters (and short context) | **`qwen3-coder`** | About 108 tok/s, 5 of 6 tasks, no thinking mode to manage. Weakest at long context (see below) |
 | Contexts above about 32K tokens | **`gemma-4-26b-a4b`** or **`qwen3.6-35b-a3b`** | KV cache is about 20 KiB per token vs 96 KiB for Qwen3-Coder: 2.7 to 2.9 GB at 128K instead of 12.9 GB |
 | A task that needs multi-step reasoning | **Gemma or Qwen3.6 with thinking on**, with a token cap, ideally through `iterate` with gates | Thinking costs about 18x more tokens and can run away (see Thinking) |
+| Read images, screenshots, film stills or PDF pages (layout checks, tables) | **`gemma-4-vision`** | Same Gemma weights through mlx-vlm: best recall on layout defects (8 of 9 at 1080p), 17 GB peak. `qwen3-6-vision` is a precise second opinion with fewer false flags and lower recall |
+| Speak: narration, TTS | **`kokoro`** for preset English voices; **`qwen3-tts-clone`** for a consistent distinctive narrator | Kokoro is 0.9 GB and about 30x real time. Design a voice once with `qwen3-tts-design` (`save_as_voice`), then narrate with the clone model |
+| Listen: transcripts, word timestamps | **`whisper`** (large-v3-turbo) | Word timings for captions, and a check that a generated clip says what it should |
+| Find passages in the Scala sources, docs and issues | **`scala-search`** (embedder + reranker) | About 3 GB, one process; returns passages with links, not answers |
 
 Only one LLM fits next to the others at a time under the 28 GB budget; the gateway evicts the least recently used idle backend.
 
 ## The flow
+
+First, which kind of model. Text generation has its own decision tree below.
 
 ```mermaid
 flowchart TD
   Q{"What is the job?"}
   Q -- "classify, route, tag, pick from a list" --> J["jevstyle-2b<br/>decision model · about 1 s · no generation"]
   Q -- "is this claim supported by this text?" --> N["openjev-4b NLI<br/>weak signal: use as a gate"]
-  Q -- "generate or transform text or code" --> C{"How much context?"}
+  Q -- "generate or transform text or code" --> G["see the text generation tree"]
+  Q -- "read an image or PDF page" --> V["gemma-4-vision<br/>second opinion: qwen3-6-vision"]
+  Q -- "speak" --> S{"Which voice?"}
+  S -- "preset English" --> K["kokoro"]
+  S -- "a distinctive, consistent narrator" --> TC["qwen3-tts-design once (save_as_voice)<br/>then qwen3-tts-clone"]
+  Q -- "transcribe, word timestamps" --> W["whisper"]
+  Q -- "find passages in Scala sources and issues" --> SE["scala-search"]
+```
+
+### Text generation
+
+```mermaid
+flowchart TD
+  C{"How much context?"}
   C -- "over about 32K tokens" --> L["gemma-4-26b-a4b or qwen3.6-35b-a3b<br/>KV 0.7 to 0.9 GB at 32K · 2.7 to 2.9 GB at 128K"]
   C -- "under about 32K" --> R{"Multi-step reasoning needed?"}
   R -- "yes" --> TH["Gemma or Qwen3.6 with thinking ON<br/>cap max_tokens · wrap in iterate with gates"]
