@@ -26,3 +26,23 @@ run = "pipelines/translate/make_capture_app.sh"
 [tasks.build]
 description = "Set up, test, and build the Translate capture app"
 depends = ["test", "translate-app"]
+
+[tasks.service-restart]
+description = "Relaunch the gateway launchd service (kickstart -k) and show status"
+run = "service/service.sh restart"
+
+[tasks.service-install]
+description = "Install/refresh the gateway launchd agent from this checkout (starts at login)"
+run = "service/service.sh install"
+
+[tasks.service-uninstall]
+description = "Stop the gateway and remove the launchd agent"
+run = "service/service.sh uninstall"
+
+[tasks.service-status]
+description = "Show launchd state and gateway /healthz"
+run = "service/service.sh status"
+
+[tasks.service-logs]
+description = "Tail the gateway log (arg: line count, default 50)"
+run = "service/service.sh logs {{arg(name='lines', default='50')}}"
