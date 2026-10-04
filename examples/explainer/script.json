@@ -1,0 +1,46 @@
+{
+  "title": "A private AI back end for one Mac",
+  "scenes": [
+    {
+      "id": "intro",
+      "heading": "A private AI back end for one Mac",
+      "bullets": ["Open-weight models on Apple silicon", "Started on demand, unloaded when idle", "Nothing leaves the machine"],
+      "narration": "This is a private AI back end for a single Mac. It runs open weight models on Apple silicon, starts them when they are needed, and unloads them when they go quiet. Nothing ever leaves the machine."
+    },
+    {
+      "id": "memory",
+      "heading": "Memory is the real constraint",
+      "bullets": ["A 30B coding model: about 17 GB", "A 35B general model: about 21 GB", "Together they do not fit in 48 GB", "So the gateway keeps a memory budget"],
+      "narration": "The binding constraint is memory, not speed. A thirty billion parameter coding model takes about seventeen gigabytes, and a general model takes twenty one. They do not fit together, so the gateway keeps a memory budget, and evicts the model that has been idle the longest."
+    },
+    {
+      "id": "architecture",
+      "heading": "One gateway, many backends",
+      "diagram": {
+        "boxes": [
+          {"id": "cc", "label": "Claude Code", "x": 60, "y": 150, "w": 250, "h": 70},
+          {"id": "br", "label": "Browser", "x": 60, "y": 290, "w": 250, "h": 70},
+          {"id": "gw", "label": "Gateway :8090", "x": 460, "y": 190, "w": 300, "h": 130, "accent": true},
+          {"id": "llm", "label": "Chat models", "x": 910, "y": 110, "w": 280, "h": 60},
+          {"id": "dec", "label": "Decision + NLI", "x": 910, "y": 190, "w": 280, "h": 60},
+          {"id": "tts", "label": "Speech out", "x": 910, "y": 270, "w": 280, "h": 60},
+          {"id": "stt", "label": "Speech in", "x": 910, "y": 350, "w": 280, "h": 60}
+        ],
+        "arrows": [["cc", "gw"], ["br", "gw"], ["gw", "llm"], ["gw", "dec"], ["gw", "tts"], ["gw", "stt"]]
+      },
+      "narration": "Claude Code and the browser talk to one gateway. Behind it sit the chat models, the decision and entailment models, and now speech in both directions. The gateway starts each one on first use, and stops it when it has been idle."
+    },
+    {
+      "id": "decide",
+      "heading": "Decide, don't generate",
+      "bullets": ["Score a closed list of options", "One forward pass, about one second", "Deterministic, with probabilities", "Classification, triage, routing"],
+      "narration": "The most useful trick is to decide instead of generate. A decision model scores every option in a single forward pass, and returns probabilities. It is fast, deterministic, and cheap, so most pipelines here are plain code that calls a scorer."
+    },
+    {
+      "id": "speech",
+      "heading": "And now it can talk",
+      "bullets": ["Kokoro: fast narration, many voices", "Qwen3-TTS: design or clone a voice", "Whisper: word timestamps for captions", "This video was narrated locally"],
+      "narration": "Phase nine adds speech. Kokoro gives fast, clean narration. Qwen three T T S can design a voice from a description, or clone one from a short clip. Whisper listens to the result, and returns word timestamps for the captions. This very video was narrated, captioned and assembled on this Mac."
+    }
+  ]
+}

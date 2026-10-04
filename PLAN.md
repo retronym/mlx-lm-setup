@@ -147,7 +147,7 @@ sequenceDiagram
 | 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
 | 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
 | 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; repo tidy deferred until after phase 7, which touches the workers) |
-| 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | TODO |
+| 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | **DONE** |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
 
@@ -303,13 +303,13 @@ The gateway only handles text in and text out. Local text-to-speech is what lets
 
 | Step | What | Status |
 |---|---|---|
-| 9a | Spike: install mlx-audio in `.venv-audio`, run Kokoro by hand, listen to the voices, measure real-time factor and resident memory. Decide go / no-go on quality | TODO |
-| 9b | `kokoro` catalog entry on the `command` adapter; `/v1/audio/speech` proxied by the gateway with lazy start (like `/v1/chat/completions`); `est_mem_gb` from the spike | TODO |
-| 9c | `speak` MCP tool: text, voice and optional speed in; wav path, duration and sample rate out. Long text split at sentence boundaries and concatenated, so callers do not manage model context limits | TODO |
-| 9d | Chat site: a play button on assistant messages and a voice picker, mostly as a cheap way to audition voices | TODO |
-| 9e | `qwen3-tts` backend: cloned voices from a reference clip kept in the repo's data directory, and voice design from a description. Extend `speak` with `voice` as a preset name, a reference clip or a description | TODO |
-| 9f | Word-level timestamps via `mlx-whisper` as a `transcribe` tool (or a `timestamps` option on `speak`), so a renderer can drive captions | TODO |
-| 9g | Worked example: a short explainer for this repo, built from a script by Claude, per-scene `speak` calls and an ffmpeg or Remotion render. Documented as a pipeline next to the emoji book and PR triage | TODO |
+| 9a | Spike: install mlx-audio in `.venv-audio`, run Kokoro by hand, listen to the voices, measure real-time factor and resident memory. Decide go / no-go on quality | **DONE** |
+| 9b | `kokoro` catalog entry on the `command` adapter; `/v1/audio/speech` proxied by the gateway with lazy start (like `/v1/chat/completions`); `est_mem_gb` from the spike | **DONE** |
+| 9c | `speak` MCP tool: text, voice and optional speed in; wav path, duration and sample rate out. Long text split at sentence boundaries and concatenated, so callers do not manage model context limits | **DONE** |
+| 9d | Chat site: a play button on assistant messages and a voice picker, mostly as a cheap way to audition voices | **DONE** |
+| 9e | `qwen3-tts` backend: cloned voices from a reference clip kept in the repo's data directory, and voice design from a description. Extend `speak` with `voice` as a preset name, a reference clip or a description | **DONE** |
+| 9f | Word-level timestamps via `mlx-whisper` as a `transcribe` tool (or a `timestamps` option on `speak`), so a renderer can drive captions | **DONE** |
+| 9g | Worked example: a short explainer for this repo, built from a script by Claude, per-scene `speak` calls and an ffmpeg or Remotion render. Documented as a pipeline next to the emoji book and PR triage | **DONE** |
 
 ### Open questions
 
@@ -317,3 +317,16 @@ The gateway only handles text in and text out. Local text-to-speech is what lets
 - **Where rendering lives.** Video assembly is a pipeline on top of the gateway (like the book pipeline), not part of it. 9g decides whether that is a script in this repo or a skill.
 - **Concurrency.** TTS runs on the same GPU as the LLMs, and the existing note on GPU contention applies: a narration batch running while a 30B model generates will slow both. One request at a time per backend is already enforced; cross-backend serialisation is not planned unless it proves a problem.
 - **Licences.** Kokoro and Qwen3-TTS are Apache 2.0. Cloning a real person's voice is a user decision, not something the gateway should police, but the docs should say that reference clips need consent.
+
+### Phase 9 findings
+
+How-to, API and numbers are in [docs/SPEECH.md](docs/SPEECH.md); this is what changed the plan.
+
+- **Own backend servers instead of `mlx_audio.server`.** `gateway/backends/tts_server.py` and `stt_server.py` use mlx-audio as a library behind the same thin-server contract as the other backends (listen only when ready; one request at a time). The stock server streams audio and gives no durations, and the whole point is timing. The `command` adapter was not enough once a catalog entry needed output and reference directories, so there are two small adapters (`mlx_audio_tts`, `mlx_audio_stt`) and two new backend kinds (`tts`, `stt`).
+- **9a verdict: go.** Kokoro warm is about 30x real time at 0.9 GB RSS; every clip round-trips through Whisper word for word. Not judged by ear (see SPEECH.md).
+- **Timing comes from the server, not the caller.** Text is split into sentence groups synthesised one by one, so any length works and each group's start/end comes back as `segments`; Whisper adds word timestamps (9f is the `transcribe` tool, plus `/api/transcribe`). Clips are content-addressed, so re-running a pipeline is free until the script changes.
+- **A designed voice is not a stable voice.** Qwen3-TTS voice design draws a new voice each call; `save_as_voice` keeps one as a named reference clip and the clone model narrates with it. This was not in the plan and is the key to consistent multi-scene narration.
+- **Qwen3-TTS is three models** (design, clone, preset "CustomVoice"); design and clone are in the catalog, the preset flavour is not (Kokoro covers presets).
+- **Dependencies bite:** `mlx-audio` leaves `uvicorn`, `misaki`, `spacy` and a spaCy model to the caller, and misaki installs the model with `pip`, which a `uv` venv lacks (install `pip` into the venv).
+- **Decisions on the open questions:** rendering stays outside the gateway (the example is a script in `examples/explainer/`); GPU contention is unmanaged beyond the existing one-request-per-backend rule and has not been a problem; the docs say reference clips need consent.
+- **Not done:** Dia, Orpheus, Chatterbox (no need yet); streaming synthesis; a speech panel on the admin page; speaker-similarity measurement of cloned voices.

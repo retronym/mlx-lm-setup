@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np                                                  # noqa: E402
 import soundfile as sf                                              # noqa: E402
 from _http import Raw, serve                                        # noqa: E402
+from speechtext import NAME_OK, groups                              # noqa: E402
 
 t0 = time.time()
 from mlx_audio.tts.utils import load_model                          # noqa: E402
@@ -38,28 +39,6 @@ model = load_model(a.model)
 SR = int(model.sample_rate)
 print(f"model loaded in {time.time() - t0:.1f}s, sample rate {SR}", flush=True)
 os.makedirs(a.output_dir, exist_ok=True)
-
-SENTENCE = re.compile(r"(?<=[.!?…])[\"')\]]*\s+|\n+")
-NAME_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
-
-
-def groups(text: str, max_chars: int) -> list[tuple[str, bool]]:
-    """Split into (group text, starts_new_paragraph). Sentences are packed up to max_chars; a long sentence stands alone."""
-    out: list[tuple[str, bool]] = []
-    for pi, para in enumerate(re.split(r"\n\s*\n", text.strip())):
-        cur = ""
-        first = True
-        for sent in (s.strip() for s in SENTENCE.split(para)):
-            if not sent:
-                continue
-            if cur and len(cur) + 1 + len(sent) > max_chars:
-                out.append((cur, pi > 0 and first)); first = False; cur = sent
-            else:
-                cur = f"{cur} {sent}".strip()
-        if cur:
-            out.append((cur, pi > 0 and first))
-    return out
-
 
 def ref_paths(name: str) -> tuple[str, str | None]:
     if not NAME_OK.match(name):

@@ -9,6 +9,7 @@
 - **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks). Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
 - **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide` and `/api/entail`.
 - **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
+- **Speak and listen** (`speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps, so Claude can narrate and caption a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
 - **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland* and an NLI triage of scala/scala pull requests, both built as ordinary code around the scorers (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
@@ -31,6 +32,8 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 | Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default (thinking switched off): passed all six benchmark tasks, smallest memory |
 | NLI cross-encoder | OpenJev 4B v5 (Qwen3.5-4B fine-tune; also 2B, 0.8B) | PyTorch on MPS, `.venv-jev` (python 3.12) | ~9 GB | claim verification, PR triage. Slow: no fast kernels for Qwen3.5's linear-attention layers on MPS |
 | Decision model | Jev-Style 2B v3 (Qwen3.5-2B fine-tune), 8-bit | MLX, `.venv-mlxjev` (versions pinned, the runtime refuses others) | ~2 GB weights | emoji, colour, mood, sentiment: one pass scores hundreds of options |
+| Speech out | Kokoro-82M; Qwen3-TTS 1.7B (voice design, voice clone), 8-bit | `mlx-audio`, `.venv-audio` (python 3.13) | 0.9 GB; 3.7 GB each | narration for video explainers; see [docs/SPEECH.md](docs/SPEECH.md) |
+| Speech in | Whisper large-v3-turbo, fp16 | `mlx-audio`, `.venv-audio` | 2 GB | transcripts with word timestamps (captions) |
 | Encoder (alternative) | open-jev DeBERTa-v3-large | PyTorch on MPS, `.venv-jev` | 1.7 GB | fast baseline; 512-token cap |
 
 Which LLM to pick for which job, with measurements: **[docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md)**. Weights live under `models/` (git-ignored) or the Hugging Face cache. The 4B NLI and the DeBERTa model are not currently used by any pipeline, only by benchmarks and the triage demo.
@@ -131,6 +134,10 @@ python3 dashboard_server.py &                      # http://127.0.0.1:8766/
 .venv-jev/bin/python jev_triage.py --fresh
 ```
 
+### Narrated video explainer
+
+`examples/explainer/build.py` builds an MP4 with narration, captions and timed slides from a JSON script, entirely through the gateway's speech API; see [docs/SPEECH.md](docs/SPEECH.md).
+
 ### Chat and MCP
 
 ```bash
@@ -158,6 +165,8 @@ The standalone server above is independent of the gateway. Claude Code now talks
 | `decide` | typed decisions with probabilities from the decision model: one `question` + `options`, or several `questions` about one state | no |
 | `entail` | NLI: is each hypothesis entailed by / contradicted by / neutral to a premise | no |
 | `iterate` | `chat` with retries until the answer passes gates: JSON (+schema), regex, contains, length, NLI faithfulness to a source text; optional escalation model for the last try; no shell gate | no |
+| `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
+| `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
 | `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
 | `start_backend`, `stop_backend`, `set_backend_policy` | change what is running; TTL and pin | **yes** |
 
@@ -190,10 +199,11 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `bench_*.py`, `fuse_*.py`, `bench_all.sh`, `run_fused.sh` | benchmarks and fusion experiments (`bench_llm_compare.py`: head-to-head of the catalog LLMs, one model per process) |
 | `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
 | `docs/FINDINGS.md` | long-form log of what was tried |
+| `docs/SPEECH.md`, `examples/explainer/` | speech models, voices, API, and the narrated-video example |
 | `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
 | `gateway.toml`, `gateway/` (`web/` holds the chat and admin sites) | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-6 done: catalog, supervisor, HTTP front door, MCP tools, chat and admin sites, memory budget) |
 
-Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
+Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
 
 ## Gateway (in progress)
 
