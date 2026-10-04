@@ -1,0 +1,178 @@
+"""MCP tools over real streamable HTTP, with the SDK's own client against a real gateway (fake backends)."""
+import asyncio, contextlib, json, socket, tempfile, unittest
+from pathlib import Path
+
+import uvicorn
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import TextContent
+
+from gateway.app import create_app
+from gateway.supervisor import State, Supervisor
+from gateway.tests.test_supervisor import catalog, until
+
+TOKEN = "test-token-123"
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class McpTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.port = free_port()
+        self.cat = catalog({
+            "llm": {"kind": "llm", "est_mem_gb": 6, "flags": ["--ready-delay", "0.3"]},
+            "llm2": {"kind": "llm", "est_mem_gb": 6},
+            "dec": {"kind": "decision", "est_mem_gb": 1},
+            "nli": {"kind": "nli", "est_mem_gb": 1},
+        }, port=self.port, default_llm="llm", memory_budget_gb=10, room_timeout_s=0.4)
+        self.sup = Supervisor(self.cat, state_dir=Path(self.tmp.name) / "state", reap_interval=0.05, health_interval=0.05, grace_s=0.5)
+        app = create_app(self.cat, supervisor=self.sup, token=TOKEN)
+        self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="warning", lifespan="on"))
+        self.task = asyncio.create_task(self.server.serve())
+        while not self.server.started:
+            await asyncio.sleep(0.02)
+        self.url = f"http://127.0.0.1:{self.port}/mcp"
+
+    async def asyncTearDown(self):
+        self.server.should_exit = True
+        await self.task
+        await self.sup.shutdown()
+        self.tmp.cleanup()
+
+    @contextlib.asynccontextmanager
+    async def client(self, token=None):
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        async with streamablehttp_client(self.url, headers=headers) as (r, w, _):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                yield s
+
+    async def call(self, session, tool, **args):
+        res = await session.call_tool(tool, args)
+        text = "".join(c.text for c in res.content if isinstance(c, TextContent))
+        if res.structuredContent is not None:
+            return res.isError, res.structuredContent, text
+        try:
+            return res.isError, (None if res.isError else json.loads(text)), text
+        except json.JSONDecodeError:
+            return res.isError, text, text
+
+    # ------------------------------------------------------------------------------------------------------------
+    async def test_tools_are_listed_with_descriptions_and_instructions(self):
+        async with self.client() as s:
+            tools = {t.name: t for t in (await s.list_tools()).tools}
+            self.assertEqual(set(tools), {"backends_status", "chat", "decide", "entail", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertTrue(all(t.description for t in tools.values()))
+            self.assertIn("token", tools["start_backend"].description)
+            init = await s.initialize()
+            self.assertIn("Local model gateway", init.instructions)
+
+    async def test_status_is_open_and_does_not_start_anything(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "backends_status")
+            self.assertFalse(err)
+            self.assertEqual([b["name"] for b in data["backends"]], ["llm", "llm2", "dec", "nli"])
+            self.assertEqual(data["memory"]["budget_gb"], 10)
+            self.assertEqual(data["default_llm"], "llm")
+            self.assertIn("free_pct", data["system"])
+        self.assertEqual(self.sup.rt["llm"].starts, 0)
+
+    async def test_chat(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "chat", message="hello", system="be brief")
+            self.assertFalse(err)
+            self.assertEqual((data["text"], data["model"]), ("echo:2", "llm"))        # system + user message reached the backend
+            self.assertGreater(data["cold_start_s"], 0.2)                              # lazily started
+            err, data, _ = await self.call(s, "chat", messages=[{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}, {"role": "user", "content": "c"}])
+            self.assertEqual((data["text"], data["cold_start_s"]), ("echo:3", 0.0))     # warm now
+            for args in ({}, {"message": "x", "messages": [{"role": "user", "content": "y"}]}, {"messages": []}):
+                err, _, text = await self.call(s, "chat", **args)
+                self.assertTrue(err)
+                self.assertIn("invalid_arguments", text)
+            err, _, text = await self.call(s, "chat", message="x", model="dec")        # wrong kind
+            self.assertTrue(err)
+            self.assertIn("wrong_model_kind", text)
+            err, _, text = await self.call(s, "chat", message="x", model="nope")
+            self.assertIn("model_not_found", text)
+
+    async def test_decide_single_multi_and_top_k(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "decide", state="s", question="q", options=["a", "b", "c", "d"], top_k=2)
+            self.assertFalse(err)
+            r = data["results"][0]
+            self.assertEqual((data["model"], r["answer"], len(r["top"])), ("dec", "a", 2))
+            self.assertEqual(r["top"][0], ["a", 0.6])
+            err, data, _ = await self.call(s, "decide", state="s", question="q", options=["a", "b", "c", "d"], top_k=0)
+            self.assertEqual(len(data["results"][0]["top"]), 4)                          # 0 = all
+            err, data, _ = await self.call(s, "decide", state="s", questions=[
+                {"t": "choice", "ins": "i", "crit": {"x": None, "y": None}}, {"t": "noul", "ins": "j"}])
+            self.assertEqual([x["answer"] for x in data["results"]], ["x", "false"])
+            for args in ({"state": "s"}, {"state": "s", "question": "q", "questions": []}):
+                err, _, text = await self.call(s, "decide", **args)
+                self.assertTrue(err)
+                self.assertIn("invalid_arguments", text)
+
+    async def test_entail(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "entail", premise="p", hypotheses=["a", "b"])
+            self.assertFalse(err)
+            self.assertEqual([r["label"] for r in data["results"]], ["entailment", "entailment"])
+            self.assertEqual(data["results"][0]["entailment"], 1.0)
+            err, _, text = await self.call(s, "entail", premise="p", hypotheses=[])
+            self.assertTrue(err)
+
+    async def test_lifecycle_tools_require_the_token(self):
+        for tool, args in (("start_backend", {"name": "llm"}), ("stop_backend", {"name": "llm"}), ("set_backend_policy", {"name": "llm", "ttl_s": 5})):
+            async with self.client() as s:                                               # no token
+                err, _, text = await self.call(s, tool, **args)
+                self.assertTrue(err)
+                self.assertIn("unauthorized", text)
+            async with self.client(token="wrong") as s:
+                err, _, text = await self.call(s, tool, **args)
+                self.assertIn("unauthorized", text)
+        self.assertEqual((self.sup.rt["llm"].starts, self.sup.rt["llm"].ttl_s), (0, 600.0))     # nothing changed
+
+    async def test_lifecycle_with_the_token(self):
+        async with self.client(token=TOKEN) as s:
+            err, data, _ = await self.call(s, "start_backend", name="llm")
+            self.assertFalse(err)
+            self.assertEqual((data["name"], data["state"]), ("llm", "ready"))
+            err, data, _ = await self.call(s, "set_backend_policy", name="llm", ttl_s=42, pinned=True)
+            self.assertEqual((data["ttl_s"], data["pinned"]), (42.0, True))
+            err, _, text = await self.call(s, "set_backend_policy", name="llm", ttl_s=-1)
+            self.assertTrue(err)
+            err, data, _ = await self.call(s, "set_backend_policy", name="llm", pinned=False)
+            err, data, _ = await self.call(s, "stop_backend", name="llm")
+            self.assertEqual(data["state"], "stopped")
+            err, _, text = await self.call(s, "start_backend", name="nope")
+            self.assertTrue(err)
+            self.assertIn("model_not_found", text)
+
+    async def test_start_that_cannot_fit_reports_why_and_pinning_respects_the_budget(self):
+        async with self.client(token=TOKEN) as s:
+            await self.call(s, "start_backend", name="llm")                              # 6 of 10 GB
+            await self.call(s, "set_backend_policy", name="llm", pinned=True)
+            err, _, text = await self.call(s, "start_backend", name="llm2")              # 6 more would not fit, llm is pinned
+            self.assertTrue(err)
+            self.assertIn("insufficient_memory", text)
+            self.assertIn("llm (pinned)", text)
+            err, _, text = await self.call(s, "set_backend_policy", name="llm2", pinned=True)   # 12 GB pinned > 10 GB budget
+            self.assertTrue(err)
+            self.assertIn("more than the 10 GB budget", text)
+
+    async def test_host_policy_covers_the_mcp_endpoint(self):
+        import httpx
+        async with httpx.AsyncClient(trust_env=False) as c:
+            r = await c.post(self.url, json={}, headers={"Host": "evil.example", "Accept": "application/json, text/event-stream"})
+            self.assertEqual(r.status_code, 421)
+            r = await c.post(self.url, json={}, headers={"Origin": "https://evil.example", "Accept": "application/json, text/event-stream"})
+            self.assertEqual(r.status_code, 403)
+
+
+if __name__ == "__main__":
+    unittest.main()

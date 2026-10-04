@@ -114,10 +114,10 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_decide_and_entail_route_by_kind(self):
         r = await self.http.post("/api/decide", json={"state": "s", "question": "q", "options": ["a", "b"]})
-        self.assertEqual((r.status_code, r.json()["answer"], r.headers["x-gateway-backend"]), (200, "x", "dec"))
+        self.assertEqual((r.status_code, r.json()["answer"], r.headers["x-gateway-backend"]), (200, "a", "dec"))
         self.assertEqual(r.json()["echo"]["options"], ["a", "b"])                     # body passed through untouched
         r = await self.http.post("/api/decide", json={"model": "dec", "state": "s", "questions": [{"t": "noul", "ins": "i"}] * 2})
-        self.assertEqual([x["answer"] for x in r.json()], ["y", "y"])                 # "questions" -> /score_many
+        self.assertEqual([x["answer"] for x in r.json()], ["false", "false"])          # "questions" -> /score_many
         r = await self.http.post("/api/decide", json={"state": "s", "question": "bad"})
         self.assertEqual((r.status_code, r.json()["error"]), (400, "QuestionError: bad"))   # backend 4xx passed through
         r = await self.http.post("/api/entail", json={"premise": "p", "hypotheses": ["a", "b", "c"]})

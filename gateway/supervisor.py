@@ -93,8 +93,7 @@ class Supervisor:
     def __init__(self, catalog: Catalog, state_dir: str | Path | None = None, *, reap_interval: float = 1.0,
                  health_interval: float = 0.25, grace_s: float = 10.0, clock=time.monotonic, memory_probe=None):
         self.catalog = catalog
-        sd = state_dir or catalog.gateway.state_dir or (catalog.base_dir / ".gateway")
-        self.state_dir = Path(sd)
+        self.state_dir = Path(state_dir) if state_dir else catalog.state_path()
         (self.state_dir / "logs").mkdir(parents=True, exist_ok=True)
         (self.state_dir / "pids").mkdir(parents=True, exist_ok=True)
         self.reap_interval, self.health_interval, self.grace_s, self.clock = reap_interval, health_interval, grace_s, clock

@@ -1,4 +1,6 @@
-"""Run the gateway:  python -m gateway [--catalog gateway.toml]   (use the gateway venv, see README)"""
+"""Run the gateway:  python -m gateway [serve] [--catalog gateway.toml]
+Helpers:           python -m gateway token   print the token needed by start/stop/policy tools (creates it on first use)
+                   python -m gateway url     print the MCP endpoint URL"""
 import argparse, asyncio, contextlib, os, signal, sys, time
 
 import uvicorn
@@ -10,10 +12,18 @@ from .supervisor import Supervisor
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="python -m gateway")
+    ap.add_argument("command", nargs="?", default="serve", choices=["serve", "token", "url"])
     ap.add_argument("--catalog", default=os.environ.get("GATEWAY_CATALOG", "gateway.toml"))
     ap.add_argument("--log-level", default="info")
     a = ap.parse_args(argv)
     cat = cat_mod.load(a.catalog)
+    if a.command == "token":
+        from . import auth
+        print(auth.load_or_create(cat.state_path() / "token"))
+        return
+    if a.command == "url":
+        print(f"http://{cat.gateway.host}:{cat.gateway.port}/mcp")
+        return
 
     sup_holder = {}
 

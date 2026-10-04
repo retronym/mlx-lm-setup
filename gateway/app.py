@@ -15,19 +15,15 @@ import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 
+from . import auth
 from .catalog import Catalog
-from .supervisor import BackendUnavailable, GatewayError, InsufficientMemory, StartFailed, State, Supervisor, UnknownBackend
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, resolve as core_resolve
+from .mcp_server import build_mcp
+from .supervisor import Supervisor
 
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]", "::1"}
-COLD_HEADER_THRESHOLD_S = 0.05
-
-
-class ApiError(Exception):
-    def __init__(self, status: int, kind: str, message: str, headers: dict | None = None):
-        super().__init__(message)
-        self.status, self.kind, self.message, self.headers = status, kind, message, headers or {}
 
 
 def error_response(status: int, kind: str, message: str, headers: dict | None = None) -> JSONResponse:
@@ -89,7 +85,8 @@ class LocalOnly:
 
 
 # ---- the app ------------------------------------------------------------------------------------------------------------
-def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_timeout_s: float = 600.0) -> Starlette:
+def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_timeout_s: float = 600.0, token: str | None = None) -> Starlette:
+    token = token or auth.load_or_create((supervisor.state_dir if supervisor else catalog.state_path()) / "token")
     state: dict = {"sup": supervisor, "client": None, "owns_sup": supervisor is None}
 
     def sup() -> Supervisor:
@@ -106,7 +103,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             state["sup"] = Supervisor(catalog)
         await sup().start_background()
         try:
-            yield
+            async with mcp.session_manager.run():                    # MCP streamable-HTTP sessions live as long as the app
+                yield
         finally:
             if state["owns_sup"]:
                 await sup().shutdown()
@@ -115,12 +113,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
                 state["client"] = None
 
     def resolve(model: str | None, kind: str):
-        try:
-            return catalog.find(model, kind)
-        except KeyError as e:
-            raise ApiError(404, "model_not_found", str(e.args[0])) from None
-        except ValueError as e:
-            raise ApiError(400, "wrong_model_kind", str(e)) from None
+        return core_resolve(catalog, model, kind)
 
     async def read_json(request: Request) -> dict:
         try:
@@ -130,19 +123,6 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         if not isinstance(body, dict):
             raise ApiError(400, "invalid_json", "request body must be a JSON object")
         return body
-
-    def map_errors(e: Exception) -> ApiError:
-        if isinstance(e, BackendUnavailable):
-            return ApiError(503, "backend_unavailable", str(e), {"Retry-After": "5"})
-        if isinstance(e, InsufficientMemory):
-            return ApiError(503, "insufficient_memory", str(e), {"Retry-After": "10"})
-        if isinstance(e, StartFailed):
-            return ApiError(503, "backend_start_failed", str(e))
-        if isinstance(e, UnknownBackend):
-            return ApiError(404, "model_not_found", str(e))
-        if isinstance(e, httpx.HTTPError):
-            return ApiError(502, "backend_error", f"backend request failed: {type(e).__name__}: {e}")
-        return ApiError(500, "gateway_error", f"{type(e).__name__}: {e}")
 
     def meta_headers(name: str, cold_s: float) -> dict:
         h = {"X-Gateway-Backend": name}
@@ -232,6 +212,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/backends", handler(backends), methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),
     ]
+    mcp = build_mcp(catalog, sup, client, token)
+    routes.append(Mount("/", app=mcp.streamable_http_app()))       # /mcp, after our own routes
     app = Starlette(routes=routes, lifespan=lifespan)
     wrapped = LocalOnly(app, catalog.gateway.port)
     wrapped.starlette = app                                         # for tests / later route additions

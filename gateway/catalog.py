@@ -60,6 +60,10 @@ class Catalog:
     backends: dict[str, BackendSpec]
     base_dir: Path
 
+    def state_path(self) -> Path:
+        """Where logs, pidfiles and the token live."""
+        return Path(self.gateway.state_dir).expanduser() if self.gateway.state_dir else self.base_dir / ".gateway"
+
     def total_ports(self) -> list[int]:
         return [b.port for b in self.backends.values()]
 

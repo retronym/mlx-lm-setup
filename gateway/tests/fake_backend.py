@@ -56,9 +56,16 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/decide":
             if req.get("question") == "bad":
                 return self._err(400, {"error": "QuestionError: bad"})
-            return self._json({"answer": "x", "echo": req})
+            opts = req.get("options") or ["x"]
+            names = list(opts)
+            probs = {n: (0.6 if i == 0 else 0.4 / max(1, len(names) - 1)) for i, n in enumerate(names)}
+            return self._json({"answer": names[0], "top_probability": probs[names[0]], "probabilities": probs, "echo": req})
         if self.path == "/score_many":
-            return self._json([{"answer": "y", "q": q} for q in req["questions"]])
+            def one(q):
+                crit = q.get("crit") or {"false": None, "true": None}
+                names = list(crit) if isinstance(crit, dict) else [str(i) for i in range(len(crit))]
+                return {"answer": names[0], "top_probability": 0.7, "probabilities": {n: (0.7 if i == 0 else 0.3 / max(1, len(names) - 1)) for i, n in enumerate(names)}}
+            return self._json([one(q) for q in req["questions"]])
         if self.path == "/entail":
             return self._json({"labels": ["contradiction", "entailment", "neutral"], "probs": [[0, 1, 0] for _ in req["hypotheses"]]})
         t0 = time.time(); time.sleep(req.get("sleep", 0))
