@@ -31,7 +31,7 @@ The through-line is a **deck of real job cards**: the small requests that come u
 ## Other devices
 
 1. **The plan rail.** After the why, three chapter titles appear along the top edge: *One front door · Decide, don't generate · Trust, but check.* They stay there for the rest of the film, with the current chapter lit, the finished ones ticked and the next one dim. Every chapter starts with its title sliding from the rail into the frame and ends by sliding back. The viewer always knows where they are and what's next.
-2. **The ledger.** A small, quiet counter in the corner: *calls handled on this Mac*, *data sent off the machine*. It ticks as each demo runs. At the end it shows the real totals for making this film, read from the gateway's request counters, and honestly lists the one thing that did leave: the script, written with Claude. That honest exception *is* the division of labour.
+2. **The ledger.** A small, quiet counter in the corner: *jobs done on this Mac* and *jobs done by Claude*. It ticks as each demo runs. At the end it shows the real split for making this film (see "Production split"), read from the gateway's request counters and the build log. The Claude column is not hidden, because it *is* the division of labour.
 3. **Bookend with a promise.** The first line says the voice was made on this Mac and that we'll come back to it; the last act keeps that promise.
 4. **Show the mechanism.** As in v1: decide is animated as the real computation on a real phrase, and the gates as a real retry.
 5. **Honesty beats.** Local models are smaller and are confidently wrong sometimes (the invented IndexError, and the NLI model agreeing with it). Act 1 says it, act 3 deals with it.
@@ -58,7 +58,7 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
 ### 0. Hook (0:00–0:12)
 
 - **Visual:** black. The narrator's waveform draws itself as the first sentence is spoken. The ledger fades in at the bottom right: `on this Mac: 0 · sent elsewhere: 0`. It ticks to 1 as the sentence ends.
-- **Narration:** "This voice wasn't made in a data centre. [[ledger]] It was made on this Mac, like everything else in this film. We'll come back to how. First, why you'd want that."
+- **Narration:** "This voice wasn't made in a data centre. [[ledger]] Neither was the first draft of what it's saying, or the fact-check. Both happened on this Mac. We'll come back to how. First, why you'd want that."
 
 ### 1. Why local (0:12–1:05)
 
@@ -123,10 +123,27 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
   - A one-line voice description becomes `narrator.wav`, which fans out to every scene's clip.
   - "As promised: [[voice]] this voice was designed from one sentence of description, then cloned so every scene sounds the same, and Whisper timed every word you've seen."
 - **The ledger (3:18–3:30):**
-  - The ledger grows to full frame with the real totals for this film: narration calls, transcriptions and decisions handled on the Mac (gateway counters, reset before the build).
-  - Sent elsewhere: **one thing**, the script, written with Claude.
-  - The deck is empty. Fade to the repo name.
-  - "Making this film took [[total]] some hundreds of local calls. The only thing that left the machine was the script, and that was the point."
+  - The film's own production jobs deal out as a second deck: draft each scene, fact-check each sentence, voice each scene, pick the best take, time the words, sort the cards, design the storyboard, write the renderer, edit the script.
+  - They route exactly as the deck in 3c did. Most go down to the Mac; design, code and the final edit go up to Claude.
+  - The ledger grows to full frame with the real counts: calls per local model from the gateway's counters (reset before the build), and how many drafted lines Claude kept as written and how many it edited.
+  - Fade to the repo name.
+  - "Making this film was a stack of jobs too. [[total]] The drafts, the fact-checks, the voice and the timing ran on this Mac. The storyboard, the code and the final edit were Claude's. Same split, same reasons."
+
+## Production split: what the local models do in making the film
+
+The hook and the payoff claim local work, so the build has to earn it. These jobs move to the local models. Each was tried on 2026-10-04 before writing this:
+
+| Production job | Local model | Tried | Result |
+|---|---|---|---|
+| Voice each scene, consistently | Qwen3-TTS clone (`narrate`) | built (v1) | works; the same narrator in every scene |
+| Time every word; cue times; captions | Whisper (`narrate`) | built (v1) | works |
+| Pronunciation check | Whisper (`transcript_differs`) | built | flags real differences; spacing and number formatting are filtered or expected |
+| **First draft of each scene's narration**, from the storyboard's fact list for that scene | Gemma 4 via `iterate`: gates on length, no digits, no list markup, NLI faithfulness to the fact list | 1 scene | passed on the first attempt in 6 s; usable but plain, e.g. "port eight zero nine zero". Claude edits; the ledger counts lines kept vs edited |
+| **Fact-check every narration sentence** against README, FINDINGS and PLAN | OpenJev 4B (`entail`) | 6 claims | 4 true claims entailed (≥ 0.99); an invented telemetry claim came back neutral (flagged); **an inflated number ("three thousand PRs") was wrongly entailed at 0.975**. So the NLI model checks the wording, and **numbers are checked by code** against the data files, never by the model |
+| **Sort the job cards on screen** (generate / decide / check / judgment) | Jev-Style 2B (`decide`) | 6 cards | 5 of 6 right. It filed "does this summary match the code?" as generate (check came second at 0.19). The film shows the live result, miss included, and says so: a decision model is good, not perfect |
+| **Pick the best take** per scene: 3 fresh takes, keep the one Whisper transcribes most faithfully and that fits the scene's target length | Qwen3-TTS + Whisper | not yet | the cost argument made literal: re-takes are free. Test in the build, and keep it only if the takes really differ |
+
+Stays with Claude: the storyboard and its structure, the Remotion code, the final edit of the narration, and reviewing rendered frames. These are the judgment cards from act 3c.
 
 ## How it changes the build
 
@@ -143,9 +160,13 @@ Narration is a first draft at about 150 words a minute. `[[cue]]` marks a moment
   - Token volumes come from the real inputs (chunk counts × prompt sizes, measured with the model's tokenizer).
   - If a dollar figure appears, its price and date are cited on screen.
 
+## Decisions
+
+1. Cost is shown in tokens, plus "marginal cost: electricity". No dollar figures.
+2. The hook claims only what the local models really did: voice, timing, first drafts, fact-checks and card sorting. The ledger shows Claude's share openly.
+3. No short cut.
+4. The ledger lists Claude's jobs by name (see above).
+
 ## Open questions
 
-1. **Dollars or tokens for cost?** Tokens are safe. Dollars hit harder, but need a sourced price that dates the film. I'd show tokens, plus "marginal cost: electricity".
-2. **Is the hook ("this voice wasn't made in a data centre") right?** The alternative is a plainer opening question ("What can one Mac do on its own?").
-3. **Length.** Still about 3:30. Is a 90-second cut (hook, why, the plan, decide, payoff) worth making as well?
-4. **The ledger's honest exception:** the script went to Claude. Keep it explicit (recommended: it *is* the division of labour), or leave it out?
+1. **Draft quality.** If the local drafts need heavy editing, the "first draft" claim is weak. Proposal: draft all scenes before committing to the claim, and keep it only if Claude keeps most lines with light edits. The ledger reports the real ratio either way.
