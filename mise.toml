@@ -56,3 +56,13 @@ run = ".venv/bin/python -m gateway.cli discover"
 description = "Exercise every gateway tool against a running gateway with the real models"
 depends = ["setup"]
 run = ".venv/bin/python -m gateway.live_check"
+
+[tasks.gateway]
+description = "Run the gateway in the foreground on 127.0.0.1:8090 (the service tasks run it as a login service)"
+depends = ["setup"]
+run = ".venv/bin/python -m gateway"
+
+[tasks.admin]
+description = "Open the authenticated admin page (token travels in the URL fragment only)"
+depends = ["setup"]
+run = ".venv/bin/python -m gateway admin"

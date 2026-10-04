@@ -114,9 +114,9 @@ Alice in Wonderland annotated phrase by phrase: a decision model and an LLM scor
 ```bash
 brew install mlx-lm                  # one-time
 mise run service-install             # the gateway as a launchd login service (also service-status, -logs, -restart, -uninstall, wrapping service/service.sh); or run it by hand:
-.venv/bin/python -m gateway &        # chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
+mise run gateway &                  # chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
 open http://127.0.0.1:8090/          # home: a panel per page, live model state and memory
-python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
+mise run admin                       # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
 ./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
 ```
