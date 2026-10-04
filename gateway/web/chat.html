@@ -58,7 +58,7 @@
   .wait { color: var(--warn); font-size: 13px; }
   details.think { margin-bottom: 8px; border-left: 2px solid var(--line); padding-left: 10px; color: var(--muted); font-size: 13px; }
   details.think summary { cursor: pointer; font-size: 12px; user-select: none; }
-  details.think .tbody { white-space: pre-wrap; margin-top: 4px; max-height: 40vh; overflow-y: auto; }
+  details.think .tbody { margin-top: 4px; max-height: 40vh; overflow-y: auto; }
   .msg p { margin: 0 0 .6em; } .msg p:last-child { margin-bottom: 0; } .msg.assistant p.raw { white-space: pre-wrap; }
   .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
   .md h1, .md h2, .md h3, .md h4 { margin: 1em 0 .4em; line-height: 1.25; } .md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3, .md h4 { font-size: 1.05em; }
@@ -237,8 +237,22 @@ document.addEventListener("click", e => {
   navigator.clipboard.writeText(b.parentElement.querySelector("pre").textContent);
   b.textContent = "copied"; setTimeout(() => b.textContent = "copy", 1200);
 });
-function thinkBlock(text, open) {                          // the model's reasoning, shown while it streams and collapsed once the answer starts
-  return text ? `<details class="think"${open ? " open" : ""}><summary>${open ? "Thinking…" : "Thought"} (${text.length} chars)</summary><div class="tbody">${esc(text)}</div></details>` : "";
+function thinkUpdate(el, text, streaming) {                // reasoning is a persistent <details> updated in place so toggling and scrolling survive streaming; it collapses once the answer starts unless the user toggled it
+  let d = el.querySelector("details.think");
+  if (!d) {
+    if (!text) return;
+    el.textContent = "";
+    d = document.createElement("details"); d.className = "think"; d.open = true;
+    d.innerHTML = `<summary></summary><div class="tbody"></div>`;
+    d.addEventListener("toggle", () => { if (!d._auto) d._user = true; });
+    el.appendChild(d); el.appendChild(Object.assign(document.createElement("div"), { className: "ans" }));
+  }
+  if (!streaming && !d._user && d.open) { d._auto = true; d.open = false; setTimeout(() => d._auto = false); }
+  d.querySelector("summary").textContent = `${streaming ? "Thinking…" : "Thought"} (${text.length} chars)`;
+  const b = d.querySelector(".tbody"), top = b.scrollTop, pin = b.scrollHeight - top - b.clientHeight < 24;
+  if (d._text !== text) { d._text = text; b.innerHTML = render(text); }   // markdown is re-rendered from the full text; replacing content clamps scrollTop, so restore it
+  b.scrollTop = pin ? b.scrollHeight : top;
+  return d;
 }
 function addMsg(role, html, cls = "") {
   $("empty")?.remove();
@@ -263,6 +277,14 @@ async function send() {
     if (!out && !reasoning) el.innerHTML = `<p class="wait">${cold ? "Starting " + esc(model) + " (first message after idle)" : "Thinking"}… ${((performance.now() - t0) / 1000).toFixed(0)}s</p>`;
   }, 250);
   let tFirst = null, out = "", reasoning = "", chunks = 0, usage = null, coldSecs = null;
+  let raf = 0, renderedOut = -1;
+  const paint = () => {                                    // coalesce chunks into one DOM update per frame
+    raf = 0; const stick = atBottom();
+    if (reasoning) { thinkUpdate(el, reasoning, !out); if (out.length !== renderedOut) el.querySelector(".ans").innerHTML = out ? render(out) : ""; }
+    else if (out.length !== renderedOut) el.innerHTML = render(out);
+    renderedOut = out.length;
+    if (stick) toBottom();
+  };
   try {
     const r = await fetch("/v1/chat/completions", {
       method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" },
@@ -291,10 +313,11 @@ async function send() {
         if (d.reasoning || d.content) {
           if (tFirst === null) tFirst = performance.now();
           reasoning += d.reasoning || ""; out += d.content || ""; chunks++;
-          const stick = atBottom(); el.innerHTML = thinkBlock(reasoning, !out) + (out ? render(out) : ""); if (stick) toBottom();
+          if (!raf) raf = requestAnimationFrame(paint);
         }
       }
     }
+    cancelAnimationFrame(raf); paint();
     history.push({ role: "assistant", content: out });
     const t1 = performance.now(), ntok = usage?.completion_tokens ?? chunks, genS = tFirst ? (t1 - tFirst) / 1000 : 0;
     const meta = document.createElement("div"); meta.className = "meta";
@@ -303,10 +326,10 @@ async function send() {
       (usage?.prompt_tokens ? ` · prompt ${usage.prompt_tokens} tok` : "");
     el.appendChild(meta);
   } catch (e) {
-    if (e.name === "AbortError") { if (out) history.push({ role: "assistant", content: out }); el.insertAdjacentHTML("beforeend", `<div class="meta">stopped</div>`); }
+    if (e.name === "AbortError") { cancelAnimationFrame(raf); paint(); if (out) history.push({ role: "assistant", content: out }); el.insertAdjacentHTML("beforeend", `<div class="meta">stopped</div>`); }
     else { el.classList.add("error"); el.innerHTML = `<p>${esc(String(e.message || e))}</p>`; history.pop(); }
   } finally {
-    clearInterval(ticker); controller = null; $("send").textContent = "Send"; loadModels();
+    cancelAnimationFrame(raf); clearInterval(ticker); controller = null; $("send").textContent = "Send"; loadModels();
   }
 }
 
