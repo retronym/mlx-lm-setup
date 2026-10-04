@@ -17,37 +17,39 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 
 Weights live under `models/` (git-ignored) or the Hugging Face cache. The 4B NLI and the DeBERTa model are not currently used by any pipeline, only by benchmarks and the triage demo.
 
-## Architecture today
+## Architecture
 
-Each model is its own script, venv and (sometimes) port. There is no lifecycle management: you start and stop things by hand, and two heavy models together push the machine into swap.
+The gateway is the front door for Claude Code (MCP over HTTP) and starts, stops and passivates the model processes on demand within a memory budget. The older standalone scripts still run models directly; the dashed box marks what bypasses the gateway and so sits outside its memory management (migrating the workers is phase 7 in [PLAN.md](PLAN.md)).
 
 ```mermaid
 flowchart TB
-  CC["Claude Code"] -- "MCP stdio" --> BR["mlx-mcp-server 0.7.0 (third party)<br/>.venv · tools: chat, iterate, ..."]
-  BR -- "HTTP :8080" --> SRV
-  CHAT["chat.html<br/>served by chat.sh :8765"] -- "HTTP :8080 (CORS open)" --> SRV
-  subgraph llm ["Generative LLM · Homebrew python 3.14"]
-    SRV["mlx_lm.server :8080<br/>Qwen3-Coder-30B-A3B 4-bit · ~17 GB"]
+  CC["Claude Code"] -- "MCP over HTTP + token" --> GW
+  subgraph gw ["Gateway · python -m gateway · :8090 · .venv"]
+    GW["MCP /mcp · OpenAI API /v1 · /api/decide · /api/entail · /api/backends<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
   end
-  subgraph nli ["NLI cross-encoder · .venv-jev · PyTorch/MPS"]
-    TRI["jev_triage.py<br/>OpenJev 4B v5 · ~9 GB"]
-    CHK["jev_check.py"]
+  GW -- "spawn / stop / proxy" --> Q["qwen3-coder :18101<br/>mlx_lm.server · Homebrew python · ~17.5 GB"]
+  GW -- "spawn / stop / proxy" --> O["openjev-4b :18102<br/>OpenJev NLI · .venv-jev · ~9.5 GB"]
+  GW -- "spawn / stop / proxy" --> J["jevstyle-2b :18103<br/>Jev-Style decision · .venv-mlxjev · ~3 GB"]
+  subgraph direct ["Standalone scripts, outside the gateway's memory management"]
+    SRV["serve.sh: mlx_lm.server :8080<br/>~17 GB"]
+    CHAT["chat.sh: chat.html :8765"]
+    TRI["jev_triage.py: OpenJev 4B directly<br/>~9 GB"]
+    JW["score_worker.py jev: Jev-Style directly"]
+    LW["score_worker.py lm: its OWN in-process<br/>Qwen3-Coder copy, ~17 GB"]
   end
-  subgraph dec ["Decision model · .venv-mlxjev · MLX"]
-    JW["score_worker.py jev<br/>Jev-Style 2B 8-bit · ~2 GB"]
-  end
-  LW["score_worker.py lm / lm_emoji.py<br/>loads its OWN in-process copy of<br/>Qwen3-Coder · another ~17 GB"]
-  DASH["dashboard_server.py :8766<br/>serves only whitelisted pages + data files"]
-  TRI -- "data/results.jsonl" --> DASH
-  JW -- "data/scores_jev.jsonl" --> FUS["emoji_book_fused.py"]
-  LW -- "data/scores_lm.jsonl" --> FUS
-  FUS -- "data/book_events.jsonl" --> DASH
+  CHAT -- "HTTP :8080 (CORS open)" --> SRV
+  DASH["dashboard_server.py :8766<br/>whitelisted pages + data files"]
+  TRI -- "results.jsonl" --> DASH
+  JW -- "scores_jev.jsonl" --> FUS["emoji_book_fused.py"]
+  LW -- "scores_lm.jsonl" --> FUS
+  FUS -- "book_events.jsonl" --> DASH
   DASH --> PAGES["dashboard.html · book.html"]
+  style direct stroke-dasharray: 5 5
   classDef warn stroke:#d95926,stroke-width:2px;
   class LW warn;
 ```
 
-Note the orange box: the LLM emoji worker does not talk to the `mlx_lm.server` on :8080; it loads a second copy of the same 17 GB model. Running both is how the machine ended up with 6 GB of swap.
+The orange box is the one to watch: the LLM emoji worker does not use any server; it loads a second copy of the 17 GB model. Running it beside the gateway's Qwen is how the machine once reached 6 GB of swap.
 
 ## Pipelines
 
@@ -121,13 +123,24 @@ brew install mlx-lm                  # one-time
 ./ask.sh "Summarize" < Foo.scala     # one-shot
 ```
 
-The MCP bridge is the third-party `mlx-mcp-server` 0.7.0 in `.venv`, registered in Claude Code at local scope (tools: `chat`, `iterate`, `quick_test`, `set_model`, `health_check`, `list_models`). It only forwards to :8080. Do not run its own `install` command (it writes to `~/.claude/settings.json`); register it with:
+The standalone server above is independent of the gateway. Claude Code now talks to the **gateway's own MCP server** (the third-party `mlx-mcp-server` was retired: unregistered, uninstalled; its vetting notes remain in [docs/FINDINGS.md](docs/FINDINGS.md)).
+
+### Gateway MCP tools
 
 ```bash
-claude mcp add mlx --scope local -e MLX_BASE_URL=http://127.0.0.1:8080 \
-  -e MLX_DEFAULT_MODEL=mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit -e MLX_TIMEOUT=300 \
-  -- "$PWD/.venv/bin/mlx-mcp-server"
+.venv/bin/python -m gateway &          # must be running for Claude Code to connect (launchd service: phase 8)
+./register_mcp.sh                      # claude mcp add --transport http ... with the token header; restart Claude Code after
 ```
+
+| Tool | What | Token |
+|---|---|---|
+| `chat` | local LLM (default Qwen3-Coder); `message` or `messages`, optional `system` | no |
+| `decide` | typed decisions with probabilities from the decision model: one `question` + `options`, or several `questions` about one state | no |
+| `entail` | NLI: is each hypothesis entailed by / contradicted by / neutral to a premise | no |
+| `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
+| `start_backend`, `stop_backend`, `set_backend_policy` | change what is running; TTL and pin | **yes** |
+
+State-changing tools need the token in the `Authorization: Bearer` header (the registration script adds it; the token lives in `.gateway/token`, mode 0600, created on first run; `python -m gateway token` prints it). Inference and status are open on localhost. `.venv/bin/python -m gateway.live_check` exercises every tool against a running gateway with the real models.
 
 ## What we measured (headlines)
 
@@ -154,17 +167,16 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `emoji_book.py`, `emoji_book_mlx.py` | earlier pipeline iterations, kept for reference |
 | `jev_check.py`, `jev_triage.py` | OpenJev NLI wrapper and PR triage |
 | `bench_*.py`, `fuse_*.py`, `bench_all.sh`, `run_fused.sh` | benchmarks and fusion experiments |
-| `test_mcp.py` | stdio smoke test of the MCP bridge |
 | `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
 | `docs/FINDINGS.md` | long-form log of what was tried |
 | `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
-| `gateway.toml`, `gateway/` | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-3 and 6 done: catalog, supervisor, HTTP front door, memory budget) |
+| `gateway.toml`, `gateway/` | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-4 and 6 done: catalog, supervisor, HTTP front door, MCP tools, memory budget) |
 
-Environments: `.venv` (MCP bridge, `mcp<2`), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
+Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
 
 ## Gateway (in progress)
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-3 and 6 are built (catalog, supervisor, HTTP proxy, memory budget); MCP tools, the admin and chat sites and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-4 and 6 are built (catalog, supervisor, HTTP proxy, MCP tools, memory budget); the admin and chat sites, the gated `iterate` tool, migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 .venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM
