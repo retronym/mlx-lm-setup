@@ -6,28 +6,28 @@
 
 - **Chat with a local LLM** in the browser (`/`): streaming, tokens per second, a collapsible view of the model's reasoning, markdown and code rendering, a model picker with memory and context details.
 - **Decide instead of generate** (`/jev`): give a text, a question and a list of options, and a decision model scores every option in a single forward pass, returning probabilities (pick the best emoji, classify sentiment, triage a bug, rate urgency on a scale). It is fast, deterministic and cheap, and it never generates text.
-- **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks). Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
-- **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide` and `/api/entail`.
+- **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks), plus the speech tools below. Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
+- **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide`, `/api/entail` and `/api/score` (log P(candidate | prompt) for a closed list of continuations, from an LLM, without generating).
 - **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
 - **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
-- **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland* and an NLI triage of scala/scala pull requests, both built as ordinary code around the scorers (see [Pipelines](#pipelines)).
+- **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland*, an NLI triage of scala/scala pull requests, and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
 
 ```bash
-.venv/bin/python -m gateway &
+service/service.sh install          # the gateway as a login service (or: .venv/bin/python -m gateway &)
 open http://127.0.0.1:8090/
 ```
 
 ## Why
 
-Offload cheap, bounded, verifiable work (summaries, extraction, classification, boilerplate, first-pass triage) to local models so the large hosted model is reserved for design and hard reasoning. The recurring lesson: **models that score a closed set of options in one forward pass (decision models) are far cheaper and more deterministic than generating text**, so most of the interesting pipelines here are deterministic code that calls a scorer, with no text generation in the inner loop. The binding constraint is memory, not speed: the models together do not fit comfortably, which is what the gateway's supervisor and [PLAN.md](PLAN.md) address. Target machine: an M5 Pro Mac with 48 GB unified memory.
+Offload cheap, bounded, verifiable work (summaries, extraction, classification, boilerplate, first-pass triage) to local models so the large hosted model is reserved for design and hard reasoning. The recurring lesson: **models that score a closed set of options in one forward pass (decision models) are far cheaper and more deterministic than generating text**, so most of the interesting pipelines here are deterministic code that calls a scorer, with no text generation in the inner loop. The binding constraint is memory, not speed: the models together do not fit, so every model runs behind the gateway, which starts, evicts and passivates them inside a budget ([PLAN.md](PLAN.md)). Target machine: an M5 Pro Mac with 48 GB unified memory.
 
 ## The models
 
 | Role | Model | Runtime / env | Memory | Used for |
 |---|---|---|---|---|
-| Generative LLM | Qwen3-Coder-30B-A3B-Instruct, 4-bit (MoE, ~3B active) | `mlx-lm` 0.32 (Homebrew, python 3.14) | ~17 GB | chat, MCP sub-agent, emoji next-token scoring (`lm_emoji.py`) |
+| Generative LLM | Qwen3-Coder-30B-A3B-Instruct, 4-bit (MoE, ~3B active) | `mlx-lm` 0.32 (Homebrew, python 3.14) | ~17 GB | chat, MCP sub-agent; also a separate scoring backend (`qwen3-coder-score`, `/api/score`) for emoji log-probabilities |
 | Generative LLM | Qwen3.6-35B-A3B, 4-bit (MoE, 3B active; thinks by default; so does Gemma 4) | `mlx-lm` 0.32 | ~21.5 GB peak | general sub-agent work at speed, long context (small KV cache) |
 | Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default (thinking switched off): passed all six benchmark tasks, smallest memory |
 | NLI cross-encoder | OpenJev 4B v5 (Qwen3.5-4B fine-tune; also 2B, 0.8B) | PyTorch on MPS, `.venv-jev` (python 3.12) | ~9 GB | claim verification, PR triage. Slow: no fast kernels for Qwen3.5's linear-attention layers on MPS |
@@ -36,40 +36,25 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 | Speech in | Whisper large-v3-turbo, fp16 | `mlx-audio`, `.venv-audio` | 2 GB | transcripts with word timestamps (captions) |
 | Encoder (alternative) | open-jev DeBERTa-v3-large | PyTorch on MPS, `.venv-jev` | 1.7 GB | fast baseline; 512-token cap |
 
-Which LLM to pick for which job, with measurements: **[docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md)**. Weights live under `models/` (git-ignored) or the Hugging Face cache. The 4B NLI and the DeBERTa model are not currently used by any pipeline, only by benchmarks and the triage demo.
+Which LLM to pick for which job, with measurements: **[docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md)**. Weights live under `models/` (git-ignored) or the Hugging Face cache. The DeBERTa model is used only by benchmarks in `experiments/`.
 
 ## Architecture
 
-The gateway is the front door for Claude Code (MCP over HTTP) and starts, stops and passivates the model processes on demand within a memory budget. The older standalone scripts still run models directly; the dashed box marks what bypasses the gateway and so sits outside its memory management (migrating the workers is phase 7 in [PLAN.md](PLAN.md)).
+Every model runs behind the gateway, as its own process in its own environment (their dependency pins conflict). The gateway is the front door for Claude Code (MCP over HTTP), the browser and the pipelines, and its supervisor starts each backend on first use, passivates it when idle, and evicts idle ones least recently used first to stay inside a 28 GB budget. A pressure monitor evicts too when macOS reports low free memory or growing swap.
 
 ```mermaid
 flowchart TB
   CC["Claude Code"] -- "MCP over HTTP + token" --> GW
-  BR["Browser"] -- "chat site / and admin site /admin<br/>(SSE live status, token via URL fragment)" --> GW
-  subgraph gw ["Gateway · python -m gateway · :8090 · .venv"]
-    GW["chat and admin sites · MCP /mcp · OpenAI API /v1 · /api/decide · /api/entail · /api/backends<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
+  BR["Browser"] -- "chat / · decide /jev · speech /speech · admin /admin" --> GW
+  PL["Pipelines (any python3)<br/>emoji book · PR triage · films"] -- "/api/decide · /api/score · /api/entail · /api/narrate" --> GW
+  subgraph gw ["Gateway · launchd service · :8090 · .venv"]
+    GW["MCP /mcp · OpenAI API /v1 · /api/* · sites<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
   end
-  GW -- "spawn / stop / proxy" --> Q["qwen3-coder :18101<br/>mlx_lm.server · Homebrew python · ~17.5 GB"]
-  GW -- "spawn / stop / proxy" --> O["openjev-4b :18102<br/>OpenJev NLI · .venv-jev · ~9.5 GB"]
-  GW -- "spawn / stop / proxy" --> J["jevstyle-2b :18103<br/>Jev-Style decision · .venv-mlxjev · ~3 GB"]
-  subgraph direct ["Standalone scripts, outside the gateway's memory management"]
-    SRV["serve.sh: mlx_lm.server :8080<br/>~17 GB"]
-    TRI["jev_triage.py: OpenJev 4B directly<br/>~9 GB"]
-    JW["score_worker.py jev: Jev-Style directly"]
-    LW["score_worker.py lm: its OWN in-process<br/>Qwen3-Coder copy, ~17 GB"]
-  end
-  DASH["dashboard_server.py :8766<br/>whitelisted pages + data files"]
-  TRI -- "results.jsonl" --> DASH
-  JW -- "scores_jev.jsonl" --> FUS["emoji_book_fused.py"]
-  LW -- "scores_lm.jsonl" --> FUS
-  FUS -- "book_events.jsonl" --> DASH
-  DASH --> PAGES["dashboard.html · book.html"]
-  style direct stroke-dasharray: 5 5
-  classDef warn stroke:#d95926,stroke-width:2px;
-  class LW warn;
+  GW -- "spawn / stop / proxy" --> LLM["LLMs · mlx_lm.server<br/>Qwen3-Coder · Qwen3.6-35B · Gemma 4 26B"]
+  GW --> SC["Scorers<br/>Jev-Style 2B (decide) · OpenJev 4B (entail) · Qwen3-Coder (score)"]
+  GW --> SP["Speech · mlx-audio<br/>Kokoro · Qwen3-TTS design and clone · Whisper"]
+  PL -- "results files" --> DASH["pipelines/dashboard_server.py :8766<br/>triage dashboard · emoji book"]
 ```
-
-The orange box is the one to watch: the LLM emoji worker does not use any server; it loads a second copy of the 17 GB model. Running it beside the gateway's Qwen is how the machine once reached 6 GB of swap.
 
 ## Pipelines
 
@@ -82,8 +67,8 @@ flowchart LR
   TXT["corpus/alice.txt<br/>Project Gutenberg"] --> WORDS["data/book_words.json<br/>4,280 words, chapters I–II"]
   WORDS --> CH["chunk_book.py<br/>spaCy chunker, 4–12 words<br/>0.1 s per phrase"]
   CH --> CHUNKS["data/book_chunks.json<br/>748 phrases"]
-  CHUNKS --> JW["score_worker.py jev<br/>Jev-Style 2B · ~1 s per phrase"]
-  CHUNKS --> LW["score_worker.py lm<br/>Qwen3-Coder log P(emoji) · ~1.5 s per phrase"]
+  CHUNKS --> JW["score_worker.py jev<br/>/api/decide · Jev-Style 2B · ~1 s per phrase"]
+  CHUNKS --> LW["score_worker.py lm<br/>/api/score · Qwen3-Coder log P(emoji) · ~4.5 s per phrase"]
   JW -- "emoji scores + colour, mood,<br/>sentiment" --> SJ["scores_jev.jsonl"]
   LW -- "log-probs, 346 emoji" --> SL["scores_lm.jsonl"]
   SJ --> FU["emoji_book_fused.py<br/>z-score fusion, w_lm = 0.6<br/>Jev-only where LLM not yet scored"]
@@ -109,15 +94,17 @@ flowchart LR
   S --> R["raw scores + softmax probabilities<br/>→ top-3 emoji, colour tint, popup"]
 ```
 
+The workers call the gateway (`pipelines/gateway_client.py`, stdlib only), so they run under any `python3` and never load a model; run them one at a time, since they share the GPU. The chunker and the fusion step need spaCy and numpy from `.venv-jev`.
+
 ```bash
-.venv-jev/bin/python chunk_book.py                                    # phrase boundaries -> data/book_chunks.json
-.venv-mlxjev/bin/python score_worker.py jev                           # resumable; --fresh to restart
-/opt/homebrew/opt/mlx-lm/libexec/bin/python score_worker.py lm        # optional, 17 GB: run ALONE, not beside other heavy models
-.venv-jev/bin/python emoji_book_fused.py --fresh                      # combine -> data/book_events.jsonl
-python3 dashboard_server.py &                                         # http://127.0.0.1:8766/book
+.venv-jev/bin/python pipelines/emoji_book/chunk_book.py        # phrase boundaries -> data/book_chunks.json
+python3 pipelines/emoji_book/score_worker.py jev               # resumable; --fresh to restart
+python3 pipelines/emoji_book/score_worker.py lm                # optional: the gateway evicts idle backends to fit the 18 GB scorer
+.venv-jev/bin/python pipelines/emoji_book/emoji_book_fused.py --fresh     # combine -> data/book_events.jsonl (follows the workers live)
+python3 pipelines/dashboard_server.py &                        # http://127.0.0.1:8766/book
 ```
 
-`recolor.py` re-answers only the colour question for phrases already scored (170 phrases in 9 s), so prompt wording can be iterated quickly. Questions and the context window live in `jev_attrs.py`; the emoji list in `emoji_vocab.py`.
+`recolor.py` re-answers only the colour question for phrases already scored, so prompt wording can be iterated quickly. Questions and the context window live in `jev_attrs.py`, the LLM's few-shot prompt in `lm_prompt.py`, the emoji list in `emoji_vocab.py`.
 
 ### PR triage: OpenJev on scala/scala
 
@@ -125,13 +112,13 @@ Typed yes/no questions about each merged PR (title, changed files, start of the 
 
 ```mermaid
 flowchart LR
-  GH["gh pr list<br/>(read-only)"] --> PRS["data/prs.json"] --> TRI["jev_triage.py<br/>6 hypotheses per PR<br/>OpenJev 4B NLI"] --> RES["data/results.jsonl"] --> DASH["dashboard.html<br/>precision, recall, AUROC<br/>live, threshold slider"]
+  GH["gh pr list<br/>(read-only)"] --> PRS["data/prs.json"] --> TRI["jev_triage.py<br/>6 hypotheses per PR<br/>/api/entail · OpenJev 4B"] --> RES["data/results.jsonl"] --> DASH["dashboard.html<br/>precision, recall, AUROC<br/>live, threshold slider"]
 ```
 
 ```bash
 gh pr list -R scala/scala --state merged --limit 300 --json number,title,body,labels,files,mergedAt,author > data/prs.json
-python3 dashboard_server.py &                      # http://127.0.0.1:8766/
-.venv-jev/bin/python jev_triage.py --fresh
+python3 pipelines/dashboard_server.py &                  # http://127.0.0.1:8766/
+python3 pipelines/pr_triage/jev_triage.py --fresh
 ```
 
 ### Narrated video explainer
@@ -140,13 +127,17 @@ python3 dashboard_server.py &                      # http://127.0.0.1:8766/
 
 [`examples/showcase/`](examples/showcase/) is the ambitious version: a 3-minute motion-design film about this project, rendered with Remotion. Narration is cloned locally, and `[[cue]]` markers in the script are matched to Whisper's word timestamps, so every animation lands on the word that motivates it. The on-screen numbers and screenshots are real. See its [README](examples/showcase/README.md).
 
+[`examples/safe-scala/`](examples/safe-scala/) uses the same machinery for a 2-minute explainer of safe Scala (capture checking, safe mode, TACIT) with a designed voice. Every compiler message on screen comes from compiling the snippets with that day's Scala 3 nightly, and every number from the paper is checked against arXiv before the render.
+
 ### Chat and MCP
 
 ```bash
 brew install mlx-lm                  # one-time
-.venv/bin/python -m gateway &        # the gateway: chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
+service/service.sh install           # the gateway as a launchd login service (status, logs, restart, uninstall); or run it by hand:
+.venv/bin/python -m gateway &        # chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
 open http://127.0.0.1:8090/          # chat site: streaming, tok/s, shows "starting model..." on a cold start
 open http://127.0.0.1:8090/jev       # decision-model site: prompt + question + options; ✨ asks a local LLM (Gemma) to propose the options
+open http://127.0.0.1:8090/speech    # speech site: voices, timings, word-level transcript
 python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
 ./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
 ./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
@@ -157,7 +148,7 @@ The standalone server above is independent of the gateway. Claude Code now talks
 ### Gateway MCP tools
 
 ```bash
-.venv/bin/python -m gateway &          # must be running for Claude Code to connect (launchd service: phase 8)
+service/service.sh status              # the gateway must be running for Claude Code to connect
 ./register_mcp.sh                      # claude mcp add --transport http ... with the token header; restart Claude Code after
 ```
 
@@ -169,6 +160,8 @@ The standalone server above is independent of the gateway. Claude Code now talks
 | `iterate` | `chat` with retries until the answer passes gates: JSON (+schema), regex, contains, length, NLI faithfulness to a source text; optional escalation model for the last try; no shell gate | no |
 | `speak` | text to speech (Kokoro presets, Qwen3-TTS designed or cloned voices): wav path, duration and per-sentence timings | no |
 | `transcribe` | speech to text with word timestamps, for captions and for checking a `speak` clip | no |
+| `narrate` | timed narration: scenes with `[[cue]]` markers in; per scene a clip, its duration, word timestamps and cue times out | no |
+| `voices` | the speech models, their preset voices and the saved reference voices | no |
 | `backends_status` | state, memory, idle timers, budget, system free memory and swap; starts nothing | no |
 | `start_backend`, `stop_backend`, `set_backend_policy` | change what is running; TTL and pin | **yes** |
 
@@ -185,7 +178,7 @@ State-changing tools need the token in the `Authorization: Bearer` header (the r
 | Whole-chapter context | Worse (collapses onto chapter gist, 2x slower). A 15-before / 5-after word window is free and better. |
 | Glyph-only emoji options vs names | Not better for the 2B model; some glyph knowledge exists (🍆 rank 203 → 5). |
 | LLM next-token emoji scoring | Knows slang (💀 🐐 🔥 🤡 👻); noisier on narrative. Fusion with the decision model: slang top-1 13/22 (Jev alone) and 15/22 (LLM alone) → 17–18/22 fused. |
-| Memory | LLM + decision model + browsers → 6 of 7 GB swap and a thrashing machine. Run heavy models one at a time. |
+| Memory | Before the gateway: LLM + an in-process copy for the emoji worker + decision model + browsers → 6 of 7 GB swap and a thrashing machine. Now every model is a budgeted backend and idle ones are evicted. |
 
 Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 
@@ -193,32 +186,29 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 
 | Path | What |
 |---|---|
-| `serve.sh`, `ask.sh` | standalone LLM server, one-shot client (gateway by default) |
-| `dashboard_server.py`, `dashboard.html`, `book.html` | whitelist-only localhost server; triage dashboard; emoji book |
-| `score_worker.py`, `jev_attrs.py`, `lm_emoji.py`, `emoji_book_fused.py`, `emoji_vocab.py`, `chunker_spacy.py`, `chunk_book.py`, `recolor.py` | emoji book pipeline (current) |
-| `emoji_book.py`, `emoji_book_mlx.py` | earlier pipeline iterations, kept for reference |
-| `jev_check.py`, `jev_triage.py` | OpenJev NLI wrapper and PR triage |
-| `bench_*.py`, `fuse_*.py`, `bench_all.sh`, `run_fused.sh` | benchmarks and fusion experiments (`bench_llm_compare.py`: head-to-head of the catalog LLMs, one model per process) |
-| `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
-| `docs/FINDINGS.md` | long-form log of what was tried |
-| `docs/SPEECH.md`, `examples/explainer/` | speech models, voices, API, and the narrated-video example |
-| `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
-| `gateway.toml`, `gateway/` (`web/` holds the chat and admin sites) | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-6 done: catalog, supervisor, HTTP front door, MCP tools, chat and admin sites, memory budget) |
+| `gateway/`, `gateway.toml` | the gateway: catalog, supervisor, HTTP app, MCP server, thin backend servers (`gateway/backends/`), sites (`gateway/web/`) |
+| `service/` | launchd service: `service.sh install / uninstall / restart / status / logs` |
+| `pipelines/` | what runs today, all as gateway clients: `emoji_book/`, `pr_triage/`, `dashboard_server.py` (whitelist-only localhost server for both pages), `gateway_client.py` |
+| `examples/` | narrated films: `explainer/` (slides), `showcase/`, `safe-scala/` |
+| `experiments/` | benchmarks and earlier in-process iterations behind the choices above, kept for reference (`bench_llm_compare.py`: the head-to-head in the model guide) |
+| `ask.sh`, `serve.sh`, `register_mcp.sh` | one-shot client, a plain `mlx_lm.server` outside the gateway, MCP registration |
+| `docs/` | `FINDINGS.md` (long-form log of what was tried), `MODEL_GUIDE.md` (which model when), `SPEECH.md` |
+| `PLAN.md` | the gateway's design and phase status, with findings per phase |
+| `data/`, `models/`, `corpus/`, `.venv*/` | generated or downloaded; git-ignored (logs in `data/logs/`) |
 
-Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
+Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-audio` (mlx-audio for speech, python 3.13; setup in [docs/SPEECH.md](docs/SPEECH.md)), `.venv-jev` (torch, transformers, spaCy: the OpenJev backend, the chunker and the fusion step), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`, for the Jev-Style backend), and Homebrew's `mlx-lm` for the LLM backends. They exist because the dependency pins conflict, which is why each model runs as a separate process.
 
-## Gateway (in progress)
+## Gateway
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6, 4b and 8 are built (catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service via `service/service.sh install`); migrating the workers comes next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+Starts models on demand, passivates idle ones, and fronts them with one API. All phases in [PLAN.md](PLAN.md) are done: catalog, supervisor, HTTP proxy, MCP tools, gated `iterate`, chat and admin sites, memory budget, launchd service, speech, and the pipelines as clients. **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
-.venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM
 curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"stream":true,"messages":[{"role":"user","content":"hello"}]}'          # starts Qwen3-Coder on first use
-curl localhost:8090/api/backends                 # state, idle countdown, memory estimate per backend
+curl localhost:8090/api/backends                 # state, idle countdown, memory estimate per backend, system free memory and swap
 ```
 
-Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `jevstyle`, `openjev_nli`, `command`). The catalog has four features for managing models:
+Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `mlx_lm_score`, `jevstyle`, `openjev_nli`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). The catalog has these features for managing models:
 
 - **Memory as parts**: give `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost.
 - **Argument passthrough**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
@@ -226,8 +216,8 @@ Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `
 - **Model picker details**: give each backend a `description`; the chat page's dropdown (and `GET /api/models`) then shows, per model and profile, what it is, memory breakdown, thinking default, context limit and KV cost, the defaults a profile applies, and live load/idle state.
 - **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio) with size, KV cost and mlx-lm support; `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
 
-Which model for which job: [docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md). Tests (no models needed, they use a fake backend): `.venv/bin/python -m unittest discover -s gateway/tests -t .`
+Tests (no models needed, they use a fake backend): `.venv/bin/python -m unittest discover -s gateway/tests -t .`; against the real models: `.venv/bin/python -m gateway.live_check`.
 
 ## Next
 
-[PLAN.md](PLAN.md): a long-lived local gateway that starts, stops and passivates (unloads when idle, reloads on demand) the models, extends the MCP interface with lifecycle tools, and serves the chat site and an admin site.
+Ideas not yet started are parked under "Future work" in [PLAN.md](PLAN.md).

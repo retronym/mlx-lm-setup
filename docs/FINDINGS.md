@@ -2,6 +2,8 @@
 
 Chronological notes from building and testing this setup (2026-10-03/04). The README has the current architecture and how to run things; this file keeps the evidence and the dead ends. Sections are verbatim from earlier README revisions, so some wording is dated (e.g. 'current setup').
 
+Scripts named here have since moved: pipelines to `pipelines/` (now gateway clients that load no model), benchmarks and earlier iterations to `experiments/` (see README, Files).
+
 ## MCP bridge vetting (`mlx-mcp-server` 0.7.0)
 
 **Vetting notes (reviewed the 0.7.0 wheel source, ~2.3k lines):**

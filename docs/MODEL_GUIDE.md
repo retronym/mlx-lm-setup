@@ -1,6 +1,6 @@
 # Which model when
 
-A decision guide for the gateway's catalog on this machine (M5 Pro, 48 GB, gateway memory budget 28 GB). Everything below is measured here unless marked as an estimate or untested. Reproduce the LLM numbers with `bench_llm_compare.py` (one model per process); the raw results are written to `data/llm_bench_<label>.json`.
+A decision guide for the gateway's catalog on this machine (M5 Pro, 48 GB, gateway memory budget 28 GB). Everything below is measured here unless marked as an estimate or untested. Reproduce the LLM numbers with `experiments/bench_llm_compare.py` (one model per process); the raw results are written to `data/llm_bench_<label>.json`.
 
 ## Short version
 

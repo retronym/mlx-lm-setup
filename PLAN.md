@@ -1,6 +1,6 @@
 # Plan: a local model gateway with lifecycle, passivation, MCP and web UIs
 
-Status: **design reviewed (see Decisions); phase 1 in progress.** Phases are tracked in the table below (DONE / TODO).
+Status: **phases 1–9 done.** Phases are tracked in the table below (DONE / TODO); ideas not yet started are under [Future work](#future-work).
 
 ## Problem
 
@@ -145,8 +145,8 @@ sequenceDiagram
 | 4b | `iterate` with restricted gates (schema, regex, contains, length) and an NLI faithfulness gate; no shell gate | **DONE** |
 | 5 | Admin site and chat site served by the gateway; SSE events; token for mutating calls | **DONE** |
 | 6 | Memory budget, LRU eviction, optional swap-pressure eviction | **DONE** (built before phases 4-5, at your request) |
-| 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | TODO |
-| 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; repo tidy deferred until after phase 7, which touches the workers) |
+| 7 | Migrate the emoji-book and triage workers to gateway clients (no in-process model copies) | **DONE** (see [Phase 7 findings](#phase-7-findings)) |
+| 8 | Run as a login service (launchd or `brew services`), log rotation, repo tidy (move benches and logs out of the root) | **DONE** (service and log rotation; the repo tidy after phase 7: `pipelines/`, `experiments/`) |
 | 9 | Speech: a `kokoro` TTS backend behind `/v1/audio/speech`, a `speak` MCP tool, then Qwen3-TTS for cloned or designed voices (see [Speech](#speech-phase-9)) | **DONE** |
 
 Each phase ends compiling and committed, and I would pause for review after phases 1, 4 and 5.
@@ -331,3 +331,22 @@ How-to, API and numbers are in [docs/SPEECH.md](docs/SPEECH.md); this is what ch
 - **Decisions on the open questions:** rendering stays outside the gateway (the example is a script in `examples/explainer/`); GPU contention is unmanaged beyond the existing one-request-per-backend rule and has not been a problem; the docs say reference clips need consent.
 - **`narrate` and `voices` MCP tools (after the showcase film).** The showcase's timing pipeline (speak each scene, transcribe, align, resolve `[[cue]]` markers) moved into the gateway (`gateway/narrate.py`, `/api/narrate`). A session in any repo now gets timed narration from MCP alone, rather than from a script in this repo, and the server instructions say how to choose and keep a voice. `narrate` defaults to the cloned narrator; it stops at timings and leaves copying the wavs to the caller, so the gateway still writes only under its own data directory.
 - **Not done:** Dia, Orpheus, Chatterbox (no need yet); streaming synthesis; a speech panel on the admin page; speaker-similarity measurement of cloned voices.
+
+## Phase 7 findings
+
+- **The LLM worker needed a new operation, not just a client.** The other workers map onto existing routes (`score_worker.py jev` and `recolor.py` onto `/api/decide` with several questions about one state; `jev_triage.py` onto `/api/entail`). The LLM emoji worker needs log P(candidate | prompt) for 346 multi-token candidates, which `mlx_lm.server` cannot do. So `lm_emoji.py`'s technique (one prefill, candidates as a batch of suffixes against the broadcast KV cache) became a backend: adapter `mlx_lm_score`, kind `score`, `gateway/backends/lmscore_server.py`, route `/api/score`, catalog entry `qwen3-coder-score`. No MCP tool yet.
+- **Same weights, second process, but budgeted.** The scorer cannot share the chat backend's process (`mlx_lm.server` has no hook for it), so it loads the weights again. The difference from before is that it is a backend like any other: with chat Qwen idle, starting it evicts that one instead of pushing the machine into swap. Live, it was evicted to make room for OpenJev as expected. It refuses a model unless every layer has a plain KV cache, which rules out hybrid linear-attention models such as Qwen3.6.
+- **Parity checked against the old outputs, not re-reasoned.** The in-process versions had already written `scores_jev.jsonl`, `scores_lm.jsonl` and `results.jsonl`, so the gateway path was compared phrase by phrase and PR by PR: identical emoji scores and attributes (max diff 0.000), LLM log-probs (0.001, rounding) and NLI probabilities (0.0000). Warm timings match too: about 1 s per phrase (decision), 4.5 s (LLM scorer; the old worker's own log shows 4.3 to 5.8 s), 1 to 2 s per PR (NLI).
+- **The workers no longer need a model venv.** `pipelines/gateway_client.py` is stdlib only and retries a 503 after the gateway's `Retry-After`, so the workers run under any `python3`. Only the chunker and the fusion step still need `.venv-jev`, for spaCy and numpy.
+- **Bug found on the way: the pressure monitor was blind under launchd.** The service's PATH has no `/usr/sbin`, so `sysctl` was not found and every probe returned `None`. Swap-growth and low-free-memory eviction had not fired since phase 8. Noticed because swap grew from 5 to 9 GB during these runs and `/api/backends` showed `swap_used_gb: null`. Fixed by calling `/usr/sbin/sysctl` absolutely, with a test that runs the probe under the service's PATH.
+- **Repo tidy.** `pipelines/` (emoji book, PR triage, the dashboard server, the client) and `experiments/` (benchmarks and earlier in-process iterations, repointed at the repo root's `data/` and `models/`; checked by compiling all of them and running the ones that need no model). Logs moved to `data/logs/`.
+- **Not done:** an MCP tool for `score`; `experiments/bench_emoji.py report` fails on `data/bench_*.json` files from later benchmarks that have no `model` key (true before the move as well).
+
+## Future work
+
+Not started; each would get its own design pass first.
+
+- **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
+- **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
+- **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
+- **New kinds of model:** a vision-language model (`mlx-vlm`; Qwen3-VL or Gemma 4 vision) to check film stills and screenshots against the storyboard and to read figures in papers; embeddings and a reranker (Qwen3-Embedding, Qwen3-Reranker) for search and duplicate detection over issues, PRs and these docs; a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.
