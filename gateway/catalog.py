@@ -39,7 +39,7 @@ class GatewaySettings:
 class BackendSpec:
     name: str
     adapter: str
-    kind: str                      # llm | decision | nli | custom
+    kind: str                      # llm | decision | nli | tts | stt | custom
     python: str | None
     est_mem_gb: float
     ttl_s: int
@@ -132,6 +132,22 @@ def _openjev_nli(s: BackendSpec) -> list[str]:
             "--subfolder", s.options["subfolder"], "--port", str(s.port)]
 
 
+def _mlx_audio_tts(s: BackendSpec) -> list[str]:
+    o = s.options
+    cmd = [s.python, str(BACKENDS_DIR / "tts_server.py"), "--model", o["model"], "--port", str(s.port),
+           "--output-dir", o["output_dir"], "--refs-dir", o["refs_dir"]]
+    for flag, key in (("--voice", "voice"), ("--lang-code", "lang_code"), ("--max-chars", "max_chars")):
+        if key in o:
+            cmd += [flag, str(o[key])]
+    return cmd
+
+
+def _mlx_audio_stt(s: BackendSpec) -> list[str]:
+    o = s.options
+    return [s.python, str(BACKENDS_DIR / "stt_server.py"), "--model", o["model"], "--port", str(s.port),
+            "--audio-dir", o["output_dir"], "--refs-dir", o["refs_dir"]]
+
+
 def _command(s: BackendSpec) -> list[str]:
     return [str(a).replace("{port}", str(s.port)) for a in s.options["command"]]
 
@@ -140,6 +156,9 @@ ADAPTERS: dict[str, Adapter] = {
     "mlx_lm": Adapter("llm", ("python", "model"), ("args",), "/v1/models", _mlx_lm),
     "jevstyle": Adapter("decision", ("python", "model_dir"), ("precision",), "/health", _jevstyle, ("model_dir",)),
     "openjev_nli": Adapter("nli", ("python", "root", "subfolder"), (), "/health", _openjev_nli, ("root",)),
+    "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "output_dir", "refs_dir"), "/health",
+                             _mlx_audio_tts, ("output_dir", "refs_dir")),
+    "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
 COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",
@@ -226,8 +245,14 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         if python is not None:
             _check_type(name, "python", python, (str,))
             python = str(_resolve(base_dir, python))
+        if adapter in ("mlx_audio_tts", "mlx_audio_stt"):          # shared audio locations: generated clips, named voice references
+            opts.setdefault("output_dir", "data/audio")
+            opts.setdefault("refs_dir", "data/voices")
         for k in ad.path_keys:
-            opts[k] = str(_resolve(base_dir, opts[k]))
+            if k in opts:
+                opts[k] = str(_resolve(base_dir, opts[k]))
+        if "voices" in opts and not (isinstance(opts["voices"], list) and all(isinstance(v, str) and v for v in opts["voices"])):
+            raise CatalogError(f"backends.{name}.voices: expected a list of non-empty strings")
         if adapter == "command":
             cmd = opts["command"]
             if not (isinstance(cmd, list) and cmd and all(isinstance(a, str) for a in cmd)):

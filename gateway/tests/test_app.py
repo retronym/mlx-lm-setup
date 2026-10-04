@@ -23,6 +23,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             "llm": {"kind": "llm", "aliases": ["org/some-model"], "flags": ["--ready-delay", "0.3"]},
             "dec": {"kind": "decision"},
             "nli": {"kind": "nli"},
+            "voice": {"kind": "tts"},
+            "ears": {"kind": "stt"},
             "bad": {"kind": "llm", "flags": ["--die-on-start"]},
         }, port=self.port, default_llm="llm")
         self.sup = Supervisor(self.cat, state_dir=Path(self.tmp.name) / "state", reap_interval=0.05, health_interval=0.05, grace_s=0.5)
@@ -44,6 +46,26 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         return {"messages": [{"role": "user", "content": "hi"}], **kw}
 
     # ----------------------------------------------------------------------------------------------------------
+    async def test_speech_routes_proxy_to_the_tts_backend(self):
+        r = await self.http.post("/v1/audio/speech", json={"input": "hello", "voice": "af_heart"})
+        self.assertEqual((r.status_code, r.headers["content-type"], r.content), (200, "audio/wav", b"RIFFfakewav"))
+        self.assertEqual(r.headers["x-gateway-backend"], "voice")
+        r = await self.http.post("/api/speak", json={"text": "hello", "voice": "bm_george"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual((r.json()["duration_s"], r.json()["echo"]["voice"]), (1.5, "bm_george"))
+        self.assertNotIn("model", r.json()["echo"])                                  # routing key is not forwarded
+        r = await self.http.post("/api/speak", json={"text": ""})
+        self.assertEqual(r.status_code, 400)
+        r = await self.http.post("/api/speak", json={"text": "x", "model": "llm"})
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "wrong_model_kind"))
+
+    async def test_transcribe_route_and_voices_listing(self):
+        r = await self.http.post("/api/transcribe", json={"path": "/x.wav"})
+        self.assertEqual((r.status_code, r.json()["text"]), (200, "hello world"))
+        r = await self.http.get("/api/voices")
+        self.assertEqual([m["model"] for m in r.json()["models"]], ["voice"])
+        self.assertEqual(self.sup.rt["llm"].starts, 0)
+
     async def test_models_lists_llm_backends_without_starting_anything(self):
         r = await self.http.get("/v1/models")
         self.assertEqual(r.status_code, 200)
@@ -148,7 +170,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_backends_status(self):
         r = await self.http.get("/api/backends")
         j = r.json()
-        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "bad"])
+        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "voice", "ears", "bad"])
         self.assertEqual((j["gateway"]["memory_budget_gb"], j["gateway"]["resident_est_gb"], j["gateway"]["default_llm"]), (100, 0, "llm"))
         await self.http.post("/v1/chat/completions", json=self.chat())
         j = (await self.http.get("/api/backends")).json()

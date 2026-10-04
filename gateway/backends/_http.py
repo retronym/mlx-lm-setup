@@ -9,6 +9,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MAX_BODY = 8 * 1024 * 1024
 
 
+class Raw:
+    """A route may return ``Raw(bytes, content_type)`` instead of a JSON-serialisable object (audio, for instance)."""
+    def __init__(self, body: bytes, content_type: str):
+        self.body, self.content_type = body, content_type
+
+
 def serve(port: int, health: dict, routes: dict) -> None:
     lock = threading.Lock()
 
@@ -19,9 +25,12 @@ def serve(port: int, health: dict, routes: dict) -> None:
             pass
 
         def _send(self, code: int, obj) -> None:
-            body = json.dumps(obj, ensure_ascii=False).encode()
+            if isinstance(obj, Raw):
+                body, ctype = obj.body, obj.content_type
+            else:
+                body, ctype = json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8"
             self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

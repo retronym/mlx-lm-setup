@@ -33,7 +33,7 @@ WEB = Path(__file__).parent / "web"
 # allowed because each page is a single self-contained file; nothing is ever loaded from another origin.
 PAGE_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-                               "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+                               "connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
 }
 
@@ -206,6 +206,34 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         body = apply_defaults(body, prof)
         return await forward(spec, "/entail", body)
 
+    async def speech(request: Request):
+        """OpenAI-compatible text to speech: {"model"?, "input", "voice"?, "speed"?} -> audio/wav."""
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "tts")
+        return await forward(spec, "/v1/audio/speech", apply_defaults(body, prof))
+
+    async def speak(request: Request):
+        """Like /v1/audio/speech but returns JSON: the clip's path on disk, duration and per-sentence-group timings."""
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "tts")
+        return await forward(spec, "/speak", apply_defaults(body, prof))
+
+    async def transcribe(request: Request):
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "stt")
+        return await forward(spec, "/transcribe", apply_defaults(body, prof))
+
+    async def voices(request: Request):
+        """For the chat site's voice picker: each speech model with its preset voices and the named reference clips."""
+        out = []
+        for s in catalog.backends.values():
+            if s.kind == "tts":
+                refs = Path(s.options["refs_dir"]) if s.options.get("refs_dir") else None
+                clips = sorted(p.stem for p in refs.glob("*.wav")) if refs and refs.is_dir() else []
+                out.append({"model": s.name, "description": s.description, "default_voice": s.options.get("voice"),
+                            "voices": s.options.get("voices", []), "reference_clips": clips})
+        return JSONResponse({"models": out})
+
     async def models(request: Request):
         snap = {s["name"]: s for s in sup().snapshot()}
         return JSONResponse({"object": "list", "data": [
@@ -328,7 +356,11 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
 
     routes = [
         Route("/v1/chat/completions", handler(chat_completions), methods=["POST"]),
+        Route("/v1/audio/speech", handler(speech), methods=["POST"]),
         Route("/v1/models", handler(models), methods=["GET"]),
+        Route("/api/speak", handler(speak), methods=["POST"]),
+        Route("/api/transcribe", handler(transcribe), methods=["POST"]),
+        Route("/api/voices", handler(voices), methods=["GET"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),

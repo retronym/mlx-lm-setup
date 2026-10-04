@@ -68,6 +68,18 @@ class H(BaseHTTPRequestHandler):
             return self._json([one(q) for q in req["questions"]])
         if self.path == "/entail":
             return self._json({"labels": ["contradiction", "entailment", "neutral"], "probs": [[0, 1, 0] for _ in req["hypotheses"]]})
+        if self.path == "/speak":
+            if not req.get("text"):
+                return self._err(400, {"error": "ValueError: text is empty"})
+            return self._json({"path": "/tmp/fake.wav", "duration_s": 1.5, "sample_rate": 24000, "cached": False, "echo": req,
+                               "segments": [{"text": req["text"], "start_s": 0.0, "end_s": 1.5}]})
+        if self.path == "/v1/audio/speech":
+            b = b"RIFFfakewav"
+            self.send_response(200); self.send_header("Content-Type", "audio/wav"); self.send_header("Content-Length", str(len(b))); self.end_headers()
+            return self.wfile.write(b)
+        if self.path == "/transcribe":
+            return self._json({"text": "hello world", "language": "en", "duration_s": 1.0, "segments": [], "echo": req,
+                               "words": [{"word": "hello", "start_s": 0.0, "end_s": 0.5}, {"word": "world", "start_s": 0.5, "end_s": 1.0}]})
         t0 = time.time(); time.sleep(req.get("sleep", 0))
         self._json({"pid": os.getpid(), "t0": t0, "t1": time.time()})
     def _err(self, code, obj):

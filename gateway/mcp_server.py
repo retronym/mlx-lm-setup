@@ -30,6 +30,8 @@ INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start o
 - decide: typed decisions (choose among options, rate on a scale, yes/no) with probabilities, from a local decision model;
   nothing is generated. Good for classification, routing, triage, tagging.
 - entail: check claims against a source text with a local NLI model (entailment / contradiction / neutral). A weak signal.
+- speak: text to speech with a local voice model; returns a wav file path, its duration and per-sentence-group timings (for
+  video explainers: script in, timed narration out). transcribe: speech to text with word timestamps (for captions).
 - backends_status: what is running, memory use and idle timers. start_backend / stop_backend / set_backend_policy change
   what is running and need the gateway token.
 A call that needs a model that is not running waits for it to start (seconds; the first call after idle is slower)."""
@@ -199,6 +201,32 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
             probs = {lab: round(x, 4) for lab, x in zip(labels, p)}
             res.append({"hypothesis": h, "label": max(probs, key=probs.get), **probs})
         return {"model": meta["backend"], "results": res, "cold_start_s": meta["cold_start_s"]}
+
+    @mcp.tool()
+    async def speak(text: str, voice: str | None = None, model: str | None = None, speed: float = 1.0, instruct: str | None = None,
+                    ref_audio: str | None = None, ref_text: str | None = None, name: str | None = None, fresh: bool = False,
+                    lang_code: str | None = None) -> dict:
+        """Turn text into speech with a local text-to-speech model and write a wav file. Returns `path` (absolute), `duration_s`,
+        `sample_rate` and `segments` ([{text, start_s, end_s}] per sentence group, for timing captions and cuts). Any text length
+        works (it is split at sentence boundaries; a blank line makes a longer pause). `voice` is a preset (see GET /api/voices),
+        `speed` 0.5..2. Cloning models take `ref_audio`, the name of a clip in data/voices (data/voices/<name>.wav, transcript in
+        <name>.txt or `ref_text`); voice-design models take `instruct`, a description of the voice. The same request returns the
+        cached clip (`cached: true`); `fresh` forces a new take. `name` prefixes the file name. Starts the model if needed."""
+        spec = spec_for(model, "tts")
+        body = {k: v for k, v in dict(text=text, voice=voice, speed=speed, instruct=instruct, ref_audio=ref_audio, ref_text=ref_text,
+                                      name=name, fresh=fresh or None, lang_code=lang_code).items() if v is not None}
+        data, meta = await call(spec, "/speak", body, profile_for(model, "tts"))
+        return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
+
+    @mcp.tool()
+    async def transcribe(path: str, language: str | None = None, words: bool = True, model: str | None = None) -> dict:
+        """Speech to text with a local Whisper model. `path` must be an audio file inside the gateway's audio directory (data/audio,
+        where `speak` writes) or voices directory. Returns text, `segments` and, unless `words` is false, per-word timestamps
+        ([{word, start_s, end_s}]) for captions or word-synced highlights. Also a check that a `speak` clip says what it should."""
+        spec = spec_for(model, "stt")
+        body = {k: v for k, v in dict(path=path, language=language, words=words).items() if v is not None}
+        data, meta = await call(spec, "/transcribe", body)
+        return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
 
     # ---- lifecycle (token required) -----------------------------------------------------------------------------------
     @mcp.tool()

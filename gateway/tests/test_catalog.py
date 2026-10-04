@@ -118,3 +118,26 @@ class CatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeechAdapterTests(unittest.TestCase):
+    def parse(self, **b):
+        return parse({"backends": {"v": {"adapter": "mlx_audio_tts", "python": "py", "model": "org/tts", "est_mem_gb": 2, **b}}}, Path("/base"))
+
+    def test_tts_command_and_default_directories(self):
+        s = self.parse(voice="af_heart", voices=["af_heart", "bm_george"]).backends["v"]
+        self.assertEqual(s.kind, "tts")
+        cmd = s.command()
+        self.assertEqual(cmd[cmd.index("--output-dir") + 1], "/base/data/audio")
+        self.assertEqual(cmd[cmd.index("--refs-dir") + 1], "/base/data/voices")
+        self.assertEqual(cmd[cmd.index("--voice") + 1], "af_heart")
+        self.assertEqual(s.options["voices"], ["af_heart", "bm_george"])
+
+    def test_stt_and_validation(self):
+        s = parse({"backends": {"w": {"adapter": "mlx_audio_stt", "python": "py", "model": "org/stt", "est_mem_gb": 3}}}, Path("/base")).backends["w"]
+        self.assertEqual(s.kind, "stt")
+        self.assertIn("--audio-dir", s.command())
+        with self.assertRaises(CatalogError):
+            self.parse(voices="af_heart")
+        with self.assertRaises(CatalogError):
+            self.parse(nonsense=1)

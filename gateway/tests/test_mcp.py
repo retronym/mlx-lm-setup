@@ -29,6 +29,8 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             "llm2": {"kind": "llm", "est_mem_gb": 6},
             "dec": {"kind": "decision", "est_mem_gb": 1},
             "nli": {"kind": "nli", "est_mem_gb": 1},
+            "voice": {"kind": "tts", "est_mem_gb": 1},
+            "ears": {"kind": "stt", "est_mem_gb": 1},
         }, port=self.port, default_llm="llm", memory_budget_gb=10, room_timeout_s=0.4)
         self.sup = Supervisor(self.cat, state_dir=Path(self.tmp.name) / "state", reap_interval=0.05, health_interval=0.05, grace_s=0.5)
         app = create_app(self.cat, supervisor=self.sup, token=TOKEN)
@@ -66,7 +68,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -76,7 +78,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
         async with self.client() as s:
             err, data, _ = await self.call(s, "backends_status")
             self.assertFalse(err)
-            self.assertEqual([b["name"] for b in data["backends"]], ["llm", "llm2", "dec", "nli"])
+            self.assertEqual([b["name"] for b in data["backends"]], ["llm", "llm2", "dec", "nli", "voice", "ears"])
             self.assertEqual(data["memory"]["budget_gb"], 10)
             self.assertEqual(data["default_llm"], "llm")
             self.assertIn("free_pct", data["system"])
@@ -134,6 +136,22 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
                 err, _, text = await self.call(s, "decide", **args)
                 self.assertTrue(err)
                 self.assertIn("invalid_arguments", text)
+
+    async def test_speak_and_transcribe(self):
+        async with self.client() as s:
+            err, data, _ = await self.call(s, "speak", text="hello there", voice="af_heart", fresh=True)
+            self.assertFalse(err)
+            self.assertEqual((data["duration_s"], data["backend"], data["segments"][0]["end_s"]), (1.5, "voice", 1.5))
+            self.assertEqual((data["echo"]["voice"], data["echo"]["fresh"], "instruct" in data["echo"]), ("af_heart", True, False))
+            err, _, text = await self.call(s, "speak", text="")
+            self.assertTrue(err)
+            self.assertIn("text is empty", text)
+            err, _, text = await self.call(s, "speak", text="x", model="llm")
+            self.assertTrue(err)
+            self.assertIn("wrong_model_kind", text)
+            err, data, _ = await self.call(s, "transcribe", path="/x.wav")
+            self.assertFalse(err)
+            self.assertEqual([w["word"] for w in data["words"]], ["hello", "world"])
 
     async def test_entail(self):
         async with self.client() as s:

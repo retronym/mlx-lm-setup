@@ -111,3 +111,29 @@ chat_template_kwargs = { enable_thinking = true }
 
 # Not candidates on this machine: DeepSeek-V4-Flash is 151.5 GB at 4-bit (a thread called it "smallish"); Qwen3.8-27B and
 # Qwen3.6-27B are dense (16.1 GB at 4-bit, reported 8-12 tok/s, long thinking).
+
+# --- speech (phase 9) -------------------------------------------------------------------------------------------------------
+# One venv for all speech models (.venv-audio: mlx-audio, python 3.13). Clips are written to data/audio (output_dir) and named
+# reference voices for cloning live in data/voices (refs_dir); both can be overridden per backend. See PLAN.md "Speech".
+
+[backends.kokoro]
+adapter = "mlx_audio_tts"
+description = "Narration voice (Kokoro, 82M): fast and clean English with many preset voices, no cloning. About 30x faster than real time, so a minute of audio takes a couple of seconds."
+python = ".venv-audio/bin/python"
+model = "mlx-community/Kokoro-82M-bf16"
+voice = "af_heart"
+voices = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_nova", "af_aoede", "af_kore", "af_alloy", "af_jessica", "af_river",
+          "am_adam", "am_michael", "am_eric", "am_liam", "am_onyx", "am_puck", "am_fenrir", "am_echo",
+          "bf_emma", "bf_isabella", "bf_alice", "bf_lily", "bm_george", "bm_daniel", "bm_lewis", "bm_fable"]
+est_mem_gb = 2.5
+ttl_s = 900
+aliases = ["tts"]
+
+[backends.whisper]
+adapter = "mlx_audio_stt"
+description = "Speech to text (Whisper large-v3-turbo) with word timestamps, for captions and for checking that a generated clip says what it should."
+python = ".venv-audio/bin/python"
+model = "mlx-community/whisper-large-v3-turbo-asr-fp16"
+est_mem_gb = 3
+ttl_s = 300
+aliases = ["stt"]
