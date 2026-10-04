@@ -4,16 +4,21 @@
 
 ## What you can do with it
 
-- **Chat with a local LLM** in the browser (`/`): streaming, tokens per second, a collapsible view of the model's reasoning, markdown and code rendering, a model picker with memory and context details.
-- **Decide instead of generate** (`/jev`): give a text, a question and a list of options, and a decision model scores every option in a single forward pass, returning probabilities (pick the best emoji, classify sentiment, triage a bug, rate urgency on a scale). It is fast, deterministic and cheap, and it never generates text.
-- **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks), plus the speech tools below. Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
-- **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide`, `/api/entail` and `/api/score` (log P(candidate | prompt) for a closed list of continuations, from an LLM, without generating).
-- **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop, and an activity timeline of every request lease (wait, run, outcome; also `/api/requests`). The home page (`/`) shows one panel per section with live model state.
-- **Speak and listen** (`narrate`, `voices`, `speak`, `transcribe`, `/v1/audio/speech`): local text-to-speech with Kokoro and Qwen3-TTS (preset, designed or cloned voices) and Whisper for word timestamps. `narrate` turns scenes with `[[cue]]` markers into clips with word and cue timings, so Claude can narrate and time a video explainer entirely on the Mac ([docs/SPEECH.md](docs/SPEECH.md)).
-- **See** (`look`, image parts on `/v1/chat/completions`, `/vision`): Gemma 4 or Qwen3.6 vision on the weights already on disk. Layout checks of film stills and screenshots (overlap, clipping, bad wraps), frames against their storyboard, tables and charts in PDF pages. Paste, drop or point at a directory; the page and the tool return a `flagged` list (PLAN.md, Vision).
-- **Translate** (`/translate`, `translate`, `/api/translate`, a macOS Shortcut): text or a screenshot into English (or another language; the page defaults to Polish → English) with a short summary. Screenshots are read by macOS's own OCR (no model load), so a warm translation takes 1–3 s ([pipelines/translate](pipelines/translate/README.md)).
-- **Search the Scala sources** (`/search`, `search`, `/api/search`, `/v1/embeddings`, `/api/rerank`): hybrid keyword + vector retrieval with a cross-encoder reranker over scala/scala (compiler, library, spec), the Scala 3 docs and scala/bug issues and comments. Returns passages with links, not answers. About 1 s per query once warm; the index is built and refreshed incrementally by [pipelines/search](pipelines/search/README.md).
-- **Run pipelines on top**: an NLI triage of scala/scala pull requests, the search indexer, an emoji-annotated *Alice in Wonderland* ([pipelines/emoji_book](pipelines/emoji_book/README.md)) and narrated explainer films. All are ordinary code that calls the gateway, never a model in process (see [Pipelines](#pipelines)).
+- **In the browser:** the pages below.
+- **From Claude Code:** the gateway's MCP server delegates cheap, bounded, checkable work to local models; the hosted model keeps design and hard reasoning.
+- **From code:** an OpenAI-compatible API at `/v1`, plus `/api/*` endpoints for each capability.
+
+| Capability | Page | MCP tools | What it's for |
+|---|---|---|---|
+| Chat | `/chat` | `chat`, `iterate` | Streaming local LLM with a model picker; `iterate` retries until JSON, regex, length or faithfulness gates pass |
+| Decide | `/jev` | `decide`, `entail` | Score a list of options in one forward pass instead of generating; NLI claim checks |
+| Speech | `/speech` | `speak`, `narrate`, `transcribe`, `voices` | Local text-to-speech and word-timed transcripts ([docs/SPEECH.md](docs/SPEECH.md)) |
+| Vision | `/vision` | `look` | Layout checks of stills and screenshots, tables and charts in PDF pages |
+| Translate | `/translate` | `translate` | Text or a screenshot into English in 1–3 s ([pipelines/translate](pipelines/translate/README.md)) |
+| Search | `/search` | `search` | Hybrid search over Scala sources, docs and issues, returning passages with links ([pipelines/search](pipelines/search/README.md)) |
+| Operate | `/admin`, `/` | `backends_status`, `start_backend`, `stop_backend`, `set_backend_policy` | Live state, memory, idle timers, pinning, request timeline |
+
+Built on top: [pipelines](#pipelines) for PR triage, search indexing and an emoji-annotated book, and narrated explainer films.
 
 Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
 
