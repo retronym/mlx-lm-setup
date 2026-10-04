@@ -7,7 +7,7 @@ before synthesis and resolved to the start time of the first spoken word after t
 Whisper's. Animations key off cue names, so re-recording a line re-times its scene. Also extracts the real data shown on screen
 (the Alice phrase, the triage ROC curves, model sizes) into data.json. Standard library only.
 """
-import argparse, difflib, json, re, shutil, tomllib, urllib.request
+import argparse, array, difflib, json, math, re, shutil, tomllib, urllib.request, wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +53,17 @@ def resolve(script_words, spoken, cues, duration):
     return out
 
 
+def peaks(path, fps=30):
+    """RMS level per video frame, normalised to the loudest frame (PCM16 mono wav), for drawing the waveform."""
+    with wave.open(str(path)) as w:
+        n, sr = w.getnframes(), w.getframerate()
+        a = array.array("h", w.readframes(n))
+    step = sr // fps
+    rms = [math.sqrt(sum(x * x for x in a[i:i + step]) / max(len(a[i:i + step]), 1)) for i in range(0, len(a), step)]
+    top = max(rms) or 1
+    return [round(r / top, 3) for r in rms]
+
+
 def roc(results, label):
     pts = sorted(((r["p"][label][1], r["truth"][label]) for r in results), reverse=True)     # p = [contradiction, entailment, neutral]
     P = sum(t for _, t in pts); N = len(pts) - P
@@ -64,7 +75,9 @@ def roc(results, label):
         curve.append((fp / N, tp / P))
     at_half = sum(1 for s, t in pts if s >= 0.5)
     prec = sum(1 for s, t in pts if s >= 0.5 and t) / max(at_half, 1)
+    tp_half = sum(1 for s, t in pts if s >= 0.5 and t)
     return {"label": label, "auc": round(auc / N, 3), "positives": P, "n": len(pts),
+            "at_half": [round((at_half - tp_half) / N, 4), round(tp_half / P, 4)],
             "curve": [[round(x, 4), round(y, 4)] for x, y in curve], "precision_at_half": round(prec, 3), "flagged_at_half": at_half}
 
 
@@ -113,7 +126,7 @@ def main():
         missing = [c for c in cues if c not in times]
         print(f"{sc['id']:<10} {clip['duration_s']:6.2f}s {'(cached)' if clip.get('cached') else ''}  cues: {times}" + (f"  MISSING {missing}" if missing else ""), flush=True)
         scenes.append({"id": sc["id"], "audio": f"audio/{sc['id']}.wav", "duration_s": clip["duration_s"], "lead_s": sc.get("lead", 0.3),
-                       "tail_s": sc.get("tail", 0.6), "text": text, "cues": times,
+                       "tail_s": sc.get("tail", 0.6), "text": text, "cues": times, "peaks": peaks(out / "audio" / f"{sc['id']}.wav"),
                        "words": [{"w": w["word"], "s": round(w["start_s"], 3), "e": round(w["end_s"], 3)} for w in words]})
     (out / "timeline.json").write_text(json.dumps({"fps": 30, "scenes": scenes}, ensure_ascii=False, indent=1))
     extract_data(out)
