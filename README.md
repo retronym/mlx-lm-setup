@@ -11,11 +11,13 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 | Role | Model | Runtime / env | Memory | Used for |
 |---|---|---|---|---|
 | Generative LLM | Qwen3-Coder-30B-A3B-Instruct, 4-bit (MoE, ~3B active) | `mlx-lm` 0.32 (Homebrew, python 3.14) | ~17 GB | chat, MCP sub-agent, emoji next-token scoring (`lm_emoji.py`) |
+| Generative LLM | Qwen3.6-35B-A3B, 4-bit (MoE, 3B active; thinks by default) | `mlx-lm` 0.32 | ~21.5 GB peak | general sub-agent work at speed, long context (small KV cache) |
+| Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default: passed all six benchmark tasks, smallest memory |
 | NLI cross-encoder | OpenJev 4B v5 (Qwen3.5-4B fine-tune; also 2B, 0.8B) | PyTorch on MPS, `.venv-jev` (python 3.12) | ~9 GB | claim verification, PR triage. Slow: no fast kernels for Qwen3.5's linear-attention layers on MPS |
 | Decision model | Jev-Style 2B v3 (Qwen3.5-2B fine-tune), 8-bit | MLX, `.venv-mlxjev` (versions pinned, the runtime refuses others) | ~2 GB weights | emoji, colour, mood, sentiment: one pass scores hundreds of options |
 | Encoder (alternative) | open-jev DeBERTa-v3-large | PyTorch on MPS, `.venv-jev` | 1.7 GB | fast baseline; 512-token cap |
 
-Weights live under `models/` (git-ignored) or the Hugging Face cache. The 4B NLI and the DeBERTa model are not currently used by any pipeline, only by benchmarks and the triage demo.
+Which LLM to pick for which job, with measurements: **[docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md)**. Weights live under `models/` (git-ignored) or the Hugging Face cache. The 4B NLI and the DeBERTa model are not currently used by any pipeline, only by benchmarks and the triage demo.
 
 ## Architecture
 
@@ -168,7 +170,7 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `score_worker.py`, `jev_attrs.py`, `lm_emoji.py`, `emoji_book_fused.py`, `emoji_vocab.py`, `chunker_spacy.py`, `chunk_book.py`, `recolor.py` | emoji book pipeline (current) |
 | `emoji_book.py`, `emoji_book_mlx.py` | earlier pipeline iterations, kept for reference |
 | `jev_check.py`, `jev_triage.py` | OpenJev NLI wrapper and PR triage |
-| `bench_*.py`, `fuse_*.py`, `bench_all.sh`, `run_fused.sh` | benchmarks and fusion experiments |
+| `bench_*.py`, `fuse_*.py`, `bench_all.sh`, `run_fused.sh` | benchmarks and fusion experiments (`bench_llm_compare.py`: head-to-head of the catalog LLMs, one model per process) |
 | `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
 | `docs/FINDINGS.md` | long-form log of what was tried |
 | `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
