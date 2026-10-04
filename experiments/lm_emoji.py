@@ -9,7 +9,8 @@ import mlx.core as mx
 from mlx_lm import load
 from mlx_lm.models.cache import make_prompt_cache
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 sys.path.insert(0, HERE)
 from emoji_vocab import EMOJI
 from lm_prompt import FEWSHOT

@@ -4,7 +4,7 @@ A 3-minute explainer of this project with motion design, rendered entirely on th
 
 ```bash
 python3 examples/showcase/narrate.py          # narration (clone voice "narrator"), word timestamps, cues, data.json -> data/showcase/
-node examples/showcase/capture.mjs            # screenshots of the real sites (needs the gateway and dashboard_server.py running)
+node examples/showcase/capture.mjs            # screenshots of the real sites (needs the gateway and pipelines/dashboard_server.py running)
 cd examples/showcase && npm install && npm run render     # -> data/showcase/showcase.mp4
 ```
 

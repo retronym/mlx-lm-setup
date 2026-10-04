@@ -8,7 +8,8 @@ import numpy as np
 import mlx.core as mx
 from mlx_lm import load
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"
 FEWSHOT = """Phrase: The cat knocked the glass off the table and stared at me.
 Emoji: 😼

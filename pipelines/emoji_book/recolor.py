@@ -1,11 +1,12 @@
 """Re-answer ONLY the colour question for phrases already in scores_jev.jsonl (cheap: tiny question on a ~25-token state).
-  python3 recolor.py         # via the gateway's decision model
+  python3 pipelines/emoji_book/recolor.py         # via the gateway's decision model
 """
 import json, os, sys, time
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path[:0] = [HERE, os.path.dirname(HERE)]
 import gateway_client as gw
 from jev_attrs import COLOR_Q, make_state, attr_result
-D = os.path.join(HERE, "data"); P = os.path.join(D, "scores_jev.jsonl")
+D = os.path.join(ROOT, "data"); P = os.path.join(D, "scores_jev.jsonl")
 words = [w["w"] for w in json.load(open(os.path.join(D, "book_words.json")))]
 chunks = json.load(open(os.path.join(D, "book_chunks.json")))
 rows = [json.loads(l) for l in open(P) if l.strip()]

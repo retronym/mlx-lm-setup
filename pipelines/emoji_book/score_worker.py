@@ -1,14 +1,15 @@
 """Score every book phrase with ONE model via the gateway and append raw per-emoji scores to data/scores_<mode>.jsonl (resumable).
-  python3 score_worker.py jev    # Jev-Style 2B decision model (names as options), plus colour, mood and sentiment
-  python3 score_worker.py lm     # Qwen3-Coder log P(emoji | few-shot), via /api/score
+  python3 pipelines/emoji_book/score_worker.py jev    # Jev-Style 2B decision model (names as options), plus colour, mood and sentiment
+  python3 pipelines/emoji_book/score_worker.py lm     # Qwen3-Coder log P(emoji | few-shot), via /api/score
 The gateway (.venv/bin/python -m gateway) starts the model on first use and keeps it inside the memory budget.
 """
 import json, os, sys, time
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(os.path.dirname(HERE))
+sys.path[:0] = [HERE, os.path.dirname(HERE)]
 from emoji_vocab import EMOJI
 import gateway_client as gw
 mode = sys.argv[1]; fresh = "--fresh" in sys.argv
-D = os.path.join(HERE, "data"); OUT = os.path.join(D, f"scores_{mode}.jsonl")
+D = os.path.join(ROOT, "data"); OUT = os.path.join(D, f"scores_{mode}.jsonl")
 words = [w["w"] for w in json.load(open(os.path.join(D, "book_words.json")))]
 chunks = json.load(open(os.path.join(D, "book_chunks.json")))
 if fresh and os.path.exists(OUT): os.remove(OUT)

@@ -1,7 +1,8 @@
 """Local-context variants for the Jev-Style 2B scorer: state = [before] ⟦chunk⟧ [after], question points at the marked passage."""
 import json, os, sys, time
 import numpy as np
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "models", "jevstyle-2b-mlx"))
 from emoji_vocab import EMOJI
 from jev_style_decision_mlx import JevStyleDecisionMLX

@@ -1,17 +1,17 @@
 """Tiny localhost-only server for dashboard.html. Serves ONLY the dashboard and its two data files.
 
-Usage: python3 dashboard_server.py [port]    (default 8766)
+Usage: python3 pipelines/dashboard_server.py [port]    (default 8766)
 """
 import http.server, os, sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # paths below are relative to the repo root
 ALLOWED = {
-    "/": "dashboard.html",
-    "/dashboard.html": "dashboard.html",
+    "/": "pipelines/pr_triage/dashboard.html",
+    "/dashboard.html": "pipelines/pr_triage/dashboard.html",
     "/data/status.json": "data/status.json",
     "/data/results.jsonl": "data/results.jsonl",
-    "/book": "book.html",
-    "/book.html": "book.html",
+    "/book": "pipelines/emoji_book/book.html",
+    "/book.html": "pipelines/emoji_book/book.html",
     "/data/book_words.json": "data/book_words.json",
     "/data/book_status.json": "data/book_status.json",
     "/data/book_events.jsonl": "data/book_events.jsonl",
@@ -21,7 +21,7 @@ ALLOWED = {
 class Handler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path):
         rel = ALLOWED.get(path.split("?", 1)[0])
-        return os.path.join(HERE, rel) if rel else os.path.join(HERE, "__missing__")
+        return os.path.join(ROOT, rel) if rel else os.path.join(ROOT, "__missing__")
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")

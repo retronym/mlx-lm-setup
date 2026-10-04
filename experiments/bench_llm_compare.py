@@ -10,7 +10,8 @@ import mlx.core as mx
 from mlx_lm import load, stream_generate
 from mlx_lm.sample_utils import make_sampler
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 MODEL, LABEL = sys.argv[1], sys.argv[2]
 SCALA = """object Foo {
   def a(x: Int): Int = x + 1

@@ -6,14 +6,14 @@ so dashboard.html can follow along live. Resumable: PRs already in results.jsonl
 
 Scoring goes through the gateway's NLI backend (/api/entail), which starts OpenJev on first use.
 
-Usage: python3 jev_triage.py [--limit N] [--fresh]
+Usage: python3 pipelines/pr_triage/jev_triage.py [--limit N] [--fresh]
 """
 import argparse, json, os, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 import gateway_client as gw
-DATA = os.path.join(HERE, "data")
+DATA = os.path.join(os.path.dirname(os.path.dirname(HERE)), "data")
 PRS, RESULTS, STATUS = (os.path.join(DATA, f) for f in ("prs.json", "results.jsonl", "status.json"))
 
 # (key, short name, hypothesis shown to the model, GitHub labels that count as ground truth)

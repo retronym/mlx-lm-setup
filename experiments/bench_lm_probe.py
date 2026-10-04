@@ -1,6 +1,6 @@
 import json, os, sys, time
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipelines", "emoji_book"))
 from emoji_vocab import EMOJI
 from lm_emoji import LMEmoji
 model = sys.argv[1] if len(sys.argv) > 1 else "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit"

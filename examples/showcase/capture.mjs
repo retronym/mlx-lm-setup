@@ -1,5 +1,5 @@
 // Screenshot the real sites for the film: chat, decide, admin, speech (gateway :8090) and the emoji book and triage dashboard
-// (dashboard_server.py :8766). Drives them with real requests, so the models start on demand.
+// (pipelines/dashboard_server.py :8766). Drives them with real requests, so the models start on demand.
 //   node examples/showcase/capture.mjs [only,...]
 import { chromium } from "playwright";
 import { readFileSync, mkdirSync } from "node:fs";

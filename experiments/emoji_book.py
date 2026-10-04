@@ -11,11 +11,13 @@ Deterministic loop (no text generation anywhere):
 Usage: .venv-jev/bin/python emoji_book.py [--fresh] [--max-phrases N] [--vocab N]
 Env:   JEV_SUBFOLDER=qwen3.5-2b-nli-v5 to use another checkpoint (see jev_check.py)
 """
+import sys
 import argparse, json, math, os, time
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 DATA = os.path.join(HERE, "data")
 WORDS, EVENTS, STATUS, LOGITS = (os.path.join(DATA, f) for f in
                                  ("book_words.json", "book_events.jsonl", "book_status.json", "book_logits.jsonl"))

@@ -1,11 +1,12 @@
 """Combine the two workers' scores (z-score fusion, w_lm=0.6, LM logprobs floored at max-12) into book_events.jsonl.
-  .venv-jev/bin/python emoji_book_fused.py [--fresh]
+  .venv-jev/bin/python pipelines/emoji_book/emoji_book_fused.py [--fresh]
 """
 import json, os, sys, time
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 from emoji_vocab import EMOJI
-D = os.path.join(HERE, "data")
+D = os.path.join(ROOT, "data")
 W_LM, FLOOR, TOP_K, MIN_Z = 0.6, 12.0, 3, 1.5
 words = [w["w"] for w in json.load(open(f"{D}/book_words.json"))]
 chunks = json.load(open(f"{D}/book_chunks.json"))

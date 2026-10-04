@@ -7,7 +7,8 @@ import os, sys, time
 import numpy as np
 import torch
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # the repo root: data/ and models/ live there
+sys.path[:0] = [os.path.join(HERE, "experiments"), os.path.join(HERE, "pipelines", "emoji_book")]
 MODEL_DIR = os.path.join(HERE, "models", "openjev")
 SUBFOLDER = os.environ.get("JEV_SUBFOLDER", "qwen3.5-4b-nli-v5")
 LABELS = ["contradiction", "entailment", "neutral"]  # head order per model card
