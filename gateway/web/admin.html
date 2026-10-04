@@ -52,6 +52,23 @@
   #toast.bad { border-color: var(--bad); color: var(--bad); }
   #banner { display: none; margin-bottom: 12px; font-size: 13px; }
   code { font: 12px ui-monospace, Menlo, monospace; background: var(--track); padding: 1px 5px; border-radius: 4px; }
+  /* activity timeline: one lane per model, a bar per request (hatched = waiting / cold start), ticks for model starts and stops */
+  .tlh { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); margin-bottom: 6px; } .tlh h2 { margin: 0; }
+  .tlh select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: auto; }
+  .lane { display: grid; grid-template-columns: 150px 1fr; align-items: center; height: 22px; }
+  .lane .nm { font: 11px ui-monospace, Menlo, monospace; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track { position: relative; height: 14px; background: var(--track); border-radius: 4px; }
+  .rq { position: absolute; top: 2px; height: 10px; border-radius: 3px; min-width: 3px; background: var(--c); }
+  .rq.wait { opacity: .45; background-image: repeating-linear-gradient(45deg, transparent 0 3px, #fff6 3px 6px); }
+  .rq.live { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 35%, transparent); animation: pulse 1s ease-in-out infinite; }
+  .rq.error { background: var(--bad); } .rq.cancelled { opacity: .35; }
+  .tev { position: absolute; top: -2px; width: 2px; height: 18px; border-radius: 1px; background: var(--muted); }
+  .tev.ready { background: var(--good); } .tev.starting { background: var(--warn); } .tev.failed, .tev.crashed { background: var(--bad); }
+  .axis { display: grid; grid-template-columns: 150px 1fr; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .axis div:last-child { display: flex; justify-content: space-between; }
+  .tlempty { font-size: 12px; color: var(--muted); padding: 4px 0; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @media (max-width: 520px) { .lane, .axis { grid-template-columns: 90px 1fr; } }
 </style>
 </head>
 <body>
@@ -86,6 +103,12 @@
       <div class="bar"><i id="swapBar" style="width:0"></i></div>
       <div class="note">The tick marks the free-memory limit below which an idle model is evicted. Swap can stay high after pressure eases; growth is what triggers eviction.</div>
     </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px">
+    <div class="tlh"><h2>Activity</h2><span id="tlsum"></span>
+      <select id="win"><option value="60">1 min</option><option value="300" selected>5 min</option><option value="900">15 min</option><option value="3600">1 h</option></select></div>
+    <div id="lanes"></div><div class="axis"><div></div><div id="ticks"></div></div>
   </div>
 
   <div class="card" style="margin-bottom:12px; overflow-x:auto">
@@ -218,6 +241,38 @@ function connect() {
   es.addEventListener("log", m => addLog(JSON.parse(m.data)));
 }
 connect();
+// ---- activity timeline (as on the home page, coloured like the memory stack) ----
+let tl = null, tlAt = 0;
+const LABEL = p => ({ "/v1/chat/completions": "chat", "/api/decide": "decide", "/decide": "decide", "/score_many": "decide", "/entail": "entail",
+                      "/speak": "speak", "/v1/audio/speech": "speech", "/transcribe": "transcribe", "/score": "score" })[p] || p;
+async function pollTimeline() {
+  try { tl = await (await fetch(`/api/requests?window_s=${$("win").value}`)).json(); tlAt = performance.now(); } catch {}
+}
+function drawTimeline() {
+  if (!tl) return;
+  const W = +$("win").value, now = tl.now + (performance.now() - tlAt) / 1000, x0 = now - W;
+  const pct = t => Math.max(0, Math.min(100, 100 * (t - x0) / W));
+  const reqs = [...tl.recent, ...tl.active], names = [...new Set([...reqs.map(r => r.backend), ...tl.events.map(e => e.backend)])];
+  names.sort((a, b) => (order.indexOf(a) + 1 || 1e9) - (order.indexOf(b) + 1 || 1e9));
+  const lanes = names.map(n => {
+    const bars = reqs.filter(r => r.backend === n && (r.t1 ?? now) >= x0).map(r => {
+      const run = r.t_run ?? (r.t1 ?? now), end = r.t1 ?? now, live = r.t1 == null;
+      const tip = `${n} · ${LABEL(r.label)} · ${r.status}${r.cold ? " · cold start" : ""} · waited ${(run - r.t0).toFixed(1)} s · ran ${(end - run).toFixed(1)} s${r.error ? " · " + r.error : ""}`;
+      return (run > r.t0 + 0.05 ? `<span class="rq wait" style="left:${pct(r.t0)}%;width:${pct(run) - pct(r.t0)}%" title="${esc(tip)}"></span>` : "") +
+             `<span class="rq ${live ? "live" : esc(r.status)}" style="left:${pct(run)}%;width:${pct(end) - pct(run)}%" title="${esc(tip)}"></span>`;
+    }).join("");
+    const evs = tl.events.filter(e => e.backend === n && e.ts >= x0).map(e => `<span class="tev ${esc(e.kind)}" style="left:${pct(e.ts)}%" title="${esc(n + " " + e.kind + " " + new Date(e.ts * 1000).toLocaleTimeString())}"></span>`).join("");
+    const i = order.indexOf(n);
+    return `<div class="lane" style="--c:${i >= 0 ? colorOf(i) : "var(--muted)"}"><div class="nm" title="${esc(n)}">${esc(n)}</div><div class="track">${bars}${evs}</div></div>`;
+  });
+  $("lanes").innerHTML = lanes.length ? lanes.join("") : '<div class="tlempty">no requests in this window</div>';
+  const done = tl.recent.length, act = tl.active.length;
+  $("tlsum").textContent = `${act ? act + " active · " : ""}${done} finished in the window`;
+  const lbl = s => s >= 60 ? `-${Math.round(s / 60)} min` : `-${Math.round(s)} s`;
+  $("ticks").innerHTML = [W, W * .75, W / 2, W / 4].map(s => `<span>${lbl(s)}</span>`).join("") + "<span>now</span>";
+}
+$("win").onchange = pollTimeline;
+pollTimeline(); setInterval(pollTimeline, 1000); setInterval(drawTimeline, 200);
 </script>
 </body>
 </html>
