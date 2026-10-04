@@ -46,3 +46,13 @@ run = "service/service.sh status"
 [tasks.service-logs]
 description = "Tail the gateway log (arg: line count, default 50)"
 run = "service/service.sh logs {{arg(name='lines', default='50')}}"
+
+[tasks.discover]
+description = "List MLX models on disk (HF cache, LM Studio); pass --snippet <id> --context N --kv-bits B for a catalog entry"
+depends = ["setup"]
+run = ".venv/bin/python -m gateway.cli discover"
+
+[tasks.live-check]
+description = "Exercise every gateway tool against a running gateway with the real models"
+depends = ["setup"]
+run = ".venv/bin/python -m gateway.live_check"

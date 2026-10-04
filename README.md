@@ -147,7 +147,7 @@ Backends are declared in `gateway.toml`; adding a model is a `[backends.<name>]`
 - **Arguments**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
 - **Profiles**: `[profiles.<name>]` is a named virtual model on an existing backend with request defaults (sampling, token cap, `chat_template_kwargs` such as `enable_thinking`, a system prompt). Client values win; no second process.
 - **Description**: shown in the chat page's model picker and `GET /api/models` with memory breakdown, thinking default, context limit and KV cost.
-- **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio); `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
+- **Discovery** (read-only): `mise run discover` lists MLX models on disk (HF cache, LM Studio); `mise run discover -- --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
 
 ### Tests
 
@@ -155,7 +155,7 @@ No models needed (a fake backend); CI runs them on macOS.
 
 ```bash
 mise run test        # creates .venv from requirements.txt
-.venv/bin/python -m gateway.live_check     # against the real models
+mise run live-check  # against the real models, needs a running gateway
 ```
 
 ## Next
