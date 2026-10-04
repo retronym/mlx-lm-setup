@@ -261,7 +261,7 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
 
 
 # ---- search over the indexed Scala sources (HTTP API and MCP tool) -------------------------------------------------------------
-SEARCH_SOURCES = {"scalac": "scala/scala (compiler, reflect, library, spec)", "scala3docs": "Scala 3 reference and internals docs",
+SEARCH_SOURCES = {"scalac": "scala/scala (compiler, reflect, library, spec)", "scala3": "scala/scala3 (compiler, library, tasty-core, sbt-bridge)", "scala3docs": "Scala 3 reference and internals docs",
                   "bug": "scala/bug issues and comments"}
 
 

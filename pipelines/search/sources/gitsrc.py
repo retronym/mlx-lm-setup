@@ -139,6 +139,8 @@ SOURCES = {
     "scalac": lambda: GitSource("scalac", f"{CODE}/scala/scala", "https://github.com/scala/scala", "HEAD",
                                 ["src/compiler", "src/reflect", "src/library", "spec"], (".scala", ".md"),
                                 lambda p, t: chunk_markdown(p, t) if p.endswith(".md") else chunk_scala(p, t)),
+    "scala3": lambda: GitSource("scala3", f"{CODE}/scala/scala3", "https://github.com/scala/scala3", "HEAD",
+                                ["compiler/src", "library/src", "tasty-core/src", "sbt-bridge/src"], (".scala",), chunk_scala),
     "scala3docs": lambda: GitSource("scala3docs", f"{CODE}/scala/scala3", "https://github.com/scala/scala3", "HEAD",
                                     ["docs/_docs/reference", "docs/_docs/internals"], (".md",), chunk_markdown),
 }
