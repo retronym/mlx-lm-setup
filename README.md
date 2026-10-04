@@ -24,20 +24,19 @@ The gateway is the front door for Claude Code (MCP over HTTP) and starts, stops 
 ```mermaid
 flowchart TB
   CC["Claude Code"] -- "MCP over HTTP + token" --> GW
+  BR["Browser"] -- "chat site / and admin site /admin<br/>(SSE live status, token via URL fragment)" --> GW
   subgraph gw ["Gateway · python -m gateway · :8090 · .venv"]
-    GW["MCP /mcp · OpenAI API /v1 · /api/decide · /api/entail · /api/backends<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
+    GW["chat and admin sites · MCP /mcp · OpenAI API /v1 · /api/decide · /api/entail · /api/backends<br/>supervisor: lazy start, idle passivation, memory budget with LRU eviction, pressure monitor"]
   end
   GW -- "spawn / stop / proxy" --> Q["qwen3-coder :18101<br/>mlx_lm.server · Homebrew python · ~17.5 GB"]
   GW -- "spawn / stop / proxy" --> O["openjev-4b :18102<br/>OpenJev NLI · .venv-jev · ~9.5 GB"]
   GW -- "spawn / stop / proxy" --> J["jevstyle-2b :18103<br/>Jev-Style decision · .venv-mlxjev · ~3 GB"]
   subgraph direct ["Standalone scripts, outside the gateway's memory management"]
     SRV["serve.sh: mlx_lm.server :8080<br/>~17 GB"]
-    CHAT["chat.sh: chat.html :8765"]
     TRI["jev_triage.py: OpenJev 4B directly<br/>~9 GB"]
     JW["score_worker.py jev: Jev-Style directly"]
     LW["score_worker.py lm: its OWN in-process<br/>Qwen3-Coder copy, ~17 GB"]
   end
-  CHAT -- "HTTP :8080 (CORS open)" --> SRV
   DASH["dashboard_server.py :8766<br/>whitelisted pages + data files"]
   TRI -- "results.jsonl" --> DASH
   JW -- "scores_jev.jsonl" --> FUS["emoji_book_fused.py"]
@@ -118,9 +117,11 @@ python3 dashboard_server.py &                      # http://127.0.0.1:8766/
 
 ```bash
 brew install mlx-lm                  # one-time
-./serve.sh &                         # mlx_lm.server on 127.0.0.1:8080 (OpenAI-compatible, localhost only)
-./chat.sh                            # chat UI at http://127.0.0.1:8765/chat.html (streaming, tok/s)
-./ask.sh "Summarize" < Foo.scala     # one-shot
+.venv/bin/python -m gateway &        # the gateway: chat site, admin site, MCP, OpenAI-compatible API on 127.0.0.1:8090
+open http://127.0.0.1:8090/          # chat site: streaming, tok/s, shows "starting model..." on a cold start
+python -m gateway admin              # admin site, authenticated (opens your browser; token travels in the URL fragment only)
+./ask.sh "Summarize" < Foo.scala     # one-shot through the gateway
+./serve.sh &                         # optional, independent of the gateway: a plain mlx_lm.server on :8080 (use ./ask.sh "..." 8080)
 ```
 
 The standalone server above is independent of the gateway. Claude Code now talks to the **gateway's own MCP server** (the third-party `mlx-mcp-server` was retired: unregistered, uninstalled; its vetting notes remain in [docs/FINDINGS.md](docs/FINDINGS.md)).
@@ -161,7 +162,7 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 
 | Path | What |
 |---|---|
-| `serve.sh`, `ask.sh`, `chat.sh`, `chat.html` | LLM server, one-shot client, chat UI |
+| `serve.sh`, `ask.sh` | standalone LLM server, one-shot client (gateway by default) |
 | `dashboard_server.py`, `dashboard.html`, `book.html` | whitelist-only localhost server; triage dashboard; emoji book |
 | `score_worker.py`, `jev_attrs.py`, `lm_emoji.py`, `emoji_book_fused.py`, `emoji_vocab.py`, `chunker_spacy.py`, `chunk_book.py`, `recolor.py` | emoji book pipeline (current) |
 | `emoji_book.py`, `emoji_book_mlx.py` | earlier pipeline iterations, kept for reference |
@@ -170,13 +171,13 @@ Details, tables and dead ends: [docs/FINDINGS.md](docs/FINDINGS.md).
 | `data/`, `models/`, `corpus/`, `.venv*/`, `*.log` | generated or downloaded; git-ignored |
 | `docs/FINDINGS.md` | long-form log of what was tried |
 | `PLAN.md` | design for the model gateway (lifecycle, passivation, MCP, web) and its phase status |
-| `gateway.toml`, `gateway/` | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-4 and 6 done: catalog, supervisor, HTTP front door, MCP tools, memory budget) |
+| `gateway.toml`, `gateway/` (`web/` holds the chat and admin sites) | gateway: catalog (`python -m gateway.catalog`), supervisor, HTTP app (`python -m gateway`), thin backend servers for the decision and NLI models; supervisor in `gateway/supervisor.py`, driver: `python -m gateway.cli demo jevstyle-2b --ttl 5`; all tests: `.venv/bin/python -m unittest discover -s gateway/tests -t .` (phases 1-6 done: catalog, supervisor, HTTP front door, MCP tools, chat and admin sites, memory budget) |
 
 Environments: `.venv` (the gateway: `mcp[cli]<2`, uvicorn, httpx), `.venv-jev` (torch, transformers, spaCy), `.venv-mlxjev` (pinned `mlx==0.32.2 mlx-lm==0.31.3 transformers==5.17.0 tokenizers==0.23.2 numpy==2.5.3`). Two of these exist because dependency pins conflict, which is one reason the planned gateway runs each model as a separate process.
 
 ## Gateway (in progress)
 
-A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-4 and 6 are built (catalog, supervisor, HTTP proxy, MCP tools, memory budget); the admin and chat sites, the gated `iterate` tool, migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
+A localhost gateway that starts models on demand, passivates idle ones, and fronts them with one API. Phases 1-6 are built (catalog, supervisor, HTTP proxy, MCP tools, chat and admin sites, memory budget); the gated `iterate` tool, migrating the workers and launchd come next (see [PLAN.md](PLAN.md)). **Memory is managed**: a 28 GB budget with least-recently-used eviction of idle backends (busy and pinned ones are never evicted), plus a pressure monitor that evicts an idle backend when macOS reports low free memory or growing swap.
 
 ```bash
 .venv/bin/python -m gateway                      # http://127.0.0.1:8090, backends start lazily, stop on idle or SIGTERM
