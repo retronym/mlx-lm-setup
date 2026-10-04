@@ -43,6 +43,8 @@ Image or Text to Text
 ![img_6.png](img_6.png)
 ### Admin
 ![img_5.png](img_5.png)
+### Semantic Search
+![img_7.png](img_7.png)
 
 ## The models
 
