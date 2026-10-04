@@ -48,6 +48,29 @@ async def demo(args):
         pt.cancel()
 
 
+def discover(a) -> None:
+    from pathlib import Path
+    from . import discovery
+    cat = cat_mod.load(a.catalog)
+    dirs = discovery.default_dirs() + [("dir", Path(d).expanduser()) for d in a.dir]
+    found = discovery.scan(cat, dirs, llm_only=not a.all)
+    if a.snippet:
+        hits = [f for f in found if f.id == a.snippet] or [f for f in found if a.snippet.lower() in f.id.lower()]
+        if len(hits) != 1:
+            sys.exit(f"{'no model' if not hits else 'ambiguous: ' + ', '.join(f.id for f in hits)} matches {a.snippet!r}; run `discover` to list")
+        print(discovery.snippet(hits[0], context_tokens=a.context, kv_bits=a.kv_bits, python=discovery.catalog_python(cat) or "python3"), end="")
+        return
+    bits = f"{a.kv_bits}-bit" if a.kv_bits else "fp16"
+    print(f"{len(found)} MLX model(s) found; KV sized for {a.context} tokens ({bits}). Read-only: nothing is changed or started.\n")
+    print(f"{'model':56s} {'GB':>6s} {'type':14s} {'bits':>4s} {'mlx-lm':>6s} {'KiB/tok':>8s} {'KV':>6s}  in catalog")
+    for f in found:
+        kv = f.kv_gb(a.context, a.kv_bits)
+        sup = {True: "yes", False: "NO", None: "?"}[f.supported]
+        print(f"{f.id:56s} {f.weights_gb:6.1f} {str(f.model_type):14s} {str(f.quant_bits or '-'):>4s} {sup:>6s} "
+              f"{f.kv_kib_per_token if f.kv_kib_per_token is not None else '-':>8} {('%.1fG' % kv) if kv is not None else '-':>6s}  {', '.join(f.in_catalog) or '-'}")
+    print("\nTo add one: python -m gateway.cli discover --snippet <id> [--context N] [--kv-bits N]  (prints a table to paste into gateway.toml)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m gateway.cli")
     ap.add_argument("--catalog", default="gateway.toml")
@@ -58,12 +81,25 @@ def main(argv=None):
     d.add_argument("--ttl", type=float, default=5)
     d.add_argument("--cycles", type=int, default=2)
     d.add_argument("--path", default="/health")
+    v = sub.add_parser("discover", help="list MLX models on disk (read-only); --snippet ID prints a catalog entry for one")
+    v.add_argument("--dir", action="append", default=[], help="extra directory to scan (repeatable)")
+    v.add_argument("--context", type=int, default=32768, help="context length (tokens) to size the KV cache for")
+    v.add_argument("--kv-bits", type=int, choices=[2, 3, 4, 5, 6, 8], default=None, help="quantized KV cache (adds --kv-bits to the snippet)")
+    v.add_argument("--all", action="store_true", help="include MLX models that are not generative LLMs")
+    v.add_argument("--snippet", metavar="ID", help="print a [backends.*] table for this model (exact id or unique substring)")
     a = ap.parse_args(argv)
+    if a.cmd == "discover":
+        return discover(a)
     if a.cmd == "catalog":
         c = cat_mod.load(a.catalog)
         print(f"gateway {c.gateway.host}:{c.gateway.port}, budget {c.gateway.memory_budget_gb} GB")
         for s in c.backends.values():
-            print(f"- {s.name} [{s.kind}] :{s.port} ~{s.est_mem_gb} GB ttl {s.ttl_s}s start-timeout {s.start_timeout_s}s concurrency {s.concurrency}\n    {' '.join(s.command())}")
+            mem = f"~{s.est_mem_gb} GB" + (f" (weights {s.weights_gb} + KV {s.kv_gb} + overhead {s.overhead_gb}"
+                                           + (f", sized for {s.context_tokens} tokens" if s.context_tokens else "") + ")" if s.weights_gb else "")
+            print(f"- {s.name} [{s.kind}] :{s.port} {mem} ttl {s.ttl_s}s start-timeout {s.start_timeout_s}s concurrency {s.concurrency}\n    {' '.join(s.command())}")
+        for p in c.profiles.values():
+            print(f"- profile {p.name} -> {p.backend}" + (f" (aliases {', '.join(p.aliases)})" if p.aliases else "") + f": {p.defaults}"
+                  + (" + system prompt" if p.system_prompt else "") + (f"  # {p.description}" if p.description else ""))
     else:
         asyncio.run(demo(a))
 

@@ -16,11 +16,12 @@ from urllib.parse import urlsplit
 import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 
 from . import auth
 from .catalog import Catalog
+from . import discovery
 from .profiles import apply_defaults
 from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
@@ -215,6 +216,35 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
              "aliases": list(p.aliases), "state": snap[p.backend]["state"], "ready": snap[p.backend]["state"] == "ready"}
             for p in catalog.profiles.values() if catalog.backends[p.backend].kind == "llm"]})
 
+    def discovery_params(request: Request) -> tuple[int, int | None]:
+        try:
+            ctx = int(request.query_params.get("context_tokens", 32768))
+            bits = request.query_params.get("kv_bits")
+            bits = int(bits) if bits else None
+        except ValueError:
+            raise ApiError(400, "invalid_parameter", "context_tokens and kv_bits must be integers") from None
+        if not 256 <= ctx <= 4_000_000:
+            raise ApiError(400, "invalid_parameter", "context_tokens must be between 256 and 4000000")
+        if bits not in (None, 2, 3, 4, 5, 6, 8):
+            raise ApiError(400, "invalid_parameter", "kv_bits must be one of 2, 3, 4, 5, 6, 8")
+        return ctx, bits
+
+    async def models_discovered(request: Request):
+        """Read-only: MLX LLMs found on disk (HF cache, LM Studio) with sizes, KV estimates and catalog status."""
+        ctx, bits = discovery_params(request)
+        found = await asyncio.to_thread(discovery.scan, catalog, None, llm_only=True)       # stats + one subprocess: off the event loop
+        return JSONResponse({"context_tokens": ctx, "kv_bits": bits, "models": [discovery.to_dict(f, ctx, bits) for f in found]})
+
+    async def models_snippet(request: Request):
+        """Read-only: a [backends.*] table for one discovered model, as text. Takes a model id, never a path."""
+        ctx, bits = discovery_params(request)
+        mid = request.query_params.get("id", "")
+        found = await asyncio.to_thread(discovery.scan, catalog, None, llm_only=True)
+        hit = next((f for f in found if f.id == mid), None)
+        if hit is None:
+            raise ApiError(404, "model_not_found", f"{mid!r} is not among the discovered models")
+        return PlainTextResponse(discovery.snippet(hit, context_tokens=ctx, kv_bits=bits, python=discovery.catalog_python(catalog) or "python3"))
+
     async def backends(request: Request):
         return JSONResponse(await status_payload(catalog, sup()))
 
@@ -275,6 +305,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),
+        Route("/api/models/discovered", handler(models_discovered), methods=["GET"]),
+        Route("/api/models/snippet", handler(models_snippet), methods=["GET"]),
         Route("/api/backends/{name}/start", handler(api_start), methods=["POST"]),
         Route("/api/backends/{name}/stop", handler(api_stop), methods=["POST"]),
         Route("/api/backends/{name}/policy", handler(api_policy), methods=["POST"]),
