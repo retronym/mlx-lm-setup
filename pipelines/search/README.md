@@ -5,12 +5,14 @@ One SQLite file (`data/search.db`, git-ignored) holding chunks, an FTS5 keyword 
 | Source | What | Change detection |
 |---|---|---|
 | `scalac` | scala/scala `src/{compiler,reflect,library}` (one chunk per member-level definition, prefixed with path, package and enclosing definition) and `spec/` (per heading section) | git blob sha per file; only changed files are re-chunked, vanished files are deleted |
+| `scala3` | scala/scala3 `compiler/src`, `library/src`, `tasty-core/src`, `sbt-bridge/src` (same chunker; tests excluded) | same |
 | `scala3docs` | Scala 3 `docs/_docs/{reference,internals}` (per heading section) | same |
-| `bug` | scala/bug issues, one chunk group per issue, one chunk per comment | `since=<max updated_at>` on the issues and the repo-wide comments stream; state and labels are metadata, so closing an issue updates a row but re-embeds nothing |
+| `bug` | scala/bug issues (title + body) and every comment as its own chunk | per stream (issues, comments) `since=<cursor>` on `updated`, ascending; paged, committed and cursor-saved after every page, so an interrupted run resumes; rate limit checked every 25 pages (sleeps to the reset below 300 left), 403/429 waited out; state and labels are metadata, so closing an issue re-embeds nothing |
+| `scalapr` | scala/scala pull requests (title + body; state open / merged / closed), conversation comments and inline review comments (with the diff hunk) | same three streams; bots and `/rebuild`-style commands skipped; default horizon 2020-01-01 (`--since` widens) |
 
 ```bash
 PY=/path/to/.venv-jev/bin/python           # numpy, torch, transformers
-$PY pipelines/search/sync.py               # scalac scala3docs bug; add `reconcile` to drop deleted issues; --since ISO8601 widens the issue backfill
+$PY pipelines/search/sync.py               # scalac scala3 scala3docs bug scalapr; add `reconcile` to drop deleted issues; --since ISO8601 widens the issue backfill
 $PY pipelines/search/embed.py              # fill missing/stale vectors (Qwen3-Embedding-0.6B, MPS, ~50 chunks/s); resumable
 $PY pipelines/search/search.py "where is eta expansion of by-name parameters handled"
 $PY pipelines/search/search.py --rerank "where does the backend decide to emit invokedynamic for lambdas"   # + Qwen3-Reranker-0.6B over the top 30 (~3 s more)
@@ -51,3 +53,13 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 | `GET /api/search/status` | chunks and embedded chunks per source, last sync position; reads the SQLite file, starts nothing |
 
 The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.
+
+## Progress dashboard
+
+```bash
+python3 pipelines/search/dashboard.py        # http://127.0.0.1:8767/  (stdlib only, read-only on the index)
+```
+
+One card per source with a "synced" bar (git sources: files indexed of files in the tree; GitHub sources: where each stream's cursor is between its start date and now, per stream) and an "embedded" bar (chunks that have a current vector), plus an overall bar with the embedding rate and ETA, running sync / embed indicators, and the latest log lines.
+
+Backfilling older history is `sync.py bug --since 2000-01-01T00:00:00Z` (then `embed.py`); it is idempotent, so a re-run only costs the API requests.

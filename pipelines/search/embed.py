@@ -79,7 +79,7 @@ def vector_search(st, emb, q, k, source=None, open_only=False):
     s = m @ emb.query(q).astype(np.float16)
     if source or open_only:
         ok = {r[0] for r in st.db.execute(
-            f"SELECT rowid FROM chunks c WHERE (? IS NULL OR source=?) AND (? = 0 OR {STATE_SQL} IS NOT 'closed')",
+            f"SELECT rowid FROM chunks c WHERE (? IS NULL OR source=?) AND (? = 0 OR COALESCE({STATE_SQL}, 'open') NOT IN ('closed', 'merged'))",
             (source, source, int(open_only)))}
         s = np.where(np.isin(ids, list(ok)), s, -np.inf)
     top = np.argsort(-s)[:k]

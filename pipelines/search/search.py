@@ -30,7 +30,7 @@ def bm25(st, q, k, source=None, open_only=False):
     if source:
         cond += " AND c.source = ?"; args.append(source)
     if open_only:
-        cond += f" AND {STATE_SQL} IS NOT 'closed'"
+        cond += f" AND COALESCE({STATE_SQL}, 'open') NOT IN ('closed', 'merged')"
     return [r[0] for r in st.db.execute(sql.format(cond), (*args, k))]
 
 

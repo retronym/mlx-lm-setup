@@ -42,7 +42,7 @@ class Store:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self.db = sqlite3.connect(path)
+        self.db = sqlite3.connect(path, timeout=60)         # a sync and an embed pass may run at the same time
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS chunks(rowid INTEGER PRIMARY KEY, id TEXT UNIQUE, source TEXT, doc TEXT, title TEXT,
                 text TEXT, hash TEXT, url TEXT, meta TEXT, updated REAL);
