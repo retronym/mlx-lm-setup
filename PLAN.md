@@ -140,7 +140,7 @@ sequenceDiagram
 | 0 | Restructure README with architecture and pipeline diagrams; move the findings log to `docs/FINDINGS.md` | **DONE** |
 | 1 | `gateway.toml` schema; `jevstyle_server.py` and `openjev_server.py` thin backends; confirm FastMCP streamable-HTTP + custom routes + streaming proxy on `mcp<2`; measure cold-cache load times | **DONE** (cold-cache timing needs `sudo purge`, see findings) |
 | 2 | Supervisor core: spawn / health / terminate, state machine, idle TTL, single-flight start, per-backend queue; CLI and unit tests with a fake backend | **DONE** |
-| 3 | HTTP proxy: `/v1/chat/completions` (streaming), `/api/decide`, `/api/entail` with lazy start | TODO |
+| 3 | HTTP proxy: `/v1/chat/completions` (streaming), `/api/decide`, `/api/entail` with lazy start | **DONE** |
 | 4 | MCP tools (table above); register in Claude Code with HTTP transport; retire `mlx-mcp-server` | TODO |
 | 4b | `iterate` with restricted gates (schema, regex, contains, length) and an NLI faithfulness gate; no shell gate | TODO |
 | 5 | Admin site and chat site served by the gateway; SSE events; token for mutating calls | TODO |
@@ -169,6 +169,33 @@ Each phase ends compiling and committed, and I would pause for review after phas
 - **Bugs the tests caught:** the idle reaper only ran if a caller remembered to start it (now starts lazily on first use, so passivation can never be silently skipped); and the orphan check compared `argv[0]`, which breaks for Homebrew's python (it re-execs under another path), so it now matches the distinctive arguments, using `ps -ww` to avoid truncation.
 - **Design notes:** all check-then-flip sections have no `await` in between (asyncio single-threaded), which is what makes the reaper-versus-lease race safe. Catalog gained `start_timeout_s`, `concurrency` and `[gateway].state_dir` (default `.gateway/`, git-ignored; logs in `logs/`, pidfiles in `pids/`).
 - **Not yet:** memory budget and LRU eviction (phase 6). Until then two heavy backends can be resident at once, which is exactly what thrashed the machine, so the admin site (phase 5) must show it, and phase 6 should not slip far behind.
+
+## Catalog evolution (from a model-selection thread, for review; not implemented)
+
+Input: a r/LocalLLM thread on what to run on 48 GB Apple-silicon Macs (a user's own report, treated as claims; the repo ids, sizes and architecture support below were checked). The main model advice is to prefer MoE models: Qwen3.6-35B-A3B (20.4 GB at 4-bit, `qwen3_5_moe`) and Gemma-4-26B-A4B (15.6 GB QAT 4-bit, `gemma4`), both supported by mlx-lm 0.32; dense 27B models are reported at 8-12 tok/s. DeepSeek-V4-Flash is 151.5 GB, so it is not a candidate here. Commented entries for the first two are in `gateway.toml`. Our measured Qwen3-Coder-30B-A3B (103 tok/s, 17.2 GB) is the same MoE class, so the right next step is a head-to-head on our sub-agent tasks, not a switch.
+
+What the thread implies for the catalog schema, ranked by value:
+
+1. **Profiles with request defaults (thinking toggle).** Reasoning models loop ("wait... wait...") and people want thinking on for hard tasks and off for chat. `mlx_lm.server` accepts per-request `chat_template_kwargs`, so a catalog `[profiles.<name>]` (a named virtual model on an existing backend, e.g. `qwen3.6-fast` = backend `qwen3-6-35b-a3b` + `chat_template_kwargs.enable_thinking = false`, temperature, max_tokens) lets clients pick a mode by model name with no second process. Merge rule: profile defaults fill only what the request omits.
+2. **Memory is weights plus KV cache.** The thread reports ~30 GB for a 35B MoE at 5-bit with a 264K context (20 GB weights). `est_mem_gb` must include KV at the configured context, and the adapter should expose KV controls. Document this in the catalog and let phase 6's budget use it.
+3. **Adapter argument passthrough** (`args = [...]`, static in the catalog, never from requests): `--kv-bits`, `--max-tokens`, `--temp`, `--chat-template-args`, `--draft-model` / `--num-draft-tokens` (speculative decoding, the thread's "MTP / dflash" theme), `--decode-concurrency`, `--prompt-cache-bytes`. All exist on the installed `mlx_lm.server`.
+4. **`external` adapter**: attach to an already-running OpenAI-compatible server (oMLX, LM Studio, Ollama, a remote box) by URL. Unmanaged: no start/stop/passivation, but it appears in the admin site and behind the same API and token.
+5. **Discovery**: list MLX models already on disk (HF cache, LM Studio's folder, which the thread notes oMLX and LM Studio share) with size and architecture, and generate the catalog snippet. Admin-site feature, read-only; never launches anything.
+6. **Roles by alias convention** (`fast`, `coder`, `default`) instead of new schema: aliases already exist and the thread's planner/implementer split maps onto them.
+
+Not catalog concerns: agent-harness token overhead, and model quality ranking (benchmark ourselves).
+
+## Phase 3 findings
+
+`gateway/app.py` (Starlette), `gateway/__main__.py` (`python -m gateway`), `gateway/tests/test_app.py` and `test_main.py`; 34 tests in total, stable over repeated runs.
+
+- **Endpoints** (all on :8090): `POST /v1/chat/completions` (OpenAI-compatible, streaming and not), `GET /v1/models`, `POST /api/decide` (routes to the backend's `/decide`, or `/score_many` when the body has `questions`), `POST /api/entail`, read-only `GET /api/backends`, `GET /healthz`. `model` resolves by backend name or alias (an `mlx_lm` model id is an implicit alias, so existing clients that send the Hugging Face id keep working), defaults to `default_llm`, and is rewritten to the backend's own id (`mlx_lm.server` may otherwise try to load a different model).
+- **Streaming:** chunks are proxied incrementally (verified arrival spacing); the lease is held for the whole stream so a backend cannot be passivated mid-response, and it is released when the client disconnects. A cold start is reported in `X-Gateway-Cold-Start-Secs`; `X-Gateway-Backend` names the backend.
+- **Errors** use the OpenAI error shape: 404 `model_not_found`, 400 `wrong_model_kind` / `invalid_json`, 503 `backend_start_failed` (with the backend's log tail) then `backend_unavailable` with `Retry-After` during backoff, 502 `backend_error`; a backend's own 4xx passes through unchanged.
+- **Host/Origin policy** is a pure-ASGI middleware over every route: wrong Host or port is 421, a non-loopback Origin is 403 (rejected before any backend is started), loopback origins get CORS and preflights are answered. Verified live.
+- **Live run with the real models** (`python -m gateway`): Qwen3-Coder cold start 6.7 s, first streamed token 9.3 s after the request, warm requests carry no cold header; Jev-Style cold start 3.5 s; OpenJev 15.4 s (it was 11 s on an idle machine, see below).
+- **Bug found only by the live test:** after SIGTERM the gateway exited but left every backend running. Cause: uvicorn >= 0.29 re-raises a captured signal as soon as `serve()` returns, killing the process before our cleanup ran. The gateway now owns signal handling (first signal graceful, second forces) so the cleanup always runs. `test_main.py` runs the real `python -m gateway` as a subprocess and asserts it exits 0 and that the backend, its child and the pidfiles are gone; I confirmed the test fails (exit -15) without the fix. The supervisor's orphan reaper was also validated for real: it cleaned up the three backends the buggy shutdown had left.
+- **Evidence for phase 6:** with all three backends resident (30 GB of the 28 GB budget, which is not enforced yet) free memory fell to 41% and swap reached 12.5 of 13.3 GB, and the OpenJev cold start slowed from 11 s to 15 s. The gateway makes it easy to start everything, so enforcing the budget should come before the MCP and web phases.
 
 ## Risks
 
