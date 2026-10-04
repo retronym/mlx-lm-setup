@@ -85,14 +85,16 @@ for (const id of ["state", "question", "options", "qtype", "count"]) {
 // One option per line; "name: description" becomes {name: description}. Returns a list when no line has a description.
 function parseOptions(text) {
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
-  const pairs = lines.map(l => { const i = l.indexOf(": "); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 2).trim()] : [l, null]; });
+  const seen = new Set();                                  // the decision model rejects duplicate names
+  const pairs = lines.map(l => { const i = l.indexOf(": "); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 2).trim()] : [l, null]; })
+    .filter(([k]) => { const key = k.toLowerCase(); return !seen.has(key) && seen.add(key); });
   return pairs.some(p => p[1]) ? Object.fromEntries(pairs) : pairs.map(p => p[0]);
 }
 
 async function api(path, body, signal) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((j.error?.message || `HTTP ${r.status}`) + (j.error?.type ? `  [${j.error.type}]` : ""));
+  if (!r.ok) throw new Error((typeof j.error === "string" ? j.error : j.error?.message || `HTTP ${r.status}`) + (j.error?.type ? `  [${j.error.type}]` : ""));
   return j;
 }
 function busy(btn, stat, msg) {
@@ -113,11 +115,11 @@ async function loadLlms() {
 }
 $("llm").addEventListener("change", () => store.set("gwjev.llm", $("llm").value));
 
-// The ✨ button: a local LLM proposes the option list for the prompt (and question, if given).
+// The ✨ button: a local LLM proposes the option list for the question.
 function extractList(text) {
   const m = text.match(/\[[\s\S]*\]/);
   if (m) { try { const a = JSON.parse(m[0]); if (Array.isArray(a)) return a.map(x => typeof x === "string" ? x : x?.name ? (x.description ? `${x.name}: ${x.description}` : x.name) : "").filter(Boolean); } catch {} }
-  return text.split("\n").map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").trim()).filter(Boolean);       // fall back to a bulleted/numbered list
+  return text.split("\n").map(l => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "").replace(/^["'\[]+|["',\]]+$/g, "").trim()).filter(Boolean);       // fall back to a bulleted/numbered list
 }
 $("magic").addEventListener("click", async () => {
   const question = $("question").value.trim(), n = parseInt($("count").value, 10) || 8;
@@ -128,10 +130,12 @@ $("magic").addEventListener("click", async () => {
   const user = `Question: ${question}\n\nGive exactly ${n} options as a JSON array of strings.`;
   const done = busy($("magic"), $("magicstat"), "Asking " + $("llm").value);
   try {
-    const j = await api("/v1/chat/completions", { model: $("llm").value, stream: false, temperature: 0.4, max_tokens: 1024,
+    const j = await api("/v1/chat/completions", { model: $("llm").value, stream: false, temperature: 0.4, max_tokens: Math.max(1024, n * 32),
                                                    messages: [{ role: "system", content: sys }, { role: "user", content: user }] });
-    const items = extractList(j.choices?.[0]?.message?.content || "");
+    const items = extractList(j.choices?.[0]?.message?.content || "");      // may repeat itself; parseOptions drops duplicates below
     if (!items.length) throw new Error("the model returned no options; try again");
+    const uniq = parseOptions(items.join("\n")); items.length = 0;
+    for (const [k, v] of Array.isArray(uniq) ? uniq.map(k => [k, null]) : Object.entries(uniq)) items.push(v ? `${k}: ${v}` : k);
     $("options").value = items.join("\n"); store.set("gwjev.options", $("options").value);
     done(); $("magicstat").textContent = `${items.length} options from ${$("llm").value}. Edit freely.`;
   } catch (e) { done(); $("magicstat").className = "status err"; $("magicstat").textContent = String(e.message || e); }
