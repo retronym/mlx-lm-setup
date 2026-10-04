@@ -15,8 +15,8 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from . import auth
 from .catalog import Catalog
-from .core import ApiError, map_errors, post_json, resolve
-from .supervisor import GatewayError, Supervisor
+from .core import ApiError, compact_backend, map_errors, op_policy, op_start, op_stop, post_json, resolve, status_payload
+from .supervisor import Supervisor
 
 INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start on first use and stop when idle.
 - chat: a local LLM (default Qwen3-Coder). Good for bounded, checkable work: summaries, extraction, boilerplate, simple
@@ -27,12 +27,6 @@ INSTRUCTIONS = """Local model gateway (Apple silicon, localhost). Models start o
 - backends_status: what is running, memory use and idle timers. start_backend / stop_backend / set_backend_policy change
   what is running and need the gateway token.
 A call that needs a model that is not running waits for it to start (seconds; the first call after idle is slower)."""
-
-
-def _compact_backend(s: dict) -> dict:
-    keep = ("name", "kind", "state", "busy", "est_mem_gb", "holds_memory", "ttl_s", "ttl_left_s", "idle_s", "pinned",
-            "requests", "starts", "passivations", "last_start_s", "last_error")
-    return {k: s[k] for k in keep if k in s}
 
 
 def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_client: Callable[[], httpx.AsyncClient], token: str) -> FastMCP:
@@ -71,7 +65,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         """Which local models are running, with state, memory estimate, idle timer, TTL and pin; plus the memory budget and
         the system's free memory and swap. Does not start anything."""
         sup = get_supervisor()
-        return {"backends": [_compact_backend(s) for s in sup.snapshot()], "memory": sup.memory_status(),
+        return {"backends": [compact_backend(s) for s in sup.snapshot()], "memory": sup.memory_status(),
                 "system": await sup.system_status(), "default_llm": catalog.gateway.default_llm}
 
     # ---- inference ---------------------------------------------------------------------------------------------------
@@ -150,42 +144,28 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         """Start a local model now (idempotent) so the next call is fast. Needs the gateway token. May evict idle models to
         make room within the memory budget."""
         authorize(ctx)
-        sup = get_supervisor()
         try:
-            b = await sup.start(name)
-        except GatewayError as e:
+            return await op_start(get_supervisor(), name)
+        except ApiError as e:
             raise fail(e) from None
-        return {"name": name, "state": b.state.value, "start_s": b.start_secs, "est_mem_gb": b.spec.est_mem_gb}
 
     @mcp.tool()
     async def stop_backend(name: str, ctx: Context, force: bool = False) -> dict:
         """Stop a local model now (idempotent) to free its memory. Waits for in-flight requests unless `force`. Needs the gateway token."""
         authorize(ctx)
-        sup = get_supervisor()
         try:
-            await sup.stop(name, force=force)
-        except GatewayError as e:
+            return await op_stop(get_supervisor(), name, force)
+        except ApiError as e:
             raise fail(e) from None
-        return _compact_backend(next(s for s in sup.snapshot() if s["name"] == name))
 
     @mcp.tool()
     async def set_backend_policy(name: str, ctx: Context, ttl_s: float | None = None, pinned: bool | None = None) -> dict:
         """Change a model's idle timeout (`ttl_s` seconds, 0 = never passivate) and/or `pinned` (never evicted or passivated).
         Takes effect immediately, lasts until the gateway restarts. Needs the gateway token."""
         authorize(ctx)
-        sup = get_supervisor()
         try:
-            b = sup._get(name)
-        except GatewayError as e:
+            return op_policy(catalog, get_supervisor(), name, ttl_s, pinned)
+        except ApiError as e:
             raise fail(e) from None
-        if pinned and not b.pinned:
-            total = sum(r.spec.est_mem_gb for r in sup.rt.values() if r.pinned or r is b)
-            if total > catalog.gateway.memory_budget_gb:
-                raise ToolError(f"invalid_arguments: pinning {name} would pin {total:g} GB, more than the {catalog.gateway.memory_budget_gb:g} GB budget")
-        try:
-            sup.set_policy(name, ttl_s=ttl_s, pinned=pinned)
-        except ValueError as e:
-            raise ToolError(f"invalid_arguments: {e}") from None
-        return _compact_backend(next(s for s in sup.snapshot() if s["name"] == name))
 
     return mcp

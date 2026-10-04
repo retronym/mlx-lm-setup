@@ -52,3 +52,66 @@ async def post_json(sup: Supervisor, client: httpx.AsyncClient, spec: BackendSpe
     except Exception as e:                                           # noqa: BLE001
         raise map_errors(e) from e
     return r, {"backend": spec.name, "cold_start_s": round(cold, 2) if cold > COLD_HEADER_THRESHOLD_S else 0.0}
+
+
+# ---- lifecycle operations shared by the HTTP API and the MCP tools ---------------------------------------------------------
+_COMPACT = ("name", "kind", "state", "busy", "est_mem_gb", "holds_memory", "ttl_s", "ttl_left_s", "idle_s", "pinned",
+            "requests", "starts", "passivations", "last_start_s", "last_error")
+
+
+def compact_backend(s: dict) -> dict:
+    return {k: s[k] for k in _COMPACT if k in s}
+
+
+def _snap(sup: Supervisor, name: str) -> dict:
+    return compact_backend(next(s for s in sup.snapshot() if s["name"] == name))
+
+
+def _runtime(sup: Supervisor, name: str):
+    try:
+        return sup._get(name)
+    except UnknownBackend as e:
+        raise ApiError(404, "model_not_found", str(e)) from None
+
+
+async def op_start(sup: Supervisor, name: str) -> dict:
+    _runtime(sup, name)
+    try:
+        await sup.start(name)
+    except Exception as e:                                           # noqa: BLE001
+        raise map_errors(e) from e
+    return _snap(sup, name)
+
+
+async def op_stop(sup: Supervisor, name: str, force: bool = False) -> dict:
+    _runtime(sup, name)
+    try:
+        await sup.stop(name, force=force)
+    except Exception as e:                                           # noqa: BLE001
+        raise map_errors(e) from e
+    return _snap(sup, name)
+
+
+def op_policy(catalog: Catalog, sup: Supervisor, name: str, ttl_s: float | None = None, pinned: bool | None = None) -> dict:
+    b = _runtime(sup, name)
+    if ttl_s is not None and (isinstance(ttl_s, bool) or not isinstance(ttl_s, (int, float)) or ttl_s < 0):
+        raise ApiError(400, "invalid_arguments", "ttl_s must be a number >= 0 (0 = never passivate)")
+    if pinned is not None and not isinstance(pinned, bool):
+        raise ApiError(400, "invalid_arguments", "pinned must be true or false")
+    if pinned and not b.pinned:
+        total = sum(r.spec.est_mem_gb for r in sup.rt.values() if r.pinned or r is b)
+        if total > catalog.gateway.memory_budget_gb:
+            raise ApiError(400, "invalid_arguments", f"pinning {name} would pin {total:g} GB, more than the "
+                                                     f"{catalog.gateway.memory_budget_gb:g} GB budget")
+    sup.set_policy(name, ttl_s=ttl_s, pinned=pinned)
+    return _snap(sup, name)
+
+
+async def status_payload(catalog: Catalog, sup: Supervisor) -> dict:
+    """Everything the admin site and /api/backends show: backends, memory budget, system reading, pressure thresholds."""
+    mem = sup.memory_status()
+    g = catalog.gateway
+    return {"backends": sup.snapshot(), "gateway": {
+        "port": g.port, "memory_budget_gb": mem["budget_gb"], "resident_est_gb": mem["resident_gb"], "free_est_gb": mem["free_gb"],
+        "default_llm": g.default_llm, "system": await sup.system_status(),
+        "pressure": {"enabled": g.pressure_eviction, "min_free_pct": g.min_free_pct, "swap_growth_gb": g.swap_growth_gb}}}

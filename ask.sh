@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Send a one-shot prompt to the local server and print the reply.
-# Usage: ./ask.sh "prompt" [port]
+# Send a one-shot prompt to the local gateway (starts the model on first use) and print the reply.
+# Usage: ./ask.sh "prompt" [port]      (port 8090 = the gateway; 8080 = a standalone ./serve.sh)
 #        cat file.scala | ./ask.sh "Summarize this file"
 set -euo pipefail
 
 PROMPT="${1:?usage: ask.sh \"prompt\" [port]}"
-PORT="${2:-8080}"
+PORT="${2:-8090}"
 MODEL="${MLX_MODEL:-mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit}"
 
 # Append stdin (if piped) to the prompt.

@@ -5,25 +5,35 @@ backend is never passivated while a request (including a streaming response) is 
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import time
+from pathlib import Path
 from contextlib import AsyncExitStack
 from urllib.parse import urlsplit
 
 import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 
 from . import auth
 from .catalog import Catalog
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, resolve as core_resolve
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, op_policy, op_start, op_stop, resolve as core_resolve, status_payload
 from .mcp_server import build_mcp
 from .supervisor import Supervisor
 
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]", "::1"}
+WEB = Path(__file__).parent / "web"
+# The pages render model output, so lock them down: same-origin only, no framing, no sniffing. Inline script/style are
+# allowed because each page is a single self-contained file; nothing is ever loaded from another origin.
+PAGE_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                               "connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+}
 
 
 def error_response(status: int, kind: str, message: str, headers: dict | None = None) -> JSONResponse:
@@ -88,6 +98,7 @@ class LocalOnly:
 def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_timeout_s: float = 600.0, token: str | None = None) -> Starlette:
     token = token or auth.load_or_create((supervisor.state_dir if supervisor else catalog.state_path()) / "token")
     state: dict = {"sup": supervisor, "client": None, "owns_sup": supervisor is None}
+    stopping = asyncio.Event()                                       # set when shutdown begins: SSE streams end themselves
 
     def sup() -> Supervisor:
         return state["sup"]
@@ -195,11 +206,55 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             for s in catalog.backends.values() if s.kind == "llm"]})
 
     async def backends(request: Request):
-        mem = sup().memory_status()
-        return JSONResponse({"backends": sup().snapshot(), "gateway": {
-            "port": catalog.gateway.port, "memory_budget_gb": mem["budget_gb"], "resident_est_gb": mem["resident_gb"],
-            "free_est_gb": mem["free_gb"], "default_llm": catalog.gateway.default_llm,
-            "system": await sup().system_status()}})
+        return JSONResponse(await status_payload(catalog, sup()))
+
+    def require_token(request: Request) -> None:
+        if not auth.valid(token, request.headers.get("authorization")):
+            raise ApiError(401, "unauthorized", "this endpoint changes what is running and needs the gateway token "
+                                                "(Authorization: Bearer <token>; see .gateway/token)", {"WWW-Authenticate": "Bearer"})
+
+    async def api_start(request: Request):
+        require_token(request)
+        return JSONResponse(await op_start(sup(), request.path_params["name"]))
+
+    async def api_stop(request: Request):
+        require_token(request)
+        body = await read_json(request) if await request.body() else {}
+        return JSONResponse(await op_stop(sup(), request.path_params["name"], bool(body.get("force", False))))
+
+    async def api_policy(request: Request):
+        require_token(request)
+        body = await read_json(request)
+        return JSONResponse(op_policy(catalog, sup(), request.path_params["name"], body.get("ttl_s"), body.get("pinned")))
+
+    def sse(event: str, data) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    async def events(request: Request):
+        """Server-sent events for the admin site: a status snapshot every second (so idle countdowns tick) and every lifecycle event."""
+        q = sup().subscribe()
+
+        async def gen():
+            try:
+                yield sse("snapshot", await status_payload(catalog, sup()))
+                for e in list(sup().events)[-60:]:
+                    yield sse("log", {**e, "replay": True})
+                while not stopping.is_set():
+                    try:
+                        e = await asyncio.wait_for(q.get(), timeout=1.0)
+                        yield sse("log", e)
+                    except asyncio.TimeoutError:
+                        pass
+                    yield sse("snapshot", await status_payload(catalog, sup()))
+            finally:
+                sup().unsubscribe(q)                                  # also runs when the client disconnects
+
+        return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    def page(name: str):
+        async def serve(request: Request):
+            return FileResponse(WEB / name, media_type="text/html", headers=PAGE_HEADERS)
+        return serve
 
     async def healthz(request: Request):
         return JSONResponse({"status": "ok"})
@@ -210,6 +265,13 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
         Route("/api/backends", handler(backends), methods=["GET"]),
+        Route("/api/backends/{name}/start", handler(api_start), methods=["POST"]),
+        Route("/api/backends/{name}/stop", handler(api_stop), methods=["POST"]),
+        Route("/api/backends/{name}/policy", handler(api_policy), methods=["POST"]),
+        Route("/api/events", events, methods=["GET"]),
+        Route("/", page("chat.html"), methods=["GET"]),
+        Route("/chat", page("chat.html"), methods=["GET"]),
+        Route("/admin", page("admin.html"), methods=["GET"]),
         Route("/healthz", handler(healthz), methods=["GET"]),
     ]
     mcp = build_mcp(catalog, sup, client, token)
@@ -217,4 +279,5 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
     app = Starlette(routes=routes, lifespan=lifespan)
     wrapped = LocalOnly(app, catalog.gateway.port)
     wrapped.starlette = app                                         # for tests / later route additions
+    wrapped.stopping = stopping                                     # the server sets this on SIGTERM/SIGINT
     return wrapped

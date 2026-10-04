@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Admin</title>
+<style>
+  :root {
+    --bg: #fcfcfb; --panel: #f3f2ef; --ink: #0b0b0b; --ink2: #52514e; --muted: #85837c; --line: #e4e2dc; --track: #e6e4de;
+    --accent: #2a78d6; --good: #1b7f4d; --warn: #b36b00; --bad: #c0392b;
+    --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #4a3aa7; --c8: #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a19; --panel: #232321; --ink: #ffffff; --ink2: #c3c2b7; --muted: #8e8c84; --line: #353533; --track: #2f2f2d;
+      --accent: #3987e5; --good: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 16px 16px 48px; }
+  header { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 18px; margin: 0; } h2 { font-size: 13px; margin: 0 0 8px; color: var(--ink2); font-weight: 600; letter-spacing: .02em; }
+  a { color: var(--ink2); } .spacer { flex: 1; }
+  .chip { font-size: 12px; padding: 1px 9px; border-radius: 10px; border: 1px solid var(--line); color: var(--ink2); white-space: nowrap; }
+  .chip.ok { color: var(--good); border-color: var(--good); } .chip.bad { color: var(--bad); border-color: var(--bad); } .chip.warn { color: var(--warn); border-color: var(--warn); }
+  .grid2 { display: grid; grid-template-columns: 3fr 2fr; gap: 12px; margin-bottom: 12px; } @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .big { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; } .big small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .stack { display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--track); gap: 2px; margin: 8px 0 6px; }
+  .seg { display: flex; align-items: center; padding: 0 7px; font-size: 11px; color: #fff; white-space: nowrap; overflow: hidden; min-width: 0; transition: flex-basis .4s; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink2); } .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .bar { position: relative; height: 10px; background: var(--track); border-radius: 5px; margin: 4px 0 2px; }
+  .bar > i { display: block; height: 100%; border-radius: 5px; background: var(--accent); transition: width .4s; }
+  .bar > b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink2); }
+  .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink2); gap: 8px; } .note { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  td small, .sub { display: block; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .name { font-weight: 600; } .num { font-variant-numeric: tabular-nums; }
+  .st { font-weight: 600; white-space: nowrap; } .st.ready { color: var(--good); } .st.starting, .st.passivating { color: var(--warn); } .st.failed { color: var(--bad); } .st.stopped { color: var(--muted); }
+  .ttl { width: 120px; } .ttlbar { height: 5px; background: var(--track); border-radius: 3px; margin-top: 4px; width: 120px; } .ttlbar i { display: block; height: 100%; background: var(--muted); border-radius: 3px; }
+  input[type=number] { width: 74px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+  button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); } button:disabled { opacity: .45; cursor: default; }
+  .err td { color: var(--bad); font-size: 12px; padding-top: 0; }
+  #log { max-height: 320px; overflow-y: auto; font: 12px/1.6 ui-monospace, Menlo, monospace; }
+  .ev { display: grid; grid-template-columns: 62px 104px 118px 1fr; gap: 8px; padding: 1px 0; } .ev.replay { opacity: .6; } .ev .k { font-weight: 600; }
+  .k.ready { color: var(--good); } .k.failed, .k.crashed, .k.rejected { color: var(--bad); } .k.pressure, .k.waiting_for_memory, .k.passivating { color: var(--warn); }
+  #toast { position: fixed; right: 14px; bottom: 14px; max-width: 420px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; display: none; z-index: 5; }
+  #toast.bad { border-color: var(--bad); color: var(--bad); }
+  #banner { display: none; margin-bottom: 12px; font-size: 13px; }
+  code { font: 12px ui-monospace, Menlo, monospace; background: var(--track); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Local Models · Admin</h1>
+    <span class="chip" id="conn">connecting…</span>
+    <span class="chip" id="auth">read-only</span>
+    <span class="spacer"></span>
+    <a href="/">Chat ↗</a>
+  </header>
+  <div class="card" id="banner">Read-only: starting, stopping and policy changes need the gateway token. Open this page with <code>python -m gateway admin</code>.</div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Memory budget (declared estimates)</h2>
+      <div class="big"><span id="resident">–</span> <small>of <span id="budget">–</span> GB resident · <span id="freeGb">–</span> GB free</small></div>
+      <div class="stack" id="stack"></div>
+      <div class="legend" id="legend"></div>
+      <div class="note" id="pnote"></div>
+    </div>
+    <div class="card">
+      <h2>System (macOS)</h2>
+      <div class="row"><span>Free memory</span><span id="freeTxt">–</span></div>
+      <div class="bar"><i id="freeBar" style="width:0"></i><b id="freeMark" style="left:12%"></b></div>
+      <div class="row" style="margin-top:10px"><span>Swap used</span><span id="swapTxt">–</span></div>
+      <div class="bar"><i id="swapBar" style="width:0"></i></div>
+      <div class="note">The tick marks the free-memory limit below which an idle model is evicted. Swap can stay high after pressure eases; growth is what triggers eviction.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:12px; overflow-x:auto">
+    <h2>Backends</h2>
+    <table>
+      <thead><tr><th>Backend</th><th>State</th><th>Memory</th><th>Idle / passivation</th><th>Policy</th><th>Activity</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Events</h2>
+    <div id="log"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---- token: arrives once in the URL fragment (never sent to a server), kept for this tab only ----
+let token = null;
+try {
+  const t = new URLSearchParams(location.hash.slice(1)).get("token");
+  if (t) { sessionStorage.setItem("gwtoken", t); history.replaceState(null, "", location.pathname); }
+  token = sessionStorage.getItem("gwtoken");
+} catch {}
+$("auth").textContent = token ? "authenticated" : "read-only";
+$("auth").className = "chip " + (token ? "ok" : "warn");
+$("banner").style.display = token ? "none" : "block";
+
+function toast(msg, bad) { const t = $("toast"); t.textContent = msg; t.className = bad ? "bad" : ""; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", bad ? 7000 : 2500); }
+async function act(name, what, body) {
+  try {
+    const r = await fetch(`/api/backends/${encodeURIComponent(name)}/${what}`, { method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const j = await r.json();
+    if (!r.ok) toast(`${what} ${name}: ${j.error?.message || r.status}`, true); else toast(`${what} ${name}: ok`);
+  } catch (e) { toast(`${what} ${name}: ${e.message}`, true); }
+}
+
+const fmtDur = s => s == null ? "–" : s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`;
+const ICON = { ready: "●", starting: "◐", passivating: "◑", stopped: "○", failed: "✕" };
+const colorOf = i => `var(--c${i % 8 + 1})`;
+let order = [], rows = {};
+
+function ensureRow(b, idx) {
+  if (rows[b.name]) return rows[b.name];
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><span class="sw" style="background:${colorOf(idx)}"></span><span class="name">${esc(b.name)}</span><small>${esc(b.kind)}</small></td>
+    <td><span class="st"></span><small class="act"></small></td>
+    <td class="num"><span class="mem"></span><small class="held"></small></td>
+    <td class="ttl"><span class="idle"></span><div class="ttlbar"><i style="width:0"></i></div></td>
+    <td><input type="number" min="0" step="30" class="ttlin" title="idle seconds before passivation (0 = never)"> s
+        <label class="sub"><input type="checkbox" class="pin"> pinned</label></td>
+    <td class="num"><span class="counts"></span><small class="start"></small></td>
+    <td><button class="start-b">Start</button> <button class="stop-b">Stop</button></td>`;
+  const err = document.createElement("tr"); err.className = "err"; err.innerHTML = `<td colspan="7"></td>`; err.style.display = "none";
+  $("rows").append(tr, err);
+  const r = { tr, err, q: sel => tr.querySelector(sel) };
+  r.q(".start-b").onclick = () => act(b.name, "start");
+  r.q(".stop-b").onclick = () => act(b.name, "stop");
+  r.q(".pin").onchange = e => act(b.name, "policy", { pinned: e.target.checked });
+  const commit = () => { const v = parseFloat(r.q(".ttlin").value); if (!Number.isNaN(v)) act(b.name, "policy", { ttl_s: v }); };
+  r.q(".ttlin").onkeydown = e => { if (e.key === "Enter") e.target.blur(); };      // blur fires `change`, which commits once
+  r.q(".ttlin").onchange = commit;
+  return rows[b.name] = r;
+}
+
+function update(snap) {
+  const g = snap.gateway, bs = snap.backends;
+  if (!order.length) order = bs.map(b => b.name);
+  // memory stack
+  const budget = g.memory_budget_gb;
+  $("budget").textContent = budget; $("resident").textContent = g.resident_est_gb.toFixed(1); $("freeGb").textContent = g.free_est_gb.toFixed(1);
+  const holders = bs.filter(b => b.holds_memory);
+  $("stack").innerHTML = holders.map(b => `<div class="seg" style="flex:${b.est_mem_gb} 0 0; background:${colorOf(order.indexOf(b.name))}" title="${esc(b.name)}: ${b.est_mem_gb} GB">${b.est_mem_gb / budget > .1 ? esc(b.name) + " " + b.est_mem_gb : ""}</div>`).join("") +
+    `<div style="flex:${Math.max(0.001, g.free_est_gb)} 0 0"></div>`;
+  $("legend").innerHTML = bs.map(b => `<span style="${b.holds_memory ? "" : "opacity:.45"}"><span class="sw" style="background:${colorOf(order.indexOf(b.name))}"></span>${esc(b.name)} ${b.est_mem_gb} GB${b.holds_memory ? "" : " (not loaded)"}</span>`).join("");
+  const p = g.pressure; $("pnote").textContent = p.enabled ? `Idle models are also evicted if free memory < ${p.min_free_pct}% or swap grows ≥ ${p.swap_growth_gb} GB within 30 s.` : "Pressure eviction is off.";
+  // system
+  const s = g.system || {};
+  if (s.free_pct != null) { $("freeTxt").textContent = `${s.free_pct}% free`; $("freeBar").style.width = s.free_pct + "%"; $("freeMark").style.left = p.min_free_pct + "%"; } else $("freeTxt").textContent = "unavailable";
+  if (s.swap_used_gb != null) { $("swapTxt").textContent = `${s.swap_used_gb.toFixed(1)} of ${s.swap_total_gb.toFixed(1)} GB`; $("swapBar").style.width = (100 * s.swap_used_gb / Math.max(0.01, s.swap_total_gb)) + "%"; } else $("swapTxt").textContent = "unavailable";
+  // rows (updated in place; the TTL box is left alone while you are typing in it)
+  bs.forEach((b, idx) => {
+    const r = ensureRow(b, order.indexOf(b.name));
+    const st = r.q(".st"); st.className = "st " + b.state; st.textContent = `${ICON[b.state] || "?"} ${b.state}`;
+    r.q(".act").textContent = b.busy ? `busy · ${b.in_flight ?? ""}` : b.state === "ready" ? "idle" : "";
+    r.q(".mem").textContent = `${b.est_mem_gb} GB`; r.q(".held").textContent = b.holds_memory ? "resident" : "not loaded";
+    const ready = b.state === "ready", never = b.pinned || b.ttl_s === 0;
+    r.q(".idle").textContent = !ready ? "–" : never ? `idle ${fmtDur(b.idle_s)} · never passivates` : `idle ${fmtDur(b.idle_s)} · stops in ${fmtDur(b.ttl_left_s)}`;
+    r.q(".ttlbar i").style.width = ready && !never && b.ttl_s ? Math.min(100, 100 * (b.idle_s || 0) / b.ttl_s) + "%" : "0";
+    const ti = r.q(".ttlin"); if (document.activeElement !== ti) ti.value = b.ttl_s;
+    r.q(".pin").checked = b.pinned;
+    r.q(".counts").textContent = `${b.requests} req · ${b.starts} starts · ${b.passivations} stops`;
+    r.q(".start").textContent = b.last_start_s != null ? `last start ${b.last_start_s}s` : "";
+    r.q(".start-b").disabled = !token || !["stopped", "failed"].includes(b.state);
+    r.q(".stop-b").disabled = !token || !["ready", "starting"].includes(b.state);
+    ti.disabled = r.q(".pin").disabled = !token;
+    r.err.style.display = b.last_error ? "" : "none"; r.err.firstChild.textContent = b.last_error ? `✕ ${b.last_error}` : "";
+  });
+}
+
+function detail(e) {
+  switch (e.kind) {
+    case "starting": return `port ${e.port}`;
+    case "ready": return `pid ${e.pid} · started in ${e.secs}s`;
+    case "passivating": case "stopped": return e.reason;
+    case "failed": return `${e.error} (retry in ${e.retry_in_s}s)`;
+    case "crashed": return `exit code ${e.code}`;
+    case "waiting_for_memory": return `needs ${e.need_gb} GB, ${e.in_use_gb} of ${e.budget_gb} GB in use`;
+    case "rejected": case "pressure": return e.reason;
+    case "policy": return `ttl ${e.ttl_s}s · pinned ${e.pinned}`;
+    default: return Object.entries(e).filter(([k]) => !["ts", "kind", "backend", "replay"].includes(k)).map(([k, v]) => `${k}=${v}`).join(" ");
+  }
+}
+function addLog(e) {
+  const d = document.createElement("div"); d.className = "ev" + (e.replay ? " replay" : "");
+  const t = new Date(e.ts * 1000).toLocaleTimeString([], { hour12: false });
+  d.innerHTML = `<span>${t}</span><span class="k ${esc(e.kind)}">${esc(e.kind)}</span><span>${esc(e.backend)}</span><span>${esc(detail(e))}</span>`;
+  const log = $("log"); log.prepend(d); while (log.children.length > 200) log.lastChild.remove();
+}
+
+function connect() {
+  const es = new EventSource("/api/events");
+  es.onopen = () => { $("conn").textContent = "live"; $("conn").className = "chip ok"; };
+  es.onerror = () => { $("conn").textContent = "reconnecting…"; $("conn").className = "chip bad"; };
+  es.addEventListener("snapshot", m => update(JSON.parse(m.data)));
+  es.addEventListener("log", m => addLog(JSON.parse(m.data)));
+}
+connect();
+</script>
+</body>
+</html>
