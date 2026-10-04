@@ -1,0 +1,28 @@
+[tools]
+python = "3.14"
+uv = "latest"
+
+[env]
+UV_PYTHON = "{{config_root}}/.venv/bin/python"
+
+[tasks.setup]
+description = "Create .venv with the gateway's dependencies"
+run = [
+  "uv venv --allow-existing --python 3.14 .venv",
+  "uv pip install -r requirements.txt",
+]
+sources = ["requirements.txt"]
+outputs = [".venv/pyvenv.cfg"]
+
+[tasks.test]
+description = "Gateway unit tests (fake backends; no models or GPU)"
+depends = ["setup"]
+run = ".venv/bin/python -m unittest discover -s gateway/tests -t ."
+
+[tasks.translate-app]
+description = "Build ~/Applications/TranslateCapture.app (Screen Recording helper for the Translate shortcut)"
+run = "pipelines/translate/make_capture_app.sh"
+
+[tasks.build]
+description = "Set up, test, and build the Translate capture app"
+depends = ["test", "translate-app"]
