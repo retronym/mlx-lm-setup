@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenJev PR Triage</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb; --surface-2: #f3f2ef; --line: #e4e2dc;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #85837c;
+    --series-1: #2a78d6; --series-2: #eb6834; --track: #ecebe6;
+    --hit: #1baf7a; --miss: #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      --surface-1: #1a1a19; --surface-2: #232321; --line: #353533;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8e8c84;
+      --series-1: #3987e5; --series-2: #d95926; --track: #2b2b29;
+      --hit: #199e70; --miss: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface-1: #1a1a19; --surface-2: #232321; --line: #353533;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8e8c84;
+    --series-1: #3987e5; --series-2: #d95926; --track: #2b2b29;
+    --hit: #199e70; --miss: #e66767;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-1); color: var(--text-primary);
+         font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 20px; margin: 0; }
+  .sub { color: var(--text-secondary); margin: 2px 0 14px; }
+  .sub a { color: inherit; }
+  .bar { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; padding: 12px 14px;
+         background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
+  .stat { min-width: 90px; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .stat span { color: var(--text-secondary); font-size: 12px; }
+  .progress { flex: 1; min-width: 220px; }
+  .progress .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .progress .fill { height: 100%; width: 0; background: var(--series-1); transition: width .4s; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600;
+          border: 1px solid var(--line); color: var(--text-secondary); }
+  .pill.running::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+          background: var(--series-1); margin-right: 6px; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .controls { display: flex; gap: 16px; align-items: center; margin: 14px 0 10px; flex-wrap: wrap; color: var(--text-secondary); }
+  .controls input[type=range] { width: 200px; accent-color: var(--series-1); }
+  .legend { display: flex; gap: 14px; margin-left: auto; font-size: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; cursor: pointer; }
+  .card.sel { outline: 2px solid var(--series-1); }
+  .card h3 { margin: 0; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+  .card h3 small { color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .hyp { color: var(--text-secondary); font-size: 12px; margin: 2px 0 8px; }
+  .m { display: grid; grid-template-columns: 62px 1fr 44px; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+  .m .t { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .m .f { height: 100%; border-radius: 0 4px 4px 0; transition: width .4s; }
+  .m .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+  .m .l { color: var(--text-secondary); }
+  .conf { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .conf b { color: var(--text-primary); }
+  h2 { font-size: 15px; margin: 22px 0 8px; display: flex; gap: 10px; align-items: baseline; }
+  h2 small { color: var(--text-secondary); font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  td.n { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.s { color: var(--text-muted); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .chip { display: inline-block; font-size: 11px; padding: 0 6px; margin: 0 4px 2px 0; border-radius: 9px;
+          border: 1px solid var(--line); color: var(--text-secondary); white-space: nowrap; }
+  .chip.ok { border-color: var(--hit); color: var(--text-primary); }
+  .chip.ok::before { content: "✓ "; color: var(--hit); }
+  .chip.fp { border: 1px dashed var(--miss); color: var(--text-primary); }
+  .chip.fp::before { content: "✗ extra: "; color: var(--miss); }
+  .chip.fn { border: 1px dashed var(--miss); color: var(--text-primary); }
+  .chip.fn::before { content: "✗ missed: "; color: var(--miss); }
+  .empty { color: var(--text-muted); padding: 20px; text-align: center; }
+  a.pr { color: inherit; text-decoration: none; } a.pr:hover { text-decoration: underline; }
+  .note { color: var(--text-muted); font-size: 12px; margin-top: 14px; }
+  button { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--line);
+           border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>OpenJev zero-shot triage of <a href="https://github.com/scala/scala/pulls?q=is%3Apr+is%3Amerged" style="color:inherit">scala/scala</a> PRs</h1>
+  <p class="sub" id="sub">Local 4B NLI cross-encoder (Qwen3.5-4B, MPS) answers typed questions about each PR; scored live against the PRs' real GitHub labels.</p>
+
+  <div class="bar">
+    <div class="stat"><b><span class="pill" id="state">…</span></b><span>state</span></div>
+    <div class="progress"><div class="stat" style="margin-bottom:4px"><b id="count">0 / 0</b></div><div class="track"><div class="fill" id="fill"></div></div></div>
+    <div class="stat"><b id="rate">–</b><span>PRs / min</span></div>
+    <div class="stat"><b id="spp">–</b><span>s / PR (inference)</span></div>
+    <div class="stat"><b id="eta">–</b><span>ETA</span></div>
+  </div>
+
+  <div class="controls">
+    <label>decision threshold on P(entailment) <input type="range" id="thr" min="0.05" max="0.95" step="0.05" value="0.5"> <b id="thrv">0.50</b></label>
+    <button id="clear" hidden>show all PRs</button>
+    <div class="legend"><span><i style="background:var(--series-1)"></i>precision</span><span><i style="background:var(--series-2)"></i>recall</span></div>
+  </div>
+
+  <div class="grid" id="cards"><div class="empty">waiting for results…</div></div>
+
+  <h2 id="feedh">Latest PRs <small id="feedsub"></small></h2>
+  <table><tbody id="feed"></tbody></table>
+  <p class="note">Ground truth = labels maintainers actually applied, which are applied inconsistently (e.g. many PRs carry no label at all), so measured precision is a lower bound.
+    Click a card to list that question's mistakes. Reading the chart: a bar's length is its value; counts under each card give the sample size behind it.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let status = null, rows = [], sel = null;
+
+const fmt = (x, d = 2) => (x == null || Number.isNaN(x)) ? "–" : x.toFixed(d);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const thr = () => parseFloat($("thr").value);
+const pe = (r, k) => r.p[k][1];
+
+function auroc(scores, truth) {               // rank-sum, ties get average rank
+  const idx = scores.map((s, i) => i).sort((a, b) => scores[a] - scores[b]);
+  const rank = new Array(scores.length);
+  for (let i = 0; i < idx.length;) {
+    let j = i; while (j + 1 < idx.length && scores[idx[j + 1]] === scores[idx[i]]) j++;
+    for (let k = i; k <= j; k++) rank[idx[k]] = (i + j) / 2 + 1; i = j + 1;
+  }
+  let np = 0, sp = 0;
+  truth.forEach((t, i) => { if (t) { np++; sp += rank[i]; } });
+  const nn = truth.length - np;
+  return (np && nn) ? (sp - np * (np + 1) / 2) / (np * nn) : null;
+}
+
+function metrics(k) {
+  let tp = 0, fp = 0, fn = 0, tn = 0; const T = thr();
+  for (const r of rows) {
+    const pred = pe(r, k) >= T, t = r.truth[k];
+    if (pred && t) tp++; else if (pred) fp++; else if (t) fn++; else tn++;
+  }
+  const P = tp + fp ? tp / (tp + fp) : null, R = tp + fn ? tp / (tp + fn) : null;
+  return { tp, fp, fn, tn, P, R, pos: tp + fn,
+           auc: auroc(rows.map(r => pe(r, k)), rows.map(r => r.truth[k])) };
+}
+
+function bar(label, v, color) {
+  return `<div class="m"><span class="l">${label}</span><div class="t"><div class="f" style="width:${v == null ? 0 : v * 100}%;background:${color}"></div></div><span class="v">${v == null ? "–" : (v * 100).toFixed(0) + "%"}</span></div>`;
+}
+
+function renderCards() {
+  if (!status) return;
+  $("cards").innerHTML = status.questions.map(q => {
+    const m = metrics(q.key);
+    return `<div class="card ${sel === q.key ? "sel" : ""}" data-k="${q.key}" title="click to list this question's mistakes">
+      <h3>${esc(q.name)} <small>${m.pos} positive / ${rows.length}</small></h3>
+      <div class="hyp">“${esc(q.hypothesis)}” <span style="color:var(--text-muted)">· labels: ${q.labels.map(esc).join(", ")}</span></div>
+      ${bar("precision", m.P, "var(--series-1)")}${bar("recall", m.R, "var(--series-2)")}
+      <div class="m"><span class="l">AUROC</span><div class="t"><div class="f" style="width:${m.auc == null ? 0 : m.auc * 100}%;background:var(--text-muted)"></div></div><span class="v">${fmt(m.auc)}</span></div>
+      <div class="conf"><span>TP <b>${m.tp}</b></span><span>FP <b>${m.fp}</b></span><span>FN <b>${m.fn}</b></span><span>TN <b>${m.tn}</b></span></div>
+    </div>`;
+  }).join("");
+}
+
+function chips(r) {
+  const T = thr(), out = [];
+  for (const q of status.questions) {
+    const pred = pe(r, q.key) >= T, t = r.truth[q.key];
+    if (pred && t) out.push(`<span class="chip ok" title="P(entail)=${fmt(pe(r, q.key))}">${esc(q.name)}</span>`);
+    else if (pred) out.push(`<span class="chip fp" title="P(entail)=${fmt(pe(r, q.key))}">${esc(q.name)}</span>`);
+    else if (t) out.push(`<span class="chip fn" title="P(entail)=${fmt(pe(r, q.key))}">${esc(q.name)}</span>`);
+  }
+  return out.join("") || `<span class="chip" title="no question fired and no mapped label">–</span>`;
+}
+
+function renderFeed() {
+  if (!status) return;
+  let list = rows;
+  if (sel) {
+    const T = thr();
+    list = rows.filter(r => (pe(r, sel) >= T) !== r.truth[sel]);
+    const q = status.questions.find(q => q.key === sel);
+    $("feedh").firstChild.textContent = `Mistakes: ${q.name} `;
+    $("feedsub").textContent = `${list.length} of ${rows.length} PRs misclassified at threshold ${T.toFixed(2)}`;
+  } else {
+    $("feedh").firstChild.textContent = "Latest PRs ";
+    $("feedsub").textContent = "✓ prediction matched a real label · ✗ extra = predicted, no such label · ✗ missed = labelled, not predicted";
+  }
+  $("clear").hidden = !sel;
+  const show = list.slice(-40).reverse();
+  $("feed").innerHTML = show.length ? show.map(r =>
+    `<tr><td class="n"><a class="pr" href="https://github.com/scala/scala/pull/${r.number}" target="_blank" rel="noopener">#${r.number}</a></td>
+     <td>${esc(r.title)}<div>${chips(r)}</div></td><td class="s">${r.secs.toFixed(1)}s</td></tr>`).join("")
+    : `<tr><td class="empty" colspan="3">nothing yet</td></tr>`;
+}
+
+function renderBar() {
+  if (!status) return;
+  const st = status.state;
+  $("state").textContent = st; $("state").className = "pill " + st;
+  const done = rows.length, total = status.total;
+  $("count").textContent = `${done} / ${total} PRs`;
+  $("fill").style.width = (total ? 100 * done / total : 0) + "%";
+  const elapsed = (Date.now() / 1000 - status.started);
+  const mins = elapsed / 60;
+  if (st === "running" && done > 0 && mins > 0) {
+    $("rate").textContent = (done / mins).toFixed(0);
+    const eta = (total - done) / (done / elapsed);
+    $("eta").textContent = eta > 90 ? Math.round(eta / 60) + " min" : Math.round(eta) + " s";
+  } else if (st === "finished") { $("eta").textContent = "done"; }
+  if (status.infer_s && done) $("spp").textContent = (status.infer_s / Math.max(1, done)).toFixed(2);
+  if (status.device) $("sub").title = `device: ${status.device}, load ${status.load_s}s, model ${status.model}`;
+}
+
+function renderAll() { renderBar(); renderCards(); renderFeed(); }
+
+async function poll() {
+  try {
+    const [s, r] = await Promise.all([fetch("/data/status.json", { cache: "no-store" }), fetch("/data/results.jsonl", { cache: "no-store" })]);
+    if (s.ok) status = await s.json();
+    if (r.ok) rows = (await r.text()).split("\n").filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    renderAll();
+  } catch (e) { /* server down or files not there yet */ }
+  const fin = status && status.state === "finished";
+  setTimeout(poll, fin ? 5000 : 1200);
+}
+
+$("thr").addEventListener("input", () => { $("thrv").textContent = thr().toFixed(2); renderAll(); });
+$("cards").addEventListener("click", e => {
+  const c = e.target.closest(".card"); if (!c) return;
+  sel = sel === c.dataset.k ? null : c.dataset.k; renderAll();
+});
+$("clear").addEventListener("click", () => { sel = null; renderAll(); });
+poll();
+</script>
+</body>
+</html>
