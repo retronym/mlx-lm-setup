@@ -170,9 +170,11 @@ VisionChat = Callable[[list[dict], int | None], Awaitable[tuple[str, dict]]]
 
 async def look(chat: VisionChat, iterate, *, images: list[str], prompt: str | None = None, preset: str | None = None,
                context: str | None = None, system: str | None = None, each: bool | None = None, gates: list[dict] | None = None,
-               image_tokens: int | None = None, max_attempts: int = 2) -> dict:
+               image_tokens: int | None = None, max_attempts: int = 2,
+               progress: Callable[[int, int, str], Awaitable[None]] | None = None) -> dict:
     """Ask the vision model about `images`. `each` asks once per image (a batch of stills); otherwise all images go in one request.
-    `gates` (as for iterate) make the model retry until the answer passes; a preset brings its own prompt, gates and detail."""
+    `gates` (as for iterate) make the model retry until the answer passes; a preset brings its own prompt, gates and detail.
+    `progress(done, total, message)` is awaited before each request and once at the end."""
     if preset is not None and preset not in PRESETS:
         raise ApiError(400, "invalid_arguments", f"unknown preset {preset!r}; one of {sorted(PRESETS)}")
     if (prompt is None) == (preset is None):
@@ -206,12 +208,21 @@ async def look(chat: VisionChat, iterate, *, images: list[str], prompt: str | No
             out["json"] = j
         return out
 
+    async def report(done: int, total: int, msg: str) -> None:
+        if progress is not None:
+            await progress(done, total, msg)
+
     t0 = time.monotonic()
     if each:
         results = []
-        for r in refs:
+        for i, r in enumerate(refs):
+            await report(i, len(refs), f"image {i + 1} of {len(refs)}: {Path(label(r)).name}")
             results.append({"image": label(r), **await one([r])})
+        await report(len(refs), len(refs), "done")
         flagged = [r["image"] for r in results if isinstance(r.get("json"), dict) and
                    (r["json"].get("ok") is False or r["json"].get("matches") is False)]
         return {"results": results, "flagged": flagged, "secs": round(time.monotonic() - t0, 2), "preset": preset}
-    return {**await one(refs), "images": [label(r) for r in refs], "preset": preset}
+    await report(0, 1, f"{len(refs)} image(s) in one request")
+    out = await one(refs)
+    await report(1, 1, "done")
+    return {**out, "images": [label(r) for r in refs], "preset": preset}

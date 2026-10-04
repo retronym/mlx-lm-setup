@@ -365,6 +365,7 @@ Ground truth: the Safe Scala film rendered from the tree before (`95d16ff`) and 
 - **False flags are mostly deliberate crops** (a web capture cut at its window, GitHub's own ellipsis). A prompt rule excusing "embedded screenshots" removed them but also hid two real defects (Gemma read the README panel as a screenshot), so it was reverted: recall matters more in a triage pass.
 - **Quotes are not verbatim:** Gemma "completed" the clipped `~/.ssh/id` as `id_rsa.pub` once. It was not derailed by the injection text it read.
 - **Tables:** Table 2 of the Safe Scala paper (printed offline from the saved HTML) came back with all 14 numbers right but the two halves of the table mis-structured (10 s). Trust digits more than layout; check against the PDF text layer.
+- **Progress, after first use:** a 108-still batch took 7 minutes as one silent request. Now the page expands directories (`/api/look/expand`) and sends one request per image behind a progress bar (count, elapsed, time left, current image, a cold-start notice while the weights load), and the MCP tool sends a progress notification per image.
 - **Not done:** a stills-check script in the film kit (the `look` tool over a stills directory covers it); text serving from the mlx-vlm process; video input; Qwen pixel cap tuning.
 
 ## Phase 7 findings

@@ -66,6 +66,22 @@ class Inline(unittest.TestCase):
             parse(base, self.d)
 
 
+class LookProgress(unittest.IsolatedAsyncioTestCase):
+    async def test_progress_is_reported_per_image_then_done(self):
+        events = []
+
+        async def chat(msgs, tokens):
+            return '{"ok": true, "issues": []}', {"model": "m"}
+
+        async def progress(done, total, msg):
+            events.append((done, total, msg.split(":")[0]))
+
+        refs = ["data:image/png;base64,AA", "data:image/png;base64,BB"]
+        res = await vision.look(chat, None, images=refs, prompt="p", each=True, gates=[], progress=progress)
+        self.assertEqual(len(res["results"]), 2)
+        self.assertEqual(events, [(0, 2, "image 1 of 2"), (1, 2, "image 2 of 2"), (2, 2, "done")])
+
+
 class VisionRoutes(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -133,6 +149,12 @@ class VisionRoutes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((d["passed"], len(d["attempts"])), (False, 2))
         r = await self.http.post("/api/look", json={"images": [str(self.d / "stills" / "s1.png")], "prompt": "hi", "image_tokens": 280})
         self.assertEqual((r.json()["json"]["image_tokens"], r.json()["images"]), (280, [str(self.d / "stills" / "s1.png")]))
+
+    async def test_expand_lists_directory_images_for_per_image_progress(self):
+        r = await self.http.post("/api/look/expand", json={"images": [str(self.d / "stills"), f"{self.d}/paper.pdf#page=2"]})
+        self.assertEqual(r.json()["images"], [str(self.d / "stills" / "s1.png"), str(self.d / "stills" / "s2.png"), f"{self.d}/paper.pdf#page=2"])
+        self.assertEqual((await self.http.post("/api/look/expand", json={"images": "x"})).status_code, 400)
+        self.assertEqual(self.sup.rt["eyes"].starts, 0)
 
     async def test_look_validation(self):
         for body in ({"images": [], "prompt": "x"}, {"images": ["/nope.png"], "prompt": "x"}, {"images": ["/a.png"]},

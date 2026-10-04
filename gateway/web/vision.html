@@ -58,6 +58,13 @@
   dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; max-height: 96vh; } dialog::backdrop { background: #000c; }
   dialog img { max-width: 96vw; max-height: 96vh; display: block; }
   @media (max-width: 640px) { .res { grid-template-columns: 1fr; } }
+  #prog { margin-top: 10px; }
+  .pbar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  #pfill { height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .35s ease; }
+  .pbar.indet #pfill { width: 28% !important; animation: slide 1.3s ease-in-out infinite; }
+  @keyframes slide { from { margin-left: -28%; } to { margin-left: 100%; } }
+  #ptext { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #ptext b { color: var(--ink); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -101,6 +108,7 @@
       <button id="stop" hidden>Stop</button>
       <span class="status" id="status"></span>
     </div>
+    <div id="prog" hidden><div class="pbar" id="pbar"><div id="pfill"></div></div><div id="ptext"></div></div>
     <div class="hint" id="mdesc" style="margin-top:6px"></div>
   </section>
   <section id="results" hidden>
@@ -290,31 +298,70 @@ function renderResults() {
   const n = k => all.filter(r => (r.error ? "err" : verdict(r.json)) === k).length;
   $("summary").textContent = all.length ? `${all.length} · ${n("bad")} flagged · ${n("ok")} ok${n("err") ? ` · ${n("err")} errors` : ""}` : "";
 }
+// ---- progress: count, elapsed, time left, current image; indeterminate while a cold model loads -----------------------------
+const prog = { t0: 0, cur0: 0, done: 0, total: 0, durs: [], cold: false, label: "", timer: null };
+const fmt = s => s < 60 ? `${s.toFixed(0)} s` : `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
+function drawProgress() {
+  const now = performance.now(), p = prog;
+  const loading = p.cold && p.durs.length === 0;
+  $("pbar").classList.toggle("indet", loading);
+  $("pfill").style.width = `${p.total ? 100 * p.done / p.total : 0}%`;
+  const warm = p.durs.slice(p.cold ? 1 : 0), avg = warm.length ? warm.reduce((a, b) => a + b) / warm.length : (p.durs[0] || 0);
+  const left = p.total - p.done, eta = left > 0 && avg ? Math.max(0, avg * left - (now - p.cur0) / 1000) : 0;
+  $("ptext").replaceChildren(
+    el("span", {}, el("b", { textContent: `${p.done} / ${p.total}` }), document.createTextNode(" done")),
+    el("span", { textContent: `elapsed ${fmt((now - p.t0) / 1000)}` }),
+    eta ? el("span", { textContent: `~${fmt(eta)} left` }) : null,
+    p.done < p.total ? el("span", { textContent: (loading ? `starting ${$("model").value} and loading its weights (about 10-20 s)… ` : "now: ") +
+                                                  `${p.label} · ${fmt((now - p.cur0) / 1000)}` }) : null);
+}
+async function modelIsReady(name) {
+  try { const d = await (await fetch("/api/backends")).json(); return d.backends.find(b => b.name === name)?.state === "ready"; }
+  catch { return true; }
+}
+async function expandPaths(group) {
+  if (group[0].kind !== "path") return [group];
+  const r = await fetch("/api/look/expand", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ images: [group[0].path] }), signal: aborter.signal });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+  return d.images.map(p => [{ kind: "path", path: p }]);
+}
 $("go").onclick = async () => {
   if (!items.length) return status("add an image first: paste, drop, pick or give a path", "err");
   if (!$("prompt").value.trim()) return status("write a prompt or pick a preset", "err");
   aborter = new AbortController();
   $("go").disabled = true; $("stop").hidden = false;
-  const groups = $("each").checked ? items.map(it => [it]) : [items.slice()];
-  results = groups.map(g => ({ items: g, pending: true })); renderResults();
-  const t0 = performance.now();
+  let groups = $("each").checked ? items.map(it => [it]) : [items.slice()];
+  Object.assign(prog, { t0: performance.now(), cur0: performance.now(), done: 0, total: 0, durs: [], label: "listing directories…" });
+  $("prog").hidden = false; drawProgress();
+  prog.timer = setInterval(drawProgress, 250);
   try {
+    if ($("each").checked) groups = (await Promise.all(groups.map(expandPaths))).flat();   // a directory becomes one step per image
+    prog.cold = !(await modelIsReady($("model").value));
+    prog.total = groups.length;
+    results = groups.map(g => ({ items: g, pending: true })); renderResults();
+    status("");
     for (const [i, r] of results.entries()) {
-      status(`looking at ${i + 1} of ${results.length}… (the first call may start the model)`, "wait");
+      prog.cur0 = performance.now();
+      prog.label = r.items.map(it => it.kind === "path" ? it.path.split("/").pop() : it.name).join(", ");
       try {
-        const body = request(r.items.map(ref));
-        if ($("each").checked && r.items[0].kind === "path") body.each = true;    // a directory path expands on the gateway
-        const d = await post(body);
-        if (d.results && d.results.length === 1) Object.assign(r, d.results[0], { secs: d.secs });           // a single file, not a directory
+        const d = await post(request(r.items.map(ref)));
+        if (d.results && d.results.length === 1) Object.assign(r, d.results[0], { secs: d.secs });
         else if (d.results) Object.assign(r, { sub: d.results.map(s => ({ ...s, items: [{ kind: "path", path: s.image }] })), secs: d.secs });
         else Object.assign(r, d);
       } catch (e) {
         if (e.name === "AbortError") { r.error = "stopped"; break; }
         r.error = e.message;
-      } finally { r.pending = false; renderResults(); }
+      } finally {
+        r.pending = false; prog.durs.push((performance.now() - prog.cur0) / 1000); prog.done = i + 1;
+        renderResults(); drawProgress();
+      }
     }
-    status(`done in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    status(`done in ${fmt((performance.now() - prog.t0) / 1000)}`);
+  } catch (e) {
+    status(e.name === "AbortError" ? "stopped" : e.message, e.name === "AbortError" ? "" : "err");
   } finally {
+    clearInterval(prog.timer); drawProgress();
     results.forEach(r => { if (r.pending) { r.pending = false; r.error = "stopped"; } });
     renderResults();
     $("go").disabled = false; $("stop").hidden = true; aborter = null;

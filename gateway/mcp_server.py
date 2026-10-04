@@ -267,7 +267,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
 
     @mcp.tool()
-    async def look(images: list[str], prompt: str | None = None, preset: str | None = None, context: str | None = None,
+    async def look(images: list[str], ctx: Context, prompt: str | None = None, preset: str | None = None, context: str | None = None,
                    each: bool | None = None, model: str | None = None, gates: list[dict] | None = None, image_tokens: int | None = None,
                    system: str | None = None, max_tokens: int = 1024, max_attempts: int = 2) -> dict:
         """Ask a local vision-language model about images. `images`: absolute paths (PNG, JPEG, WebP, GIF), PDF pages as
@@ -277,11 +277,17 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `each` = one request per image (default for layout and storyboard): returns `results` per image and `flagged` (images whose
         JSON says ok/matches false). Otherwise all images go in one request (comparisons, multi-page figures, at most 16).
         `gates` as for iterate (presets bring a JSON-schema gate); failures are fed back and retried up to `max_attempts`.
-        `image_tokens` sets detail per image (Gemma 4: 70..1120, default from the preset). Answers carry `json` when they parse."""
+        `image_tokens` sets detail per image (Gemma 4: 70..1120, default from the preset). Answers carry `json` when they parse.
+        Sends progress notifications per image (about 4 s each warm; the first call also loads the model, about 10 s)."""
+        async def progress(done: int, total: int, msg: str) -> None:
+            try:
+                await ctx.report_progress(done, total, msg)
+            except Exception:                                    # noqa: BLE001  progress is best effort
+                pass
         try:
             return await run_look(catalog, get_supervisor(), get_client(), model=model, max_tokens=max_tokens, images=images, prompt=prompt,
                                   preset=preset, context=context, system=system, each=each, gates=gates, image_tokens=image_tokens,
-                                  max_attempts=max_attempts)
+                                  max_attempts=max_attempts, progress=progress)
         except ApiError as e:
             raise fail(e) from None
 

@@ -281,6 +281,17 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(400, "invalid_arguments", "`images` must be a list")
         return JSONResponse(await run_look(catalog, sup(), client(), **body))
 
+    async def look_expand(request: Request):
+        """{"images": [...]} -> the same list with directories replaced by their image files, so a client can send one request per
+        image and show progress. Nothing is read beyond the directory listing."""
+        body = await read_json(request)
+        if not isinstance(body.get("images"), list) or not all(isinstance(i, str) for i in body["images"]):
+            raise ApiError(400, "invalid_arguments", "`images` must be a list of strings")
+        out = await asyncio.to_thread(vision.expand, body["images"])
+        if len(out) > vision.MAX_EACH:
+            raise ApiError(400, "invalid_arguments", f"too many images ({len(out)}; at most {vision.MAX_EACH})")
+        return JSONResponse({"images": out})
+
     async def vision_presets(request: Request):
         return JSONResponse({"models": [{"name": s.name, "description": s.description, "image_tokens": s.options.get("image_tokens")}
                                         for s in catalog.backends.values() if s.kind == "vision"],
@@ -415,6 +426,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/voices", handler(voices), methods=["GET"]),
         Route("/api/narrate", handler(narrate), methods=["POST"]),
         Route("/api/look", handler(look), methods=["POST"]),
+        Route("/api/look/expand", handler(look_expand), methods=["POST"]),
         Route("/api/vision/presets", handler(vision_presets), methods=["GET"]),
         Route("/api/decide", handler(decide), methods=["POST"]),
         Route("/api/entail", handler(entail), methods=["POST"]),
