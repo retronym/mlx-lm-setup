@@ -26,11 +26,17 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 
 ## Screenshots
 
+### Home
 ![img.png](img.png)
+### Chat
 ![img_1.png](img_1.png)
+### Decide
 ![img_2.png](img_2.png)
+### Speech
 ![img_3.png](img_3.png)
+### Vision
 ![img_4.png](img_4.png)
+### Admin
 ![img_5.png](img_5.png)
 
 ## The models
