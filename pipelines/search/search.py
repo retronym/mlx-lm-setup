@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Hybrid search: FTS5 BM25 + vector cosine (if vectors exist), fused with reciprocal rank fusion.
-usage: search.py [-k 8] [--source scalac|scala3docs|bug] [--open] [--bm25|--vec] <query>"""
+usage: search.py [-k 8] [--source scalac|scala3docs|bug] [--open] [--bm25|--vec] [--rerank] <query>"""
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 from store import Store, _CAMEL
@@ -42,7 +42,7 @@ def fuse(rankings, k=60):
     return sorted(score, key=score.get, reverse=True)
 
 
-def search(st, q, k=8, source=None, mode="hybrid", open_only=False, embedder=None):
+def search(st, q, k=8, source=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30):
     pool = max(50, k * 5)
     rankings = []
     if mode in ("hybrid", "bm25"):
@@ -57,6 +57,11 @@ def search(st, q, k=8, source=None, mode="hybrid", open_only=False, embedder=Non
         if key not in seen:
             seen.add(key)
             out.append(rid)
+    if reranker is not None:
+        cand = out[:pool_docs]
+        docs = [" ".join(st.db.execute("SELECT title, text FROM chunks WHERE rowid=?", (r,)).fetchone()) for r in cand]
+        sc = reranker.scores(q, docs)
+        return [r for r, _ in sorted(zip(cand, sc), key=lambda x: -x[1])][:k]
     return out[:k]
 
 
@@ -87,4 +92,8 @@ if __name__ == "__main__":
             emb = load()
         except Exception as e:
             print(f"(no embedder: {e}; keyword only)", file=sys.stderr)
-    show(st, search(st, q, k, source, mode, open_only, emb))
+    rr = None
+    if "--rerank" in a:
+        from rerank import Reranker
+        rr = Reranker()
+    show(st, search(st, q, k, source, mode, open_only, emb, rr))
