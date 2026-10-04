@@ -49,7 +49,7 @@ class Pure(unittest.TestCase):
 
 class Paragraphs(unittest.TestCase):
     """Layout wraps joined from real Vision line boxes (gateway/tests/ocr_lines.json, recorded from rendered notices in Polish,
-    Japanese and Russian and a UI screenshot; each joined result checked by eye)."""
+    Japanese and Russian, a Polish banner and a UI screenshot; each joined result checked by eye)."""
     CASES = json.loads((Path(__file__).parent / "ocr_lines.json").read_text())
 
     def test_recorded_cases(self):
@@ -66,6 +66,8 @@ class Paragraphs(unittest.TestCase):
         self.assertIn("おかけして申し訳", p["japanese_notice"][1])
         self.assertEqual(len(p["russian_notice"]), 1)                                    # Cyrillic box heights vary ~30%
         self.assertIn("22.5%", p["ui_bar_labels"])                                       # a column of numbers stays a column
+        self.assertEqual(p["polish_banner"], ["PROMOCJA! Tylko do niedzieli", "-30% na wszystkie rowery elektryczne",
+                                              "Raty 0% • Darmowa dostawa • Zwrot do 30 dni"])      # capital after a near-full line: kept
 
     def test_hyphenated_and_unboxed_lines(self):
         line = lambda t, y, w=0.9: {"text": t, "box": [0.05, y, w, 0.05]}

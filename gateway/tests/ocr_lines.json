@@ -698,5 +698,50 @@
    "5.6%",
    "4.0%"
   ]
+ },
+ "polish_banner": {
+  "lines": [
+   {
+    "text": "PROMOCJA! Tylko do niedzieli",
+    "box": [
+     0.0397,
+     0.1487,
+     0.772,
+     0.1925
+    ]
+   },
+   {
+    "text": "-30% na wszystkie rowery elektryczne",
+    "box": [
+     0.0339,
+     0.3383,
+     0.8464,
+     0.205
+    ]
+   },
+   {
+    "text": "Raty 0% • Darmowa dostawa • Zwrot do",
+    "box": [
+     0.0429,
+     0.5351,
+     0.8657,
+     0.1579
+    ]
+   },
+   {
+    "text": "30 dni",
+    "box": [
+     0.0395,
+     0.7139,
+     0.141,
+     0.1423
+    ]
+   }
+  ],
+  "paragraphs": [
+   "PROMOCJA! Tylko do niedzieli",
+   "-30% na wszystkie rowery elektryczne",
+   "Raty 0% • Darmowa dostawa • Zwrot do 30 dni"
+  ]
  }
 }

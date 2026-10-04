@@ -84,7 +84,11 @@ def _wrapped(prev: dict, nxt: dict, right_edge: float) -> bool:
         return False
     if px + pw + char_w * (len(_first_word(nt)) + 1) <= right_edge:
         return False                                                 # the next word would have fitted: a real line break
-    return nt[0].isalnum() and not _SENTENCE_END.search(pt)
+    if not nt[0].isalnum() or _SENTENCE_END.search(pt):
+        return False
+    # A capital may start a new line ("elektryczne / Raty 0%" in a banner) or continue one ("Kraków / Główny"): only join it
+    # when the sizes match closely too; lower case, digits and caseless scripts keep the loose size check.
+    return not nt[0].isupper() or 0.85 <= nh / ph <= 1.18
 
 
 def paragraphs(lines: list[dict]) -> str:
