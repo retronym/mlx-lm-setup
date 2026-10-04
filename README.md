@@ -11,8 +11,8 @@ Offload cheap, bounded, verifiable work (summaries, extraction, classification, 
 | Role | Model | Runtime / env | Memory | Used for |
 |---|---|---|---|---|
 | Generative LLM | Qwen3-Coder-30B-A3B-Instruct, 4-bit (MoE, ~3B active) | `mlx-lm` 0.32 (Homebrew, python 3.14) | ~17 GB | chat, MCP sub-agent, emoji next-token scoring (`lm_emoji.py`) |
-| Generative LLM | Qwen3.6-35B-A3B, 4-bit (MoE, 3B active; thinks by default) | `mlx-lm` 0.32 | ~21.5 GB peak | general sub-agent work at speed, long context (small KV cache) |
-| Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default: passed all six benchmark tasks, smallest memory |
+| Generative LLM | Qwen3.6-35B-A3B, 4-bit (MoE, 3B active; thinks by default; so does Gemma 4) | `mlx-lm` 0.32 | ~21.5 GB peak | general sub-agent work at speed, long context (small KV cache) |
+| Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default (thinking switched off): passed all six benchmark tasks, smallest memory |
 | NLI cross-encoder | OpenJev 4B v5 (Qwen3.5-4B fine-tune; also 2B, 0.8B) | PyTorch on MPS, `.venv-jev` (python 3.12) | ~9 GB | claim verification, PR triage. Slow: no fast kernels for Qwen3.5's linear-attention layers on MPS |
 | Decision model | Jev-Style 2B v3 (Qwen3.5-2B fine-tune), 8-bit | MLX, `.venv-mlxjev` (versions pinned, the runtime refuses others) | ~2 GB weights | emoji, colour, mood, sentiment: one pass scores hundreds of options |
 | Encoder (alternative) | open-jev DeBERTa-v3-large | PyTorch on MPS, `.venv-jev` | 1.7 GB | fast baseline; 512-token cap |
@@ -189,7 +189,14 @@ curl -N localhost:8090/v1/chat/completions -H 'Content-Type: application/json' \
 curl localhost:8090/api/backends                 # state, idle countdown, memory estimate per backend
 ```
 
-Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `jevstyle`, `openjev_nli`, `command`). Tests (no models needed, they use a fake backend): `.venv/bin/python -m unittest discover -s gateway/tests -t .`
+Add a model by adding a `[backends.<name>]` table to `gateway.toml` (adapters: `mlx_lm`, `jevstyle`, `openjev_nli`, `command`). The catalog has four features for managing models:
+
+- **Memory as parts**: give `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost.
+- **Argument passthrough**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).
+- **Profiles**: `[profiles.<name>]` is a named virtual model on an existing backend with request defaults (sampling, a token cap, `chat_template_kwargs` such as `enable_thinking`, a system prompt). Fill-only: whatever the client sends wins. No second process.
+- **Discovery** (read-only): `python -m gateway.cli discover` lists MLX models on disk (HF cache, LM Studio) with size, KV cost and mlx-lm support; `discover --snippet <id> --context 32768 --kv-bits 4` prints a ready catalog entry. Also `GET /api/models/discovered` and `/api/models/snippet?id=...`.
+
+Which model for which job: [docs/MODEL_GUIDE.md](docs/MODEL_GUIDE.md). Tests (no models needed, they use a fake backend): `.venv/bin/python -m unittest discover -s gateway/tests -t .`
 
 ## Next
 

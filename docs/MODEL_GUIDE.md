@@ -8,7 +8,7 @@ A decision guide for the gateway's catalog on this machine (M5 Pro, 48 GB, gatew
 |---|---|---|
 | Classify, route, tag, choose from a list, rate on a scale | **`jevstyle-2b`** (decision model) | One pass scores hundreds of options in about a second, nothing is generated, deterministic |
 | Check whether a text supports a claim | **`openjev-4b`** (NLI) | Entailment / contradiction / neutral per claim. A weak signal: it missed 1 of 5 in our test. Use it as a gate, not a verdict |
-| General sub-agent work (extraction, boilerplate, short reviews, reformatting) and you want the safest default | **`gemma-4-26b-a4b`**, thinking off | Only model to pass all six tasks, smallest memory (16 GB peak), fastest load, no thinking unless asked |
+| General sub-agent work (extraction, boilerplate, short reviews, reformatting) and you want the safest default | **`gemma-4-26b-a4b`**, thinking off | Only model to pass all six tasks, smallest memory (16 GB peak), fastest load. Thinking is off by default in the catalog (see Thinking) |
 | Same, and decode speed matters most | **`qwen3.6-35b-a3b`** with `enable_thinking: false` | About 104 tok/s vs 85 for Gemma, 5 of 6 tasks |
 | Code-focused work where its code training matters (and short context) | **`qwen3-coder`** | About 108 tok/s, 5 of 6 tasks, no thinking mode to manage. Weakest at long context (see below) |
 | Contexts above about 32K tokens | **`gemma-4-26b-a4b`** or **`qwen3.6-35b-a3b`** | KV cache is about 20 KiB per token vs 96 KiB for Qwen3-Coder: 2.7 to 2.9 GB at 128K instead of 12.9 GB |
@@ -68,9 +68,10 @@ Read the failures, not just the count:
 | Gemma 4: mean tokens per task | 81 | 1,465 (1 of 6 hit the cap) |
 | Wall time per task | 0.4 to 5 s | 3 to 49 s |
 
-- **Qwen3.6 thinks by default**: its chat template opens a `<think>` block, so any client that does not say otherwise pays the thinking cost on every request. Send `chat_template_kwargs: {"enable_thinking": false}` for quick tasks. `mlx_lm.server` accepts that per request, and `--chat-template-args '{"enable_thinking":false}'` sets it server-wide.
-- **Gemma 4 does not think unless asked** (`enable_thinking: true`).
+- **Qwen3.6 thinks by default**: its chat template opens a `<think>` block, so any client that does not say otherwise pays the thinking cost on every request. `mlx_lm.server` returns the reasoning in a separate `reasoning` field and leaves `content` empty if the token limit is reached first, so a naive client sees an empty answer. Send `chat_template_kwargs: {"enable_thinking": false}` for quick tasks. `mlx_lm.server` accepts that per request, and `--chat-template-args '{"enable_thinking":false}'` sets it server-wide.
+- **Gemma 4 also thinks by default under `mlx-lm`.** Found live through the gateway: a default request returned only reasoning and hit the token limit with no answer, while `enable_thinking: false` answered in 35 tokens. (My first template check, done through a different tokenizer loader, wrongly showed Gemma as off. The benchmark is unaffected because it passed the flag explicitly in both modes.)
 - **Qwen3-Coder has no thinking mode.**
+- **In the catalog** both Qwen3.6 and Gemma 4 are started with thinking off (`args = ["--chat-template-args", '{"enable_thinking": false}']`), so a plain request gets a direct answer: verified live, 39 and 35 tokens instead of a 600-token reasoning-only reply. A request can still switch it on with `chat_template_kwargs: {"enable_thinking": true}`, and the profiles `qwen3-6-think` and `gemma-4-think` (aliases `qwen-think`, `gemma-think`) do that with `max_tokens` 4096 so a runaway stops.
 - Thinking helped where the answer needed it (Qwen3.6 got the long-context list fully right with it, 16 of 16 names; Gemma stayed correct), but it also produced the only runaway generations. Always set `max_tokens` when thinking is on, and prefer `iterate` with a gate so a runaway fails fast and retries.
 
 ## Memory and context
@@ -110,4 +111,4 @@ The gateway runs under launchd and reads `gateway.toml` at startup, so the two n
 launchctl kickstart -k gui/$(id -u)/com.retronym.local-models-gateway
 ```
 
-Then use them by name or alias (`qwen3-6-35b-a3b` / `qwen3.6` / `qwen36`, `gemma-4-26b-a4b` / `gemma4` / `gemma`). Request-level defaults per model (so thinking is off without every client having to remember) are the "profiles" feature in [PLAN.md](../PLAN.md).
+Then use them by name or alias (`qwen3-6-35b-a3b` / `qwen3.6` / `qwen36`, `gemma-4-26b-a4b` / `gemma4` / `gemma`) or by profile (`qwen3-6-think`, `gemma-4-think`). To size and add another model: `python -m gateway.cli discover` lists the MLX models on disk with weights, KV-cache cost and whether mlx-lm supports them, and `discover --snippet <id> [--context N] [--kv-bits N]` prints the catalog entry (weights + KV + overhead already summed).
