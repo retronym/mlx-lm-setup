@@ -1,10 +1,26 @@
 # mlx-lm-setup
 
-A local model workbench for an M5 Pro Mac (48 GB unified memory): a generative coding LLM, two "decision"-style models, and the scripts, pipelines and web pages built around them. Everything runs on localhost; prompts and code never leave the machine.
+**A private, local AI back end for one Mac.** One gateway on `localhost:8090` runs open-weight models on Apple silicon (MLX), starts them on demand, unloads them when idle, and keeps them inside a memory budget. Nothing leaves the machine.
+
+## What you can do with it
+
+- **Chat with a local LLM** in the browser (`/`): streaming, tokens per second, a collapsible view of the model's reasoning, markdown and code rendering, a model picker with memory and context details.
+- **Decide instead of generate** (`/jev`): give a text, a question and a list of options, and a decision model scores every option in a single forward pass, returning probabilities (pick the best emoji, classify sentiment, triage a bug, rate urgency on a scale). It is fast, deterministic and cheap, and it never generates text.
+- **Delegate work from Claude Code** through the gateway's MCP server: `chat`, `decide`, `entail` (does this text support or contradict a claim?) and `iterate` (retry a generation until it passes JSON, regex, length or faithfulness checks). Cheap, bounded, checkable jobs go to the local models; the hosted model keeps design and hard reasoning.
+- **Call it from anything** via an OpenAI-compatible API at `/v1`, plus `/api/decide` and `/api/entail`.
+- **Operate it** from the admin page (`/admin`): live backend state, memory, idle timers, pinning, start and stop.
+- **Run pipelines on top**: an emoji-annotated edition of *Alice in Wonderland* and an NLI triage of scala/scala pull requests, both built as ordinary code around the scorers (see [Pipelines](#pipelines)).
+
+Quick start (needs `brew install mlx-lm`; details under [Chat and MCP](#chat-and-mcp)):
+
+```bash
+.venv/bin/python -m gateway &
+open http://127.0.0.1:8090/
+```
 
 ## Why
 
-Offload cheap, bounded, verifiable work (summaries, extraction, classification, boilerplate, first-pass triage) to local models so the large hosted model is reserved for design and hard reasoning. The recurring lesson: **models that score a closed set of options in one forward pass (decision models) are far cheaper and more deterministic than generating text**, so most of the interesting pipelines here are deterministic code that calls a scorer, with no text generation in the inner loop. The binding constraint is memory, not speed: the models together do not fit comfortably, which is what [PLAN.md](PLAN.md) addresses.
+Offload cheap, bounded, verifiable work (summaries, extraction, classification, boilerplate, first-pass triage) to local models so the large hosted model is reserved for design and hard reasoning. The recurring lesson: **models that score a closed set of options in one forward pass (decision models) are far cheaper and more deterministic than generating text**, so most of the interesting pipelines here are deterministic code that calls a scorer, with no text generation in the inner loop. The binding constraint is memory, not speed: the models together do not fit comfortably, which is what the gateway's supervisor and [PLAN.md](PLAN.md) address. Target machine: an M5 Pro Mac with 48 GB unified memory.
 
 ## The models
 
