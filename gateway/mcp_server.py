@@ -232,7 +232,8 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         """Timed narration for a video explainer. `scenes` = [{"id": "intro", "text": "Narration with [[cue]] markers. [[evict]] Like this."}].
         Markers are removed before speaking; each cue's time is the start of the first spoken word after it (from Whisper word
         timestamps aligned to the script). Returns per scene: `path` (wav), `duration_s`, `start_s` (if the scenes are played back
-        to back), `cues` {name: seconds into the clip}, `words` [{word, start_s, end_s}], `segments`, and `transcript_differs`
+        to back), `cues` {name: seconds into the clip}, `words` [{word, start_s, end_s}] as heard, `script_words` (the script's own words
+        with those timings: use these for captions), `segments`, and `transcript_differs`
         (where Whisper heard something other than the script: number formatting is expected, anything else may be mispronounced).
         Default voice: the cloned narrator (the same voice in every scene); `model`, `voice` (a preset) or `ref_audio` (a saved
         reference voice; see the voices tool) override it. Scenes are cached by text and voice, so re-running after editing one

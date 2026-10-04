@@ -3,19 +3,16 @@ import { AbsoluteFill, Audio, Sequence, interpolate, staticFile, useCurrentFrame
 import { Captions } from "./Captions";
 import { AllScenesCtx, DataCtx, Props, SceneCtx, SceneT, sceneFrames } from "./lib";
 import { C } from "./theme";
-import { Cold } from "./scenes/Cold";
-import { Title } from "./scenes/Title";
-import { Memory } from "./scenes/Memory";
-import { Door } from "./scenes/Door";
-import { Stage } from "./scenes/Stage";
-import { Decide } from "./scenes/Decide";
-import { Pipelines } from "./scenes/Pipelines";
-import { Gates } from "./scenes/Gates";
+import { Catch, Cost_, Deal, Hook, Latency_, Privacy_ } from "./scenes/Act1";
+import { Door, Team } from "./scenes/Act2";
+import { Evidence, Mechanism, Sort } from "./scenes/Act3";
+import { GatesLoop, Route, Wrong } from "./scenes/Gates";
 import { Voice } from "./scenes/Voice";
-import { End } from "./scenes/End";
+import { Timesheet } from "./scenes/Timesheet";
 
-const VIEWS: Record<string, React.FC> = { cold: Cold, title: Title, memory: Memory, door: Door, stage: Stage, decide: Decide,
-                                          pipelines: Pipelines, gates: Gates, voice: Voice, end: End };
+const VIEWS: Record<string, React.FC> = { hook: Hook, deal: Deal, cost: Cost_, latency: Latency_, private: Privacy_, catch: Catch, team: Team,
+                                          door: Door, sort: Sort, mechanism: Mechanism, evidence: Evidence, wrong: Wrong, gates: GatesLoop,
+                                          route: Route, voice: Voice, timesheet: Timesheet };
 export const XFADE = 12;      // scenes overlap by this many frames and cross-fade
 
 export const filmFrames = (scenes: SceneT[]) => scenes.reduce((n, s) => n + sceneFrames(s), 0);

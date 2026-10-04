@@ -48,19 +48,17 @@ def roc(results, label):
 
 
 def extract_data(out):
+    """The real numbers shown on screen: catalog sizes, triage ROC curves, the live card sort and PR decision (cards.py), and the
+    production counts for the timesheet (draft.py, cards.py, this script)."""
     cat = tomllib.load(open(ROOT / "gateway.toml", "rb"))
     sizes = {k: v.get("est_mem_gb") or round(v["weights_gb"] + v.get("kv_gb", 0) + v.get("overhead_gb", 0), 1) for k, v in cat["backends"].items()}
-    events = [json.loads(l) for l in open(ROOT / "data/book_events.jsonl")]
-    words = [w["w"] for w in json.load(open(ROOT / "data/book_words.json"))]
-    e = next(x for x in events if x["i"] == 17)                       # "when suddenly a White Rabbit"
-    phrase = {"text": e["text"], "before": " ".join(words[max(0, e["w0"] - 15):e["w0"]]), "after": " ".join(words[e["w1"]:e["w1"] + 5]),
-              "emoji": e["alts"][:8], "top": e["top"], "attrs": e["attrs"]}
-    sample = [{"text": x["text"], "top": [t["e"] for t in x["top"]], "color": x["attrs"]["color"]["top"]} for x in events[:60]]
     results = [json.loads(l) for l in open(ROOT / "data/results.jsonl")]
     prs = [{"number": r["number"], "title": r["title"]} for r in results[:40]]
     rocs = [roc(results, l) for l in ["internal", "docs", "collections", "repl", "perf", "release_notes"]]
-    (out / "data.json").write_text(json.dumps({"sizes": sizes, "budget_gb": cat["gateway"]["memory_budget_gb"], "phrase": phrase,
-                                               "book_sample": sample, "book_phrases": len(events), "prs": prs, "rocs": rocs}, ensure_ascii=False))
+    load = lambda name: json.load(open(out / name)) if (out / name).exists() else None
+    (out / "data.json").write_text(json.dumps({"sizes": sizes, "budget_gb": cat["gateway"]["memory_budget_gb"], "prs": prs, "rocs": rocs,
+                                               "cards": load("cards.json"), "drafts": load("draft_stats.json"), "script_check": load("script_check.json")},
+                                              ensure_ascii=False))
 
 
 def main():
@@ -93,7 +91,7 @@ def main():
         print(f"{sc['id']:<10} {r['duration_s']:6.2f}s {'(cached)' if r['cached'] else ''}  cues: {r['cues']}" + (f"  HEARD DIFFERENTLY: {odd}" if odd else ""), flush=True)
         scenes.append({"id": sc["id"], "audio": f"audio/{sc['id']}.wav", "duration_s": r["duration_s"], "lead_s": sc.get("lead", 0.3),
                        "tail_s": sc.get("tail", 0.6), "text": r["text"], "cues": r["cues"], "peaks": peaks(wav),
-                       "words": [{"w": w["word"], "s": round(w["start_s"], 3), "e": round(w["end_s"], 3)} for w in r["words"]]})
+                       "words": [{"w": w["word"], "s": round(w["start_s"], 3), "e": round(w["end_s"], 3)} for w in r["script_words"]]})
     (out / "timeline.json").write_text(json.dumps({"fps": 30, "scenes": scenes}, ensure_ascii=False, indent=1))
     extract_data(out)
     total = sum(s["lead_s"] + s["duration_s"] + s["tail_s"] for s in scenes)

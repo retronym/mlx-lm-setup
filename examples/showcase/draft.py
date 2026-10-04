@@ -128,6 +128,10 @@ def compare():
         tot_s += len(ds); kept_s += kept; tot_w += len(e.split()); same_w += same
         print(f"{sid:<10} sentences kept {kept}/{len(ds)}   words from the draft {same}/{len(e.split())}")
     print(f"\nTOTAL: {kept_s}/{tot_s} draft sentences kept verbatim; {same_w}/{tot_w} words of the final script come from the local drafts ({same_w / max(tot_w, 1):.0%})")
+    d = json.load(open(OUT / "drafts.json"))
+    (OUT / "draft_stats.json").write_text(json.dumps({"model": d["model"], "scenes": len(d["scenes"]), "sentences_kept": kept_s, "sentences": tot_s,
+        "words_from_drafts": same_w, "words": tot_w, "llm_attempts": sum(len(x["attempts"]) for x in d["scenes"]),
+        "passed": sum(1 for x in d["scenes"] if x["passed"]), "nli_checks": sum(len(x["checks"]) for x in d["scenes"])}))
 
 
 async def check_script():
@@ -150,6 +154,7 @@ async def check_script():
                         flagged += 1
                         print(f"{sc['id']:<10} {r_['label']:<13} {r_['entailment']:.2f}{'  numbers not in facts: ' + ','.join(nums) if nums else ''}  {r_['hypothesis']}")
     print(f"\n{flagged} of {total} sentences flagged")
+    (OUT / "script_check.json").write_text(json.dumps({"sentences": total, "flagged": flagged}))
 
 
 if __name__ == "__main__":

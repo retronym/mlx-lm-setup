@@ -2,12 +2,13 @@ import React from "react";
 import { useCurrentFrame } from "remotion";
 import { Appear, Arrow, Chip, Heading, INOUT, Mono, prog, typed, useAllScenes, useCue, useScene } from "../lib";
 import { C, FPS } from "../theme";
+import { PlanRail } from "../team";
 
 // The narrator was designed on the speech page with its default description, then kept with save_as_voice.
 const DESCRIPTION = "A calm, warm female narrator in her thirties, clear and measured, with a gentle smile in her voice.";
-const IDS = ["cold", "title", "memory", "door", "stage", "decide", "pipelines", "gates", "voice", "end"];
 
-const Wave: React.FC<{ peaks: number[]; w: number; h: number; upto?: number; color?: string }> = ({ peaks, w, h, upto = Infinity, color = C.speech }) => {
+
+export const Wave: React.FC<{ peaks: number[]; w: number; h: number; upto?: number; color?: string }> = ({ peaks, w, h, upto = Infinity, color = C.speech }) => {
   const n = Math.min(peaks.length, Math.floor(w / 5));
   const step = peaks.length / n;
   return (
@@ -30,11 +31,11 @@ export const Voice: React.FC = () => {
   const t = f / FPS - sc.lead_s;
   const W = 1600, X = 160, Y = 170, H = 150;
   const wordsOn = prog(f, cue("words"), 16);
-  const made = prog(f, cue("made"), 20, INOUT);
-  const pipeOp = 1 - made;
+  const pipeOp = 1;
 
   return (
     <>
+      <PlanRail current={3} opacity={1 - prog(f, 0, 30)} />
       {/* this very narration */}
       <div style={{ position: "absolute", left: X, top: Y - 50 }}><Mono size={20}>this narration · voice.wav</Mono></div>
       <div style={{ position: "absolute", left: X, top: Y }}>
@@ -63,17 +64,17 @@ export const Voice: React.FC = () => {
         <Arrow x1={1080} y1={560} x2={1140} y2={560} p={prog(f, cue("design") + 60, 12)} color={C.muted} />
         <Appear at={cue("design") + 66} style={{ left: 1150, top: 500 }}>
           <Mono size={20} color={C.ink}>data/voices/narrator.wav</Mono>
-          <div style={{ marginTop: 8 }}><Wave peaks={(all.find(s => s.id === "title") ?? sc).peaks} w={300} h={44} /></div>
+          <div style={{ marginTop: 8 }}><Wave peaks={(all.find(s => s.id === "hook") ?? sc).peaks} w={300} h={44} /></div>
         </Appear>
         {/* ... then clone it for every scene */}
         <Appear at={cue("clone")} style={{ left: 1150, top: 640 }}><Chip color={C.speech} size={24}>Qwen3-TTS clone</Chip></Appear>
-        {IDS.map((id, i) => {
+        {all.map(s => s.id).map((id, i) => {
           const s = all.find(x => x.id === id);
           const p = prog(f, cue("clone") + 14 + i * 4, 14);
           return (
-            <div key={id} style={{ position: "absolute", left: 1460 + (i % 2) * 160, top: 470 + Math.floor(i / 2) * 64, opacity: p, transform: `translateX(${(1 - p) * -30}px)` }}>
+            <div key={id} style={{ position: "absolute", left: 1500 + (i % 3) * 100, top: 440 + Math.floor(i / 3) * 56, opacity: p, transform: `translateX(${(1 - p) * -30}px)` }}>
               <Mono size={14}>{id}</Mono>
-              {s && <Wave peaks={s.peaks} w={140} h={26} color={id === "voice" ? C.accent : C.speech} />}
+              {s && <Wave peaks={s.peaks} w={90} h={22} color={id === "voice" ? C.accent : C.speech} />}
             </div>
           );
         })}
@@ -83,21 +84,6 @@ export const Voice: React.FC = () => {
         </Appear>
       </div>
 
-      {made > 0 && (
-        <div style={{ position: "absolute", inset: 0, opacity: made }}>
-          <div style={{ position: "absolute", left: 160, top: 470, display: "flex", gap: 22 }}>
-            {[["script", "Claude"], ["voice", "Qwen3-TTS"], ["timing & captions", "Whisper"], ["film", "Remotion"]].map(([a, b], i) => (
-              <Appear key={a} at={cue("made") + i * 10} style={{ position: "relative" }}>
-                <div style={{ padding: "18px 26px", borderRadius: 14, background: C.panel, border: `2px solid ${C.line}`, minWidth: 300 }}>
-                  <Mono size={20}>{a}</Mono>
-                  <Heading size={40}>{b}</Heading>
-                </div>
-              </Appear>
-            ))}
-          </div>
-          <Appear at={cue("made") + 60} style={{ left: 160, top: 660 }}><Heading size={64}>All made on this Mac.</Heading></Appear>
-        </div>
-      )}
     </>
   );
 };

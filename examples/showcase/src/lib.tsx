@@ -8,13 +8,17 @@ export type SceneT = {
   cues: Record<string, number>; words: Word[]; peaks: number[];
 };
 export type Roc = { label: string; auc: number; positives: number; n: number; curve: [number, number][]; at_half: [number, number]; precision_at_half: number; flagged_at_half: number };
-export type Emoji = { e: string; name: string; p: number; z: number };
 export type Data = {
   sizes: Record<string, number>; budget_gb: number;
-  phrase: { text: string; before: string; after: string; emoji: Emoji[]; top: Emoji[];
-            attrs: { color: { top: string; p: number }; mood: { top: string; p: number; probs: Record<string, number> }; sentiment: { score: number } } };
-  book_sample: { text: string; top: string[]; color: string }[]; book_phrases: number;
   prs: { number: number; title: string }[]; rocs: Roc[];
+  cards: { deck: { id: string; text: string; truth: string; private: boolean; sorted: string; p: number; top: [string, number][] }[];
+           pr: { state: string; questions: { q: string; kind: string; answer: string; p: number; top: [string, number][] }[] };
+           generated: { text: string; usage: { completion_tokens: number; prompt_tokens: number }; secs: number };
+           triage: { prs: number; questions: number; judgments: number; input_tokens_est: number; estimate: string };
+           counts: Record<string, number> };
+  drafts: { model: string; scenes: number; sentences_kept: number; sentences: number; words_from_drafts: number; words: number;
+            llm_attempts: number; passed: number; nli_checks: number };
+  script_check: { sentences: number; flagged: number };
 };
 export type Props = { timeline: { fps: number; scenes: SceneT[] }; data: Data };
 

@@ -131,10 +131,10 @@
     "Part two is which jobs suit the interns.",
     "Most of the small jobs are not essays; they are choices, such as which label, which category, or yes or no.",
     "The sorting of the jobs shown on screen was done by a small local decision model, Jev-Style.",
-    "It sorted five of six jobs correctly. It filed checking a summary against code as a writing job."
+    "It sorted seven of eight jobs correctly. It filed checking a summary against code as a writing job."
    ],
    "sources": [
-    "experiment 2026-10-04 (decide on six job cards)"
+    "cards.py run (data/showcase/cards.json)"
    ]
   },
   {

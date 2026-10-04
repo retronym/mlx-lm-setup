@@ -11,7 +11,7 @@ const load: CalculateMetadataFunction<Props> = async () => {
 };
 
 // One composition per scene too, for checking a scene on its own (`npm run still -- scene-decide out.png --frame 300`).
-const SCENES = ["cold", "title", "memory", "door", "stage", "decide", "pipelines", "gates", "voice", "end"];
+const SCENES = ["hook", "deal", "cost", "latency", "private", "catch", "team", "door", "sort", "mechanism", "evidence", "wrong", "gates", "route", "voice", "timesheet"];
 const loadScene = (id: string): CalculateMetadataFunction<Props> => async () => {
   const [timeline, data] = await Promise.all(["timeline.json", "data.json"].map(f => fetch(staticFile(f)).then(r => r.json())));
   const scenes = timeline.scenes.filter((s: { id: string }) => s.id === id);

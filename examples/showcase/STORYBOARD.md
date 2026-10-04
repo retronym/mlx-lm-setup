@@ -1,6 +1,6 @@
 # Showcase explainer: storyboard (v2)
 
-Status: **proposal, for review.** It replaces v1 (built and rendered at commit `90850c1`; see git history), which opened on the memory incident, gave memory management half the film, and moved from topic to topic without saying where it was going.
+Status: **built** (`data/showcase/showcase.mp4`, 3:49; see "As built" at the end). It replaces v1 (built and rendered at commit `90850c1`; see git history), which opened on the memory incident, gave memory management half the film, and moved from topic to topic without saying where it was going.
 
 ## Intent
 
@@ -184,3 +184,14 @@ Stays with Claude: the storyboard and its structure, the Remotion code, the fina
 ## Open questions
 
 1. **Draft quality.** If the local drafts need heavy editing, the "first draft" claim is weak. Proposal: draft all scenes before committing to the claim, and keep it only if Claude keeps most lines with light edits. The ledger reports the real ratio either way.
+
+## As built (v2)
+
+- **Length 3:49**, not 3:30. The cloned narrator speaks at about 140 words a minute, and the script was cut from 685 to 540 words to get here.
+- **The running ledger was dropped.** A counter ticking in the corner had no honest per-demo source. The real counts appear once, in the timesheet at the end.
+- **The card sort is live** (`cards.py`): 7 of 8 right. It misses the same card as the first experiment ("does this summary match the code" filed as generate). The narration says "seven of eight", and the miss is shown in orange.
+- **The decide example is a real run** on PR #11285 (four questions, one pass). The generate side shows Gemma's real answer to the same questions, typed at its real pace (223 tokens in 6.7 s).
+- **Cost uses tokens, not dollars.** About 379,000 input tokens for the triage's 1,800 judgments, estimated as characters ÷ 4 of the real inputs.
+- **Local share of the script:** after the lead's edit and the cut for length, 56% of the final words (302 of 540) come from the local drafts, and 2 of 55 draft sentences survived verbatim. The timesheet reports this.
+- **Captions use the script's words** with Whisper's timings (`narrate` now returns `script_words`), so they read "Claude Opus five point five" rather than Whisper's "Clawed" and "5 .5".
+- **Pronunciation:** Whisper heard "IndexError" as "intregus", so the narration says "index error".

@@ -3,6 +3,10 @@
 A 3-minute explainer of this project with motion design, rendered entirely on this Mac. [STORYBOARD.md](STORYBOARD.md) has the intent, story devices and scene list; this file covers how to build it.
 
 ```bash
+.venv/bin/python examples/showcase/draft.py                # local first drafts of every scene from brief.json (Gemma via iterate), fact-checked
+.venv/bin/python examples/showcase/draft.py --compare      # how much of the edited script.json came from the drafts
+.venv/bin/python examples/showcase/draft.py --check-script # fact-check the edited script (local NLI per sentence, numbers by code)
+.venv/bin/python examples/showcase/cards.py                # live data: the job-card sort, the PR decision, the generated contrast
 python3 examples/showcase/narrate.py          # narration (clone voice "narrator"), word timestamps, cues, data.json -> data/showcase/
 node examples/showcase/capture.mjs            # screenshots of the real sites (needs the gateway and pipelines/dashboard_server.py running)
 cd examples/showcase && npm install && npm run render     # -> data/showcase/showcase.mp4

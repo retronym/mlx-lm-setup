@@ -24,16 +24,18 @@ class Align(unittest.TestCase):
     def test_cue_resolves_to_the_spoken_start_of_the_next_word(self):
         _, ws, cues = split_cues("Two copies of the same thirty billion [[p]] parameter model")
         heard = words("Two", "copies", "of", "the", "same", "30", "billion", "parameter", "model")
-        times, diffs = align(ws, heard, cues, 4.5)
+        times, diffs, sw = align(ws, heard, cues, 4.5)
         self.assertEqual(times, {"p": 3.5})
         self.assertEqual(diffs, [{"script": "thirty", "heard": "30"}])
+        self.assertEqual([(w["word"], w["start_s"]) for w in sw[4:7]], [("same", 2.0), ("thirty", 2.5), ("billion", 3.0)])    # script spelling, heard timing
         _, ws, cues = split_cues("Claude speaks M C P to the back end")
         self.assertEqual(align(ws, words("Claude", "speaks", "MCP", "to", "the", "backend"), cues, 3.0)[1], [])
 
     def test_unaligned_tail_falls_back_to_word_position(self):
         _, ws, cues = split_cues("alpha beta [[c]] gamma")
-        times, _ = align(ws, words("alpha", "beta"), cues, 3.0)
+        times, _, sw = align(ws, words("alpha", "beta"), cues, 3.0)
         self.assertEqual(times, {"c": 2.0})
+        self.assertEqual(sw[2], {"word": "gamma", "start_s": 1.0, "end_s": 3.0})
 
 
 class ParseScenes(unittest.TestCase):

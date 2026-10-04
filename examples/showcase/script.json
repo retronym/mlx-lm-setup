@@ -1,37 +1,101 @@
 {
-  "title": "A lead and its interns: local models on one Mac",
-  "scenes": [
-    {"id": "hook", "lead": 0.8, "tail": 0.5,
-     "narration": "This voice was generated on this Mac. [[ledger]] So was the first draft of these words, and the fact-check behind them. We'll come back to how. First, why that's worth doing."},
-    {"id": "deal", "lead": 0.3, "tail": 0.4,
-     "narration": "Working with an AI coding assistant creates a steady stream of small jobs. [[deal]] Summarising a source file. Deciding if a pull request is housekeeping. Judging the sentiment of a review. Checking if a summary matches the code."},
-    {"id": "cost", "lead": 0.2, "tail": 0.4,
-     "narration": "Hosted models bill every request by the token. [[one]] For one small job, that cost is negligible. [[volume]] But this repository triaged three hundred Scala pull requests against six questions each: one thousand eight hundred judgments. [[free]] On a local model, re-takes are free, so you iterate more."},
-    {"id": "latency", "lead": 0.2, "tail": 0.4,
-     "narration": "Small jobs are also latency bound: the round trip can cost more than the work. [[local]] A local decision takes about a second, with no network and no rate limit."},
-    {"id": "private", "lead": 0.2, "tail": 0.4,
-     "narration": "And some text should never leave the machine. [[lock]] Unreleased code, private pull request descriptions, recordings of a person's voice. [[loopback]] The local gateway listens only on the machine itself."},
-    {"id": "catch", "lead": 0.2, "tail": 0.6,
-     "narration": "The catch: [[catch]] local models are much smaller than hosted models, and they are sometimes confidently wrong."},
-    {"id": "team", "lead": 0.3, "tail": 0.5,
-     "narration": "So the question is not whether to use local or hosted models, but how to split the work between them. [[team]] Think of it as a team. [[lead]] Claude Opus five point five is the capable lead. [[interns]] The local models are interns on this Mac, each good at one junior job. [[plan]] We'll cover how they are reached, [[p2]] which jobs suit them, [[p3]] and how their work gets checked."},
-    {"id": "door", "lead": 0.3, "tail": 0.5,
-     "narration": "Part one: how the interns are reached. [[door]] One gateway on this Mac is the only door to the local models. [[clients]] Claude Code talks to it over MCP, the browser gets a chat site and an admin page, and anything that speaks the OpenAI API can use it too. [[in]] An intern comes in only when a request needs it, in about two seconds, [[out]] and goes home when it has been idle. [[desks]] They share twenty eight of the Mac's forty eight gigabytes, so when the desks are full, the one idle longest makes room."},
-    {"id": "sort", "lead": 0.3, "tail": 0.4,
-     "narration": "Part two: which jobs suit the interns. [[sort]] Look at the jobs again. Most are choices rather than essays. [[jev]] A small local decision model called Jev-Style did this sorting. [[miss]] It got five of six jobs right."},
-    {"id": "mechanism", "lead": 0.2, "tail": 0.6,
-     "narration": "A generating model writes an answer token by token, and the prose has to be parsed. [[pass]] A decision model scores every option in a closed list in a single forward pass, and returns probabilities. [[pr]] Here, a Scala pull request that updates a build plugin. [[answers]] Four questions, one pass: a dependency update, low risk, no release note needed, internal housekeeping. [[cost]] Fast, deterministic, and nothing to parse."},
-    {"id": "evidence", "lead": 0.2, "tail": 0.6,
-     "narration": "This repository triaged three hundred Scala pull requests with six yes or no questions. [[rank]] The ranking was good, but the default threshold flagged many pull requests that maintainers hadn't labelled. [[calib]] For the collections question, it flagged thirty nine, and nineteen were right."},
-    {"id": "wrong", "lead": 0.3, "tail": 0.4,
-     "narration": "Part three: how the interns' work gets checked. [[review]] A local model reviewed a short Python function and claimed it raised an IndexError. [[not]] It did not. [[nli]] A local fact-checking model agreed, with a probability of zero point seven two. [[real]] The real bug was that the last windows are partial, but still divided by n."},
-    {"id": "gates", "lead": 0.2, "tail": 0.4,
-     "narration": "So generated work goes through checks a machine can verify: valid JSON, a pattern, a length, faithfulness to a source. [[retry]] Failures are fed back, and the intern tries again. [[lead]] If errors persist, the lead takes over."},
-    {"id": "route", "lead": 0.2, "tail": 0.6,
-     "narration": "The lead retains design, review and judgment. [[down]] Interns handle summaries, extraction, classification, boilerplate and first-pass triage, [[tools]] handed down through four tools: chat, decide, entail and iterate."},
-    {"id": "voice", "lead": 0.4, "tail": 0.4,
-     "narration": "As promised: [[design]] this voice was designed from one sentence describing it. [[clone]] A local model saved and cloned that voice for every scene, so they all sound the same. [[words]] Whisper listened back and timed every word, which is how the animations know when to move."},
-    {"id": "timesheet", "lead": 0.3, "tail": 3.0,
-     "narration": "Making this film was itself a stack of small jobs. [[interns]] The interns on this Mac drafted the narration, fact-checked it, voiced it and timed it. [[lead]] The lead wrote the storyboard and the animation code, and edited the script. [[same]] Same split, same reasons."}
-  ]
+ "title": "A lead and its interns: local models on one Mac",
+ "scenes": [
+  {
+   "id": "hook",
+   "lead": 0.8,
+   "tail": 0.5,
+   "narration": "This voice was generated on this Mac. [[ledger]] So was the first draft of these words, and the fact-check behind them. First, why that's worth doing."
+  },
+  {
+   "id": "deal",
+   "lead": 0.3,
+   "tail": 0.4,
+   "narration": "Working with an AI coding assistant creates a steady stream of small jobs: [[deal]] summarising a file, labelling a pull request, judging a review, checking a summary against the code."
+  },
+  {
+   "id": "cost",
+   "lead": 0.2,
+   "tail": 0.4,
+   "narration": "Hosted models bill every request by the token. [[one]] For one small job, that's negligible. [[volume]] But this repository triaged three hundred pull requests against six questions each: eighteen hundred judgments. [[free]] Locally, a re-take is free, so you iterate more."
+  },
+  {
+   "id": "latency",
+   "lead": 0.2,
+   "tail": 0.4,
+   "narration": "Small jobs are latency bound. [[local]] A local decision takes about a second, with no network and no rate limit."
+  },
+  {
+   "id": "private",
+   "lead": 0.2,
+   "tail": 0.4,
+   "narration": "And some text should never leave the machine: [[lock]] unreleased code, private pull requests, a recording of someone's voice. [[loopback]] The gateway listens only on the machine itself."
+  },
+  {
+   "id": "catch",
+   "lead": 0.2,
+   "tail": 0.6,
+   "narration": "The catch: [[catch]] local models are much smaller than hosted models, and they are sometimes confidently wrong."
+  },
+  {
+   "id": "team",
+   "lead": 0.3,
+   "tail": 0.5,
+   "narration": "So the question isn't local or hosted. It's how to split the work. [[team]] Think of a team: [[lead]] Claude Opus five point five as the lead, [[interns]] and local models on this Mac as interns, each good at one junior job. [[plan]] Three parts: how they're reached, [[p2]] which jobs suit them, [[p3]] and how their work gets checked."
+  },
+  {
+   "id": "door",
+   "lead": 0.3,
+   "tail": 0.5,
+   "narration": "Part one: how the interns are reached. [[door]] One gateway is the only door. [[clients]] Claude Code talks to it over MCP, and the browser and any OpenAI client can use it too. [[in]] An intern comes in when there's work, in about two seconds, [[out]] and goes home when idle. [[desks]] They share twenty eight gigabytes, so when the desks are full, the one idle longest makes room."
+  },
+  {
+   "id": "sort",
+   "lead": 0.3,
+   "tail": 0.4,
+   "narration": "Part two: which jobs suit them. [[sort]] Most of these jobs are choices, not essays. [[jev]] A small local decision model, Jev-Style, did this sorting. [[miss]] Seven of eight right."
+  },
+  {
+   "id": "mechanism",
+   "lead": 0.2,
+   "tail": 0.6,
+   "narration": "A generating model writes its answer token by token, and the prose has to be parsed. [[pass]] A decision model scores every option of a closed list in one forward pass, with probabilities. [[pr]] One pull request, [[answers]] four questions, one pass: a dependency update, low risk, no release note, housekeeping. [[cost]] Fast, deterministic, nothing to parse."
+  },
+  {
+   "id": "evidence",
+   "lead": 0.2,
+   "tail": 0.6,
+   "narration": "Asked of three hundred Scala pull requests, six questions each, [[rank]] the answers ranked well, but the default threshold flagged too many. [[calib]] For collections: thirty nine flagged, nineteen right."
+  },
+  {
+   "id": "wrong",
+   "lead": 0.3,
+   "tail": 0.4,
+   "narration": "Part three: how their work gets checked. [[review]] Reviewing a short Python function, a local model claimed it raised an index error. [[not]] It doesn't. [[nli]] A local fact-checker agreed, with a probability of zero point seven two."
+  },
+  {
+   "id": "gates",
+   "lead": 0.2,
+   "tail": 0.4,
+   "narration": "So generated work passes checks a machine can verify: JSON, patterns, length, faithfulness to a source. [[retry]] Failures are fed back and retried, [[lead]] and if they persist, the lead takes over."
+  },
+  {
+   "id": "route",
+   "lead": 0.2,
+   "tail": 0.6,
+   "narration": "The lead retains design, review and judgment. [[down]] Interns handle summaries, extraction, classification, boilerplate and first-pass triage, [[tools]] handed down through four tools: chat, decide, entail and iterate."
+  },
+  {
+   "id": "voice",
+   "lead": 0.4,
+   "tail": 0.4,
+   "narration": "As promised: [[design]] this voice was designed from one sentence of description, [[clone]] then cloned for every scene. [[words]] Whisper listened back and timed every word, which is how the animations know when to move."
+  },
+  {
+   "id": "timesheet",
+   "lead": 0.3,
+   "tail": 3.0,
+   "narration": "Making this film was a stack of small jobs too. [[interns]] The interns drafted the narration, fact-checked it, voiced it and timed it. [[lead]] The lead wrote the storyboard and the code, and edited the script. [[same]] Same split, same reasons."
+  }
+ ]
 }
