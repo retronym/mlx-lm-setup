@@ -1,0 +1,20 @@
+# Python environments (recreate per README)
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+
+# Downloaded or generated: model weights, data, corpus, gateway runtime state
+models/
+data/
+corpus/
+.gateway/
+
+# Logs and one-off outputs
+*.log
+bench_report.txt
+docs/*.tmp
+
+# Editor / OS
+.idea/
+.DS_Store
