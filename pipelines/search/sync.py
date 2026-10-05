@@ -36,8 +36,29 @@ def main(argv):
     fetched, failed = set(), 0
     srcs = targets(cfg, a, maxp)
     run = runstate.Run(cfg, "sync", [s.key for s in srcs])
+    gh_done = set()
     for s in srcs:
         st = Store(cfg.project_db(s.project))
+        if s.type == "github":                                   # one pass over a repo's streams serves all its sources in the project
+            if (s.project, s.repo) in gh_done:
+                continue
+            gh_done.add((s.project, s.repo))
+            members = [m for m in srcs if m.type == "github" and (m.project, m.repo) == (s.project, s.repo)]
+            if not any(due(st, m, force) for m in members):
+                run.log(f"{members[0].key}: synced recently, skipped")
+                continue
+            run.source("+".join(m.key for m in members))
+            g = ghissues.GhRepo(members, max_chars)
+            try:
+                (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None, log=run.log))
+                for m in members:
+                    st.put(m.id, "last_sync", str(time.time()))
+                st.commit()
+            except Exception as e:                               # noqa: BLE001
+                failed += 1
+                print(f"{g.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+                run.error(f"{g.key}: {type(e).__name__}: {e}")
+            continue
         if not due(st, s, force):
             run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
             continue
@@ -47,9 +68,6 @@ def main(argv):
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)
                 GitSource(s, d, max_chars).sync(st, limit=int(limit) if limit else None, log=run.log)
-            elif s.type == "github":
-                g = ghissues.GhIssues(s, max_chars)
-                (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None, log=run.log))
             elif s.type == "github_releases":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
                 fetched.add(s.repo) if d else None

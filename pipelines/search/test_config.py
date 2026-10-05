@@ -84,6 +84,16 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("HH:MM", "\n".join(self.errors(search={"refresh": {"at": "3am"}}, projects=[proj("p")], universes=[uni()])))
         self.assertIn("expected a #rrggbb colour", "\n".join(self.errors(projects=[proj("p", {**GIT, "color": "red"})], universes=[uni()])))
 
+    def test_two_sources_may_not_index_the_same_kind_of_item(self):
+        a = {**GH, "id": "a", "include": ["issues", "comments"]}
+        b = {**GH, "id": "b", "include": ["prs", "comments"]}
+        self.load(projects=[proj("p", a, b)], universes=[uni()])                                   # issues+their comments vs PRs+their comments: disjoint
+        errs = "\n".join(self.errors(projects=[proj("p", a, {**GH, "id": "c", "include": ["issues", "reviews"]})], universes=[uni()]))
+        self.assertIn("sources 'a' and 'c' both index issues of o/r", errs)
+        errs = "\n".join(self.errors(projects=[proj("p", {**GH, "id": "a", "include": ["issues", "prs", "comments"]}, b)], universes=[uni()]))
+        self.assertIn("both index comments on PRs of o/r", errs)
+        self.load(projects=[proj("p", a, {**GH, "id": "other", "repo": "o/elsewhere"})], universes=[uni()])   # a different repo is no overlap
+
     def test_invalid_json_and_missing_files(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

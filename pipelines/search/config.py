@@ -275,6 +275,22 @@ def _source(project, d, v, i, default_since):
                   include=tuple(s.get("include") or ()), since=s.get("since"), tag_messages=bool(s.get("tag_messages")))
 
 
+def _check_overlaps(v, srcs):
+    """Two `github` sources of one project on the same repo must not index the same kind of item (it would be stored twice): each of the five
+    kinds (issues, PRs, comments on issues, comments on PRs, review comments) goes to at most one source."""
+    seen = {}
+    for s in srcs:
+        if s.type != "github":
+            continue
+        inc = set(s.include)
+        kinds = [k for k, on in (("issues", "issues" in inc), ("prs", "prs" in inc), ("comments on issues", {"comments", "issues"} <= inc),
+                                 ("comments on PRs", {"comments", "prs"} <= inc), ("review comments", "reviews" in inc)) if on]
+        for k in kinds:
+            if (s.repo, k) in seen:
+                v.err("sources", f"sources {seen[(s.repo, k)]!r} and {s.id!r} both index {k} of {s.repo}")
+            seen[(s.repo, k)] = s.id
+
+
 def load(config_dir=None):
     """Load and validate everything under `config_dir` (default pipelines/search/config). Raises ConfigError listing every problem."""
     cdir = Path(config_dir) if config_dir else CONFIG_DIR
@@ -300,6 +316,7 @@ def load(config_dir=None):
                 v.err(f"sources[{i}].id", f"duplicate source id {s.id!r}")
             seen.add(s.id)
             srcs.append(s)
+        _check_overlaps(v, srcs)
         if p["id"]:
             projects[p["id"]] = Project(p["id"], p["title"] or p["id"], d.get("description", "") if isinstance(d, dict) else "", tuple(srcs))
     for f in sorted((cdir / "universes").glob("*.json")):
