@@ -1,6 +1,6 @@
 # Links between code, issues and PRs
 
-Design. Step 1 (extraction from what is indexed) is built: see [Status](#status) below and `links.py` / `refs.py`.
+Design. Steps 1 (extraction from what is indexed) and 2 (GitHub-native edges, tag-based `shipped_in`) are built: see [Status](#status) below and `links.py` / `refs.py`.
 
 ## Problem
 
@@ -79,8 +79,8 @@ This ties into the still-open evaluation step 7 in [PLAN.md](PLAN.md). Cheap gro
 
 ## Steps
 
-1. **TODO** Extraction on what's already indexed: reference parser module (project `tracker` / `legacy_prefixes` config, bare `#N` resolution, SHAs, URLs, `SI-N`), links DB schema, `links.py` phase (stamp, version, `--force`), `mentions` / `shipped_in` / `touches` edges from existing metadata, `defines` edges from code comments. Tests with fixture chunks; a stats command (edges per type, dangling %, top hubs). No gateway change. Stop for review of edge counts and a precision sample.
-2. **TODO** GitHub-native edges: closing references and merge commit sha in the adapter (additive, stored in meta; forward and backfill cursors unaffected), `closes` / `merged_as` extractors, `git describe --contains` for `shipped_in`.
+1. **DONE** Extraction on what's already indexed: reference parser module (project `tracker` / `legacy_prefixes` config, bare `#N` resolution, SHAs, URLs, `SI-N`), links DB schema, `links.py` phase (stamp, version, `--force`), `mentions` / `shipped_in` / `touches` edges from existing metadata, `defines` edges from code comments. Tests with fixture chunks; a stats command (edges per type, dangling %, top hubs). No gateway change. Stop for review of edge counts and a precision sample.
+2. **DONE** GitHub-native edges: closing references and merge commit sha in the adapter (additive, stored in meta; forward and backfill cursors unaffected), `closes` / `merged_as` extractors, `git describe --contains` for `shipped_in`.
 3. **TODO** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
 4. **TODO** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
 5. **TODO** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
@@ -98,6 +98,13 @@ Decisions taken while building it:
 - Noise filtered in the parser: bytecode listings (`invokevirtual #38`, `#29 = Utf8`), fenced code blocks (bare refs only), the text of a markdown or HTML link whose URL is read on its own, `scala/scala#2.13.x`, six-digit numbers.
 
 On the real index (21k issues and PRs, 61k commits, 3.7k files; builds in 7 s): 125k edges, `closes` 7.9k, `mentions` 32k, `shipped_in` 12k, `touches` 72k, `defines` 1k; 15k dangling nodes, mostly scala3 issues before its backfill horizon and old Trac numbers. `links.py stats`, `links.py sample <type> [n]` (random edges with the words they were found in) and `links.py of <ref>` are for judging it.
+
+**Step 2 done.**
+
+- `sources/ghlinks.py` runs at the end of a GitHub repo's sync (when it has a `prs` source; `links.github.enabled`): GraphQL, 50 PRs per request (about 6 of the 5,000 points an hour; 300 zinc PRs cost about 30), `closingIssuesReferences` and `mergeCommit`, written into the PR chunk's metadata (`closes`, `merge_sha`, `gh_links`). The marker is the work queue: PRs without one are fetched newest first up to `links.github.max_prs_per_run` (3000) per run, so scala3's backlog drains over a few nights like the other backfills. A PR the sync rewrites (edited, closed, merged) loses the marker and is fetched again; the chunk hash is untouched, so nothing is re-embedded. A PR GitHub no longer has counts as done.
+- `links.py` turns them into `closes` (conf 1.0 beats the 0.85 of a text keyword; `how` = "github closing ref") and `merged_as` (PR -> commit, dangling when the commit is not indexed).
+- `shipped_in` also comes from git now: per managed clone, tags in date order, one `git rev-list` of each against the tags before it (4 s for scala/scala), so every commit is attributed to the first tag that contains it, and a merged PR to the tag of its merge commit. Only tags that have a release node count. On the real index this took `shipped_in` from 12k edges (release notes) to 59k.
+- Not done: the PR's changed-file list (`touches` from PRs): it multiplies the GraphQL cost by the number of files and the commit edges already cover indexed files; worth revisiting only if the evaluation says PR-level file links matter.
 
 ## Open questions
 

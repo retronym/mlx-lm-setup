@@ -9,21 +9,22 @@
 Nodes are documents, not chunks. Ids: `owner/repo#N` (an issue or PR: one number space, `kind` says which when it is indexed), `commit:owner/repo@sha`,
 `release:owner/repo@tag`, `file:owner/repo:path`. A target that is not indexed (yet) is a dangling node (`indexed` = 0); the edge is kept and resolves when
 the item is backfilled. Edges are directed from the document whose text says it:
-  closes     PR / commit -> issue    a closing keyword (`Fixes #1`) in a PR title or body or a commit message
+  closes     PR / commit -> issue    GitHub's own closing references of a PR (`sources/ghlinks.py`), or a closing keyword (`Fixes #1`) in a PR title or body or a commit message
+  merged_as  PR -> commit            the merge or squash commit GitHub recorded
   mentions   any -> issue/PR/commit  `#N`, `owner/repo#N`, URLs, `SI-N`, shas in titles, bodies, comments, review comments, commit messages
-  shipped_in issue/PR -> release     the release note (or tag message) names it
+  shipped_in issue/PR/commit -> release   the release note (or tag message) names it, or the release's tag is the first, by date, to contain the commit (a PR through its merge commit)
   touches    commit -> file          the paths of a commit message chunk, only to files that are indexed (conf falls with the number of files)
   defines    file -> issue/PR/commit a reference in a comment of the source file
 `conf` is the evidence's strength times how sure the target is (a bare `#N` that is no item of the document's own repo but one of its `bare_fallbacks` trackers, as in
 scala/scala commits that mean Trac tickets, is a guess). `how` says where the words were found and `snip` quotes them."""
-import bisect, json, os, random, re, sqlite3, sys, time
+import bisect, json, os, random, re, sqlite3, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import config, runstate
+import config, repos, runstate
 from refs import make_parser, code_comments
 
 VERSION = "1"
-TYPES = ("closes", "mentions", "shipped_in", "touches", "defines")
-BASE = {"title": 0.8, "body": 0.7, "commit msg": 0.7, "comment": 0.5, "review": 0.5, "closing": 0.85, "code comment": 0.9, "release note": 0.9, "tag message": 0.9}
+TYPES = ("closes", "merged_as", "mentions", "shipped_in", "touches", "defines")
+BASE = {"github": 1.0, "git": 0.95, "title": 0.8, "body": 0.7, "commit msg": 0.7, "comment": 0.5, "review": 0.5, "closing": 0.85, "code comment": 0.9, "release note": 0.9, "tag message": 0.9}
 _FILES = re.compile(r"\s+and \d+ more$")
 _PREFIX = re.compile(r"^\S+#\d+ ")
 
@@ -64,6 +65,7 @@ class Builder:
         self.commit_repo = {}
         self.files = set()
         self.skipped_touches = 0
+        self.merged = {}                    # merged PR node -> merge commit sha
 
     # ---- pass 1: the nodes that exist ------------------------------------------------------------------------------------------
     def source(self, pid, sid):
@@ -174,6 +176,8 @@ class Builder:
                     if kind in ("issue", "pr", "comment", "review"):
                         thread = f"{repo}#{m['number']}"
                         if kind in ("issue", "pr"):
+                            if kind == "pr" and "~" not in cid:
+                                self.github_edges(thread, repo, m)
                             if "~" not in cid:
                                 self.refs_of(_PREFIX.sub("", title), thread, repo, "title", "mentions", kind == "pr")
                             self.refs_of(text, thread, repo, "body", "mentions", kind == "pr")
@@ -198,8 +202,49 @@ class Builder:
                         self.db.commit()
             finally:
                 con.close()
+        self.ship_from_tags()
         self.db.execute("DELETE FROM edges WHERE type = 'mentions' AND EXISTS (SELECT 1 FROM edges e WHERE e.src = edges.src AND e.dst = edges.dst AND e.type = 'closes')")
         self.db.commit()
+
+    def github_edges(self, pr, repo, m):
+        """What GitHub knows (meta `closes`, `merge_sha`, written by sources/ghlinks.py): the real closing references and the merge commit."""
+        for target in m.get("closes") or []:
+            dst = f"{self.alias.get(target.split('#')[0], target.split('#')[0])}#{target.split('#')[1]}"
+            self.dangling(dst)
+            self.edge(pr, dst, "closes", BASE["github"], "github closing ref", target)
+        sha = m.get("merge_sha")
+        if sha:
+            dst = f"commit:{self.commit_repo.get(sha, repo)}@{sha}"
+            self.dangling(dst)
+            self.edge(pr, dst, "merged_as", BASE["github"], "github merge commit", sha[:10])
+            self.merged[pr] = sha
+
+    def ship_from_tags(self):
+        """A commit shipped in the first release, by tag date, whose tag contains it (and a merged PR with it, through its merge commit). One
+        `git rev-list` per tag against the tags before it, over the managed clones; only tags that have a release node count."""
+        rels = {}
+        for nid, repo, tag in self.db.execute("SELECT id, repo, ref FROM nodes WHERE kind = 'release' AND indexed = 1"):
+            rels.setdefault(repo, {})[tag] = nid
+        pr_of = {}
+        for pr, sha in self.merged.items():
+            pr_of.setdefault(sha, []).append(pr)
+        for repo, tags in rels.items():
+            clone = repos.path_for(self.cfg, repo)
+            if not clone.exists():
+                continue
+            order = subprocess.run(["git", "-C", str(clone), "for-each-ref", "--sort=creatordate", "--format=%(refname:short)", "refs/tags"], capture_output=True, text=True).stdout.split()
+            seen, n = [], 0
+            for tag in order:
+                new = subprocess.run(["git", "-C", str(clone), "rev-list", "--stdin"], input="".join(f"^{s}\n" for s in seen) + f"{tag}\n", capture_output=True, text=True).stdout.split()
+                seen.append(tag)
+                if tag not in tags:
+                    continue
+                for sha in new:
+                    srcs = ([f"commit:{self.commit_repo[sha]}@{sha}"] if sha in self.commit_repo else []) + pr_of.get(sha, [])
+                    for src in srcs:
+                        self.edge(src, tags[tag], "shipped_in", BASE["git"], "first tag containing the commit", tag)
+                        n += 1
+            self.log(f"links: {repo}: {n} commit and PR to release edges from {len(order)} tags")
 
     def touches(self, commit, repo, paths, nfiles):
         conf = 1.0 if nfiles <= 5 else max(0.1, round(5 / nfiles, 2))

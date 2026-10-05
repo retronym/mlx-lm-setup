@@ -270,10 +270,14 @@ def _search(d, errors):
     s["neighbours"] = v.obj(d.get("neighbours", {}), "neighbours", {"enabled": (t_bool, True), "neighbours": (t_int(1, 50), 5), "min_similarity": (t_num(0), 0.8),
                                                                   "clusters": (t_int(1, 1000), 80)}) if isinstance(d, dict) else {}
     s["links"] = v.obj(d.get("links", {}), "links", {"enabled": (t_bool, True), "max_refs_per_chunk": (t_int(1, 5000), 200),
+                                                    "github": (lambda x: None, {}),
                                                     "repo_aliases": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items()) else "expected {old owner/repo: current owner/repo}", {"lampepfl/dotty": "scala/scala3"}),
                                                     "bare_fallbacks": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, list) and all(isinstance(y, str) and REPO_RE.match(y) for y in r) for k, r in x.items()) else "expected {repo: [repos whose issues a bare #N may mean when it is none of the repo's own]}", {"scala/scala": ["scala/bug"]}),
                                                     "legacy_prefixes": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and re.match(r"^[A-Z]{2,5}$", k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items())
                                                                         else "expected {PREFIX: owner/repo}, e.g. {\"SI\": \"scala/bug\"}", {"SI": "scala/bug"})}) if isinstance(d, dict) else {}
+    if isinstance(d, dict):
+        s["links"]["github"] = v.obj(d.get("links", {}).get("github", {}) if isinstance(d.get("links"), dict) else {}, "links.github",
+                                     {"enabled": (t_bool, True), "max_prs_per_run": (t_int(0), 3000), "batch": (t_int(1, 100), 50), "closing_first": (t_int(1, 100), 10)})
     r = d.get("refresh", {}) if isinstance(d, dict) else {}
     s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
                                         "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})
