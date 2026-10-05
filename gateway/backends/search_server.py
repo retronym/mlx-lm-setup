@@ -62,6 +62,13 @@ def _search(r):
         index = search.Index(c, r.get("universe"))
     except KeyError as e:
         raise ValueError(e.args[0])
+    try:
+        return _search_in(index, r, q, k, mode, c)
+    finally:
+        index.close()                                 # one Index per request: leave no connection to the garbage collector (the fd limit is low under launchd)
+
+
+def _search_in(index, r, q, k, mode, c):
     projects, sources, kinds = _strs(r.get("projects"), "projects"), _strs(r.get("sources"), "sources"), _strs(r.get("kinds"), "kinds")
     for kd in kinds or []:
         if kd not in config.KINDS:
@@ -70,9 +77,12 @@ def _search(r):
         if p not in index.universe.projects:
             raise ValueError(f"project {p!r} is not in universe {index.universe.id!r} (has: {', '.join(index.universe.projects)})")
     use_rr = bool(r.get("rerank", True))
+    text_chars = int(r.get("text_chars", 1200))
+    if not 1 <= text_chars <= 50000:
+        raise ValueError("text_chars must be 1..50000")
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
-                      reranker=rr if use_rr else None, explain=bool(r.get("explain")), **search.tuning(c))
+                      reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, **search.tuning(c))
     cached = {"rerank_hits": rr.hits, "rerank_misses": rr.misses} if use_rr and hasattr(rr, "hits") else None
     return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing,
             "timing_ms": {"total": round((time.time() - t) * 1000)}, **({"cache": cached} if cached else {})}

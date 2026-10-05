@@ -27,7 +27,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
     source is started; the one running finishes. `meta_only` refreshes the metadata of chunks that already exist (GitHub items and commits are re-read
     from the part of history that is indexed; nothing new is ingested, no cursor moves, no minimum interval applies; git sources are skipped)."""
     ghissues.configure(cfg.search["github"])
-    max_chars = cfg.search["chunking"]["max_chars"]
+    max_chars, pack_chars = cfg.search["chunking"]["max_chars"], cfg.search["chunking"]["pack_chars"]
     fetched, failed, gh_done, skipped = set(), 0, set(), 0
     for s in srcs:
         if deadline and time.time() > deadline:
@@ -64,7 +64,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
             if s.type == "git":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)
-                GitSource(s, d, max_chars).sync(st, limit=limit, log=run.log)
+                GitSource(s, d, max_chars, pack_chars).sync(st, limit=limit, log=run.log)
             elif s.type == "git_log":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)

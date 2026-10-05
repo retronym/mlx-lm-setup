@@ -5,7 +5,7 @@
   "sources": [
     {"id": "code", "type": "git", "label": "scala/scala3 code", "color": "#ea580c", "priority": 2,
      "repo": "scala/scala3", "ref": "main", "paths": ["compiler/src", "library/src", "tasty-core/src", "sbt-bridge/src"],
-     "chunkers": {".scala": "scala"}},
+     "chunkers": {".scala": "scala_ts"}},
     {"id": "docs", "type": "git", "label": "Scala 3 docs", "color": "#0d9488", "priority": 2,
      "repo": "scala/scala3", "ref": "main", "paths": ["docs/_docs/reference", "docs/_docs/internals"],
      "chunkers": {".md": "markdown"}},

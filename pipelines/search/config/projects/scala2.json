@@ -5,7 +5,7 @@
   "sources": [
     {"id": "code", "type": "git", "label": "scala/scala code and spec", "color": "#4f46e5", "priority": 2,
      "repo": "scala/scala", "ref": "2.13.x", "paths": ["src/compiler", "src/reflect", "src/library", "spec"],
-     "chunkers": {".scala": "scala", ".md": "markdown"}},
+     "chunkers": {".scala": "scala_ts", ".md": "markdown"}},
     {"id": "issues", "type": "github", "label": "scala/bug issues", "color": "#be185d", "priority": 3,
      "repo": "scala/bug", "include": ["issues", "comments"]},
     {"id": "prs", "type": "github", "label": "scala/scala PRs", "color": "#0369a1", "priority": 4,
