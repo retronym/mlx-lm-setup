@@ -1,6 +1,6 @@
 """Checks after a refresh: the databases are intact, nothing is left without a vector, and a short list of canary queries (config/canaries.json)
 still finds what it should through the gateway, which also proves the search backend works end to end. A canary passes when any of its
-`expect` strings occurs (case-insensitive) in the title or URL of one of the top five results. The canaries are the seed of the evaluation set."""
+`expect` strings occurs (case-insensitive) in the title or URL of one of the top `k` results (default 5). The canaries are the seed of the evaluation set."""
 import json, os, sqlite3, sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,7 +37,7 @@ def canaries(cfg, universe_id, path=None):
     passed, failed = 0, []
     for c in qs:
         try:
-            r = gw.post("/api/search", {"query": c["q"], "k": 5, "universe": universe_id, **({"projects": c["projects"]} if c.get("projects") else {})}, timeout=300, retries=6)
+            r = gw.post("/api/search", {"query": c["q"], "k": c.get("k", 5), "universe": universe_id, **({"projects": c["projects"]} if c.get("projects") else {})}, timeout=300, retries=6)
         except RuntimeError as e:
             return passed, failed, f"gateway search unavailable: {str(e)[:160]}"
         hay = " ".join(f"{h['title']} {h['url']}" for h in r["results"]).lower()

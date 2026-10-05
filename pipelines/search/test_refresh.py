@@ -19,7 +19,7 @@ class FakeGateway:
     """Just enough of the gateway: /v1/embeddings, /v1/chat/completions, /api/entail, /api/search."""
 
     def __init__(self):
-        self.chat_calls, self.embed_calls, self.unfaithful_first = [], 0, 0
+        self.chat_calls, self.embed_calls, self.unfaithful_first, self.partly_unfaithful = [], 0, 0, False
         gw = self
 
         class H(BaseHTTPRequestHandler):
@@ -57,6 +57,8 @@ class FakeGateway:
         if self.unfaithful_first > 0:
             self.unfaithful_first -= 1
             text = "The maintainers decided to rewrite the whole compiler in Rust, which is UNFAITHFUL to the source text."
+        elif self.partly_unfaithful and "<facts>" in prompt:
+            text = "## Proj\n- PR sbt/zinc#1500 was merged after a long discussion between the maintainers.\n- The maintainers decided to rewrite everything in Rust, which is UNFAITHFUL to the facts.\n"
         elif "<facts>" in prompt:
             text = "Zinc saw activity this week. PR sbt/zinc#1500 was merged after discussion. Release v1.11.0 was published."
         else:
@@ -192,18 +194,32 @@ class Digest(Case):
         fx = digest.facts(self.cfg, "u", since)
         self.assertEqual(fx[0][0], "Proj")
         self.assertTrue(any("o/gh#1500" in l and "open" in l for l in fx[0][1]))
+        st.apply("issues", [Chunk("issues:issue:1500~1", "issue:1500", "o/gh#1500 title 1500", "a long body, second part", "u", {"kind": "issue", "state": "open", "number": 1500, "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})])
+        st.commit()
+        again = digest.facts(self.cfg, "u", since)[0][1]
+        self.assertEqual(sum(1 for l in again if "o/gh#1500" in l), 1)                              # a body split into two chunks is still one item
+        self.assertTrue(any("4 new comments" in l for l in again))
         self.gw.unfaithful_first = 1                                                # the first answer invents something; the NLI gate sends it back
         d = digest.make_digest(self.cfg, "u", since)
-        self.assertTrue(d["checked"]); self.assertEqual(d["attempts"], 2)
+        self.assertTrue(d["checked"] and d["overview"]); self.assertEqual(d["attempts"], 2)
+        self.assertIn("o/gh#1500", d["text"].split("## Proj")[1])                    # the facts follow the overview as exact bullets
         self.assertIn("Fix these problems", self.gw.chat_calls[-1])
         self.assertEqual(json.loads(self.cfg.data_path("digest.json").read_text())["text"], d["text"])
         self.assertTrue(list(self.cfg.data_path("digests", "u").glob("*.md")))
 
-    def test_an_answer_that_stays_unfaithful_is_flagged_not_hidden(self):
+    def test_unsupported_lines_are_pruned_after_the_retries(self):
+        self.thread(self.store(), 7, 1, issue_updated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        self.gw.partly_unfaithful = True
+        d = digest.make_digest(self.cfg, "u", time.time() - 3600)
+        self.assertEqual((d["checked"], d["overview"], d["attempts"], d["pruned"]), (True, True, 3, 1))     # the bad line went, the good one stayed
+        self.assertNotIn("Rust", d["text"]); self.assertIn("merged after a long discussion", d["text"])
+
+    def test_an_overview_that_cannot_be_made_faithful_is_left_out_but_the_facts_remain(self):
         st = self.store(); self.thread(st, 7, 1, issue_updated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         self.gw.unfaithful_first = 99
         d = digest.make_digest(self.cfg, "u", time.time() - 3600)
-        self.assertFalse(d["checked"]); self.assertEqual(d["attempts"], 3)
+        self.assertEqual((d["overview"], d["attempts"]), (False, 3))
+        self.assertNotIn("Rust", d["text"]); self.assertIn("o/gh#7", d["text"])                    # nothing invented reaches the page; the exact facts do
 
     def test_nothing_changed_means_no_model_call(self):
         self.thread(self.store(), 1, 1, issue_updated="2020-01-01T00:00:00Z")
@@ -257,6 +273,15 @@ class Verify(Case):
         self.assertEqual((problems, counts["p"]), ([], {"chunks": 1, "pending_vectors": 1}))
         st.db.execute("DELETE FROM fts"); st.commit()
         self.assertIn("keyword index does not match", verify.integrity(self.cfg, "u")[0][0])
+
+    def test_a_canary_can_ask_for_more_results(self):
+        seen = []
+        orig = gateway_client.post
+        with mock.patch.object(gateway_client, "post", lambda path, body, **kw: (seen.append(body["k"]), orig(path, body, **kw))[1]):
+            q = self.root / "k.json"
+            q.write_text(json.dumps({"queries": [{"q": "where is the needle", "expect": ["Needle"], "k": 10}, {"q": "where is the needle", "expect": ["Needle"]}]}))
+            self.assertEqual(verify.canaries(self.cfg, "u", q)[0], 2)
+        self.assertEqual(seen, [10, 5])
 
     def test_canaries_pass_fail_and_skip(self):
         self.assertEqual(verify.canaries(self.cfg, "u")[0], 1)

@@ -40,6 +40,23 @@ def universes(cfg) -> list[dict]:
                                        for s in cfg.projects[p].sources]} for p in u.projects]} for u in cfg.universes.values()]
 
 
+def refresh_info(cfg) -> dict:
+    """The latest digest and the last refresh runs (written by pipelines/search/refresh.py), for the status tab."""
+    import json
+    out = {"digest": None, "refresh": None}
+    try:
+        d = json.loads(cfg.data_path("digest.json").read_text())
+        out["digest"] = {k: d.get(k) for k in ("universe", "generated", "since", "model", "checked", "overview", "attempts", "pruned", "facts", "text")}
+    except (OSError, ValueError):
+        pass
+    try:
+        r = json.loads(cfg.data_path("refresh.json").read_text())
+        out["refresh"] = {"last_run": r.get("last_run"), "last_reconcile": r.get("last_reconcile"), "history": (r.get("history") or [])[:5]}
+    except (OSError, ValueError):
+        pass
+    return out
+
+
 def _epoch(iso: str | None) -> float | None:
     try:
         return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ")) if iso else None

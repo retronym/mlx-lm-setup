@@ -208,6 +208,12 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         cat = parse({"backends": {"s": {"adapter": "search", "python": "py", "index_dir": str(Path(__file__).parents[2] / "pipelines" / "search"), "config_dir": str(cfgdir),
                                         "est_mem_gb": 1}}}, Path("/base"))
         d = search_stats(cat)
+        self.assertEqual((d["digest"], d["refresh"]), (None, None))                                       # nothing refreshed yet
+        (root / "data" / "digest.json").write_text(json.dumps({"universe": "u", "generated": 1.0, "since": "2026-01-01T00:00:00Z", "model": "m", "checked": True, "attempts": 1, "facts": 3, "text": "A digest.", "source_facts": "x"}))
+        (root / "data" / "refresh.json").write_text(json.dumps({"last_run": {"ok": True, "phases": {"sync": {"ok": True, "secs": 1.0}}}, "history": [{"ok": True}] * 8}))
+        d = search_stats(cat)
+        self.assertEqual((d["digest"]["text"], d["digest"]["checked"], "source_facts" in d["digest"]), ("A digest.", True, False))   # the facts stay on disk
+        self.assertEqual((d["refresh"]["last_run"]["ok"], len(d["refresh"]["history"])), (True, 5))
         self.assertEqual((d["universe"]["id"], d["indexed"], [u["id"] for u in d["universes"]]), ("u", True, ["u"]))
         p, q = d["projects"]
         self.assertEqual((p["id"], p["indexed"], q["indexed"]), ("p", True, False))                       # q has no database yet

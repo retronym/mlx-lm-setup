@@ -91,3 +91,26 @@ pipelines/search/promote_data.sh <worktree> <main-checkout>     # copy indexes a
 ```
 
 After merging to `main`: `promote_data.sh` from the worktree into the main checkout, then `service/service.sh restart`. The main checkout's legacy `data/search.db` is no longer read once the service runs the new code and can be deleted after you have checked the new indexes.
+
+## Refresh: one command, local models throughout
+
+```bash
+pipelines/search/refresh.sh                 # everything, in priority order (needs the gateway: embeddings, LLM and NLI come from it)
+pipelines/search/refresh.sh --tier high     # only sources with priority <= 3 (tiers are in search.json refresh.tiers)
+pipelines/search/refresh.sh --dry-run       # the plan: which phases run and why, which sources in what order, caps and intervals
+pipelines/search/refresh.sh --only embed,verify --budget-hours 2 --local     # pick phases, stop starting new work after 2 h, embed in-process
+service/search-refresh.sh install           # a nightly launchd job (search.json refresh.at, default 03:00; low CPU and I/O priority; caffeinate)
+```
+
+| Phase | What | Local model |
+|---|---|---|
+| `sync` | fetch the managed clones and sync every source in priority order; GitHub: forward walk, then the capped newest-first backfill | none |
+| `reconcile` | drop issues and PRs deleted upstream (weekly, `refresh.reconcile_every_days`) | none |
+| `enrich` | for long threads (>= `min_comments` comments), a summary chunk written by `llm.thread_summaries.model`, **checked sentence by sentence against the thread by the NLI model** and retried with the problems; unfaithful summaries are not indexed. Newest threads first, `max_per_run` per run, re-done when a thread has grown by half. Off by default | Qwen3-Coder + OpenJev NLI |
+| `digest` | what changed since the last refresh: exact bullets rendered from the indexes, plus a short LLM overview checked against them (unsupported lines dropped, the overview left out if nothing faithful remains). Shown on the Index status tab | Qwen3-Coder + OpenJev NLI |
+| `embed` | vectors for everything new, through the gateway's `/v1/embeddings` (one managed copy of the model, started and stopped by the gateway's memory manager; `--local` runs it in-process) | Qwen3-Embedding |
+| `verify` | database integrity, nothing left without a vector, and the canary queries (`config/canaries.json`: a query passes when an expected string is in the title or URL of the top `k` results) through the gateway, which also proves the search backend end to end | the search backend |
+
+The LLM phases run before `embed` so the large LLM and the embedder do not evict each other from the gateway's memory budget. `--budget-hours` (or `refresh.budget_hours`) stops starting new sources, LLM items and embedding work after that long; the rest comes first next time. One indexer run at a time (a lock shared with `sync.py` and `embed.py`; a second one exits with status 3). Progress is `data/run.json` (what the Index status tab shows live: phase chips, current source, rate), history is `data/refresh.json`, digests are `data/digest.json` and `data/digests/<universe>/`. Exit status: 0 ok, 1 something failed, 3 busy.
+
+Why the NLI model checks prose but not the digest bullets: it is good at "is this sentence supported by that text" and weak on lists of identifiers and numbers, so the bullets are rendered from the data (exact by construction) and only the overview is model-written. `noise_filter` (rules, then the decision model for borderline comments) is configured but not wired yet: it waits for the evaluation set to show it helps.

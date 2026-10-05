@@ -57,3 +57,29 @@ def grounded(messages, source, model, attempts=3, max_chars=None, **kw):
         convo += [{"role": "assistant", "content": text},
                   {"role": "user", "content": "Fix these problems and answer again, using only facts from the source text: " + " | ".join(problems[:5])}]
     return text, False, tries
+
+
+def prune(source, text, min_entailment=0.5, max_contradiction=0.5):
+    """Remove the lines of `text` that contain a sentence the source does not support. Returns (pruned text, lines removed); headings left with
+    nothing under them go too."""
+    lines = text.splitlines()
+    per_line = [claims(x, limit=8) for x in lines]
+    flat = [c for cs in per_line for c in cs][:48]
+    if not flat:
+        return text, 0
+    bad = {c for c, (contra, ent, _) in zip(flat, gw.entail(source[:PREMISE_CHARS], flat)) if contra >= max_contradiction or ent < min_entailment}
+    kept = [x for x, cs in zip(lines, per_line) if not any(c in bad for c in cs)]
+    out = re.sub(r"^(#+ .*)\n(?=\s*(#+ |\Z))", "", "\n".join(kept) + "\n", flags=re.M).strip()
+    return out, len(lines) - len(kept)
+
+
+def grounded_pruned(messages, source, model, **kw):
+    """`grounded`, and when the last answer still has unsupported lines, drop those lines instead of giving up: (text, ok, tries, removed).
+    If nothing faithful is left, the unfaithful answer is returned with ok=False so the failure stays visible."""
+    text, ok, tries = grounded(messages, source, model, **kw)
+    if ok:
+        return text, True, tries, 0
+    pruned, removed = prune(source, text)
+    if pruned and removed and faithful(source, pruned)[0]:
+        return pruned, True, tries, removed
+    return text, False, tries, 0

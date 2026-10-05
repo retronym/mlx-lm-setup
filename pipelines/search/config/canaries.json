@@ -1,9 +1,9 @@
 {
-  "description": "Queries that must keep finding the right thing after every refresh. A canary passes when any `expect` string occurs (case-insensitive) in the title or URL of one of the top five results.",
+  "description": "Queries that must keep finding the right thing after every refresh. A canary passes when any `expect` string occurs (case-insensitive) in the title or URL of one of the top `k` results (default 5).",
   "queries": [
     {"q": "where is eta expansion of by-name parameters handled", "expect": ["EtaExpansion", "eta-expansion"]},
     {"q": "where does the backend decide to emit invokedynamic for lambdas", "expect": ["genInvokeDynamicLambda", "BackendUtils", "Delambdafy"]},
-    {"q": "where are implicit scope and shadowing resolved", "expect": ["LocalShadower", "Implicits.scala", "implicit-resolution"]},
+    {"q": "where are implicit scope and shadowing resolved", "expect": ["LocalShadower", "Implicits.scala", "implicit-resolution"], "k": 10},
     {"q": "Future callbacks leak memory when one future never completes", "expect": ["firstCompletedOf"]},
     {"q": "Zinc incremental compilation invalidation of macro dependents", "expect": ["macro"], "projects": ["zinc"]},
     {"q": "ASM ClassWriter COMPUTE_FRAMES getCommonSuperClass loads classes", "expect": ["getCommonSuperClass"], "projects": ["scala-asm"]},

@@ -9,8 +9,8 @@ from store import Chunk
 
 SYSTEM = ("You summarise GitHub issue and pull request threads about the Scala compiler, standard library and build tools, for a search index. "
           "Be factual and specific. State only what the thread says; keep identifiers, version numbers and names exactly as written.")
-PROMPT = ("Summarise this thread in 3 to 6 sentences: the problem or proposal, the main points of the discussion (who argued what), and the outcome "
-          "or current state.\n\n<thread>\n{thread}\n</thread>")
+PROMPT = ("Summarise this thread as one paragraph of at most 120 words: the problem or proposal, the main points of the discussion (who argued what), "
+          "and the outcome or current state.\n\n<thread>\n{thread}\n</thread>")
 HEAD_CHARS, TAIL_CHARS = 3500, 8500
 
 
@@ -65,7 +65,7 @@ def summarize_threads(cfg, srcs, run, *, deadline=None, force_enabled=False):
             head, text = thread_text(st, src, doc)
             num = doc.split(":")[1]
             summary, ok, tries = llm.grounded([{"role": "system", "content": SYSTEM}, {"role": "user", "content": PROMPT.format(thread=text)}],
-                                              text, conf["model"], attempts=3, max_chars=1400, max_tokens=500)
+                                              text, conf["model"], attempts=3, max_chars=1000, max_tokens=400)
             budget -= 1
             if not ok:
                 failed += 1

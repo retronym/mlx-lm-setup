@@ -302,7 +302,7 @@ def search_stats(catalog: Catalog, model: str | None = None, universe: str | Non
         st = searchinfo.stats(cfg, universe, run)
     except KeyError as e:
         raise ApiError(404, "unknown_universe", e.args[0]) from None
-    return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), "run": run, **st}
+    return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), "run": run, **searchinfo.refresh_info(cfg), **st}
 
 
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:

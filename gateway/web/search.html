@@ -60,6 +60,10 @@
   .fill { height: 100%; background: var(--c); border-radius: 5px; transition: width .6s ease; } .fill.done { background: var(--ok); }
   .track.live .fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sheen 1.6s linear infinite; }
   @keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .phases { display: flex; flex-wrap: wrap; gap: 6px; } .phases span { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 0 10px; color: var(--muted); }
+  .phases span.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); } .phases span.cur { color: var(--ink); border-color: var(--accent); font-weight: 600; }
+  .phases span.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .digesttext { white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
   .runmsg { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 640px) { .bar { grid-template-columns: 64px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
   [hidden] { display: none !important; }
@@ -100,6 +104,7 @@
   </div>
   <div id="tab-status" hidden style="display:flex;flex-direction:column;gap:12px">
     <div class="card" style="--c: var(--ink)" id="run"></div>
+    <div class="card" style="--c: var(--accent)" id="digest" hidden></div>
     <div id="cards" style="display:flex;flex-direction:column;gap:12px"></div>
     <div class="meta">Counts are read from the index files, refreshing every 2 s. "synced" is text in the index (git sources: files indexed of files in the tree; GitHub sources: how far each stream has walked back from now to its start date); "embedded" is chunks with a current vector, which is what hybrid and vector search can see. Lower priority numbers are processed first.</div>
   </div>
@@ -229,9 +234,22 @@ function renderStatus(d) {
   }
   if (rate > 0.5) bits.push(`embedding ${rate.toFixed(0)} chunks/s`, left ? `about ${dur(left / rate)} left` : "");
   const parts = [head, el("div", "meta", bits.filter(Boolean).join(" · ")), bar("embedded", total[0] ? total[1] / total[0] : 1, `${num(total[1])} / ${num(total[0])}`, working && run.kind === "embed", false)];
+  if (run && run.phases?.length) {                           // refresh: where it is among its phases
+    const chips = el("div", "phases");
+    for (const ph of run.phases) chips.append(el("span", run.phases_done.includes(ph) ? "done" : ph === run.phase && working ? "cur" : "", ph));
+    parts.splice(2, 0, chips);
+  }
+  if (!working && d.refresh?.last_run) {                    // idle: how the last refresh went, phase by phase
+    const lr = d.refresh.last_run, chips = el("div", "phases");
+    for (const [ph, v] of Object.entries(lr.phases || {})) chips.append(el("span", v.ok ? "done" : "bad", `${ph} ${v.ok ? "ok" : "FAILED"} · ${dur(v.secs)}`));
+    parts.splice(2, 0, el("div", "meta", `last refresh ${ago(lr.started)}${lr.tier ? ` (tier ${lr.tier})` : ""}`), chips);
+  }
   if (run && run.message) parts.push(el("div", "runmsg", run.message));
   for (const e of run?.errors || []) parts.push(el("div", "runmsg", e)).lastChild.style.color = "var(--bad)";
   $("run").replaceChildren(...parts);
+  const dg = d.digest;
+  $("digest").hidden = !dg;
+  if (dg) $("digest").replaceChildren(Object.assign(el("h3", "", "What changed "), {}), el("div", "meta", `since ${dg.since.slice(0, 16).replace("T", " ")} UTC · written ${ago(dg.generated)} by ${dg.model}, ${dg.overview ? "overview checked against the facts" : "model overview left out (it did not pass the check against the facts)"}${dg.pruned ? `, ${dg.pruned} unsupported line${dg.pruned > 1 ? "s" : ""} removed` : ""} · ${dg.facts} facts`), el("div", "digesttext", dg.text));
   $("cards").replaceChildren(...d.projects.map(p => {
     const card = el("div", "card"); const h = el("h3", "", p.title); h.append(el("span", "meta", p.indexed ? p.id : `${p.id} · not indexed yet`));
     card.append(h);
