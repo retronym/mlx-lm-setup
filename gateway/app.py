@@ -30,6 +30,7 @@ from .supervisor import Supervisor
 
 LOOPBACK = {"127.0.0.1", "localhost", "[::1]", "::1"}
 WEB = Path(__file__).parent / "web"
+IMAGE_NAME = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}\.png$")
 # The pages render model output, so lock them down: same-origin only, no framing, no sniffing. Inline script/style are
 # allowed because each page is a single self-contained file; nothing is ever loaded from another origin.
 PAGE_HEADERS = {
@@ -249,6 +250,26 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         body = await read_json(request)
         spec, prof = target(body.pop("model", None), "tts")
         return await forward(spec, "/speak", apply_defaults(body, prof))
+
+    async def image(request: Request):
+        """Text to image: {"prompt", "model"?, "seed"?, "width"?, "height"?, "steps"?, "name"?, "fresh"?}
+        -> {path, name, width, height, seed, steps, model, gen_s, cached}; the picture itself is at GET /api/image/file/<name>."""
+        body = await read_json(request)
+        spec, prof = target(body.pop("model", None), "image")
+        return await forward(spec, "/generate", apply_defaults(body, prof))
+
+    async def image_models(request: Request):
+        """Each image model with its description and defaults (the image page's model picker)."""
+        return JSONResponse({"models": [{"model": s.name, "aliases": list(s.aliases), "description": s.description, "steps": s.options.get("steps"),
+                                         "size": s.options.get("size", 1024), "est_mem_gb": s.est_mem_gb}
+                                        for s in catalog.backends.values() if s.kind == "image"]})
+
+    async def image_file(request: Request):
+        name = request.path_params["name"]
+        for s in catalog.backends.values():
+            if s.kind == "image" and s.options.get("output_dir") and IMAGE_NAME.match(name) and (Path(s.options["output_dir"]) / name).is_file():
+                return FileResponse(Path(s.options["output_dir"]) / name, media_type="image/png", headers={"X-Content-Type-Options": "nosniff"})
+        return JSONResponse({"error": "not found"}, status_code=404)
 
     async def transcribe(request: Request):
         body = await read_json(request)
@@ -541,6 +562,9 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/v1/audio/speech", handler(speech), methods=["POST"]),
         Route("/v1/models", handler(models), methods=["GET"]),
         Route("/api/speak", handler(speak), methods=["POST"]),
+        Route("/api/image", handler(image), methods=["POST"]),
+        Route("/api/image/models", handler(image_models), methods=["GET"]),
+        Route("/api/image/file/{name}", image_file, methods=["GET"]),
         Route("/api/transcribe", handler(transcribe), methods=["POST"]),
         Route("/api/voices", handler(voices), methods=["GET"]),
         Route("/api/narrate", handler(narrate), methods=["POST"]),
@@ -573,6 +597,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/chat", page("chat.html"), methods=["GET"]),
         Route("/jev", page("jev.html"), methods=["GET"]),
         Route("/speech", page("speech.html"), methods=["GET"]),
+        Route("/image", page("image.html"), methods=["GET"]),
         Route("/vision", page("vision.html"), methods=["GET"]),
         Route("/translate", page("translate.html"), methods=["GET"]),
         Route("/search", page("search.html"), methods=["GET"]),

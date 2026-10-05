@@ -133,6 +133,17 @@ class SpeechAdapterTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--voice") + 1], "af_heart")
         self.assertEqual(s.options["voices"], ["af_heart", "bm_george"])
 
+    def test_mflux_image_adapter(self):
+        b = {"adapter": "mflux_image", "python": "py", "family": "flux2", "config": "flux2_klein_4b", "quantize": 8, "steps": 4, "est_mem_gb": 12}
+        s = parse({"backends": {"i": b}}, Path("/base")).backends["i"]
+        self.assertEqual(s.kind, "image")
+        cmd = s.command()
+        self.assertTrue(cmd[1].endswith("image_server.py"))
+        self.assertEqual([cmd[cmd.index(f) + 1] for f in ("--family", "--config", "--quantize", "--steps", "--output-dir")],
+                         ["flux2", "flux2_klein_4b", "8", "4", "/base/data/images"])
+        with self.assertRaises(CatalogError):
+            parse({"backends": {"i": {**b, "family": "sd"}}}, Path("/base"))
+
     def test_mlx_lm_score_adapter(self):
         s = parse({"backends": {"s": {"adapter": "mlx_lm_score", "python": "py", "model": "org/llm", "est_mem_gb": 17}}}, Path("/base")).backends["s"]
         self.assertEqual(s.kind, "score")

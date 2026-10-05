@@ -28,6 +28,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             "find": {"kind": "search"},
             "lms": {"kind": "score"},
             "voice": {"kind": "tts"},
+            "paint": {"kind": "image", "aliases": ["image"]},
             "ears": {"kind": "stt"},
             "bad": {"kind": "llm", "flags": ["--die-on-start"]},
         }, port=self.port, default_llm="llm")
@@ -62,6 +63,26 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 400)
         r = await self.http.post("/api/speak", json={"text": "x", "model": "llm"})
         self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "wrong_model_kind"))
+
+    async def test_image_routes(self):
+        r = await self.http.post("/api/image", json={"prompt": "a cat", "width": 512, "seed": 3})
+        self.assertEqual((r.status_code, r.headers["x-gateway-backend"]), (200, "paint"))
+        self.assertEqual((r.json()["width"], r.json()["echo"]["seed"]), (512, 3))
+        self.assertNotIn("model", r.json()["echo"])
+        self.assertEqual((await self.http.post("/api/image", json={"prompt": ""})).status_code, 400)
+        r = await self.http.post("/api/image", json={"prompt": "x", "model": "llm"})
+        self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "wrong_model_kind"))
+        r = await self.http.get("/api/image/models")
+        self.assertEqual([(m["model"], m["aliases"]) for m in r.json()["models"]], [("paint", ["image"])])
+
+    async def test_image_file_is_served_from_the_output_dir_only(self):
+        out = Path(self.tmp.name)
+        self.cat.backends["paint"].options["output_dir"] = str(out)               # the fake backend is a `command` one: no adapter default
+        (out / "a-1.png").write_bytes(b"\x89PNGfake")
+        r = await self.http.get("/api/image/file/a-1.png")
+        self.assertEqual((r.status_code, r.headers["content-type"], r.content), (200, "image/png", b"\x89PNGfake"))
+        for bad in ("missing.png", "..%2Fsecret.png", "a-1.txt"):
+            self.assertEqual((await self.http.get("/api/image/file/" + bad)).status_code, 404, bad)
 
     async def test_transcribe_route_and_voices_listing(self):
         r = await self.http.post("/api/transcribe", json={"path": "/x.wav"})
@@ -298,7 +319,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_backends_status(self):
         r = await self.http.get("/api/backends")
         j = r.json()
-        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "find", "lms", "voice", "ears", "bad"])
+        self.assertEqual([b["name"] for b in j["backends"]], ["llm", "dec", "nli", "find", "lms", "voice", "paint", "ears", "bad"])
         self.assertEqual((j["gateway"]["memory_budget_gb"], j["gateway"]["resident_est_gb"], j["gateway"]["default_llm"]), (100, 0, "llm"))
         await self.http.post("/v1/chat/completions", json=self.chat())
         j = (await self.http.get("/api/backends")).json()

@@ -238,6 +238,24 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
 
     @mcp.tool()
+    async def generate_image(prompt: str, model: str | None = None, width: int = 1024, height: int = 1024, seed: int | None = None,
+                             steps: int | None = None, name: str | None = None, fresh: bool = False) -> dict:
+        """Generate an image from a text prompt with a local diffusion model and write a PNG. Returns `path` (absolute; open it
+        with Read to look at it), `width`, `height`, `seed`, `model` and `gen_s`. Sizes are multiples of 16 (256..2048); the default
+        1024x1024 takes about 8 s on the default model. `model` picks the model: the default (flux2-klein-4b) is fast and the
+        better all-rounder; `z-image-turbo` is about 5x slower but renders legible text in the picture (signs, labels, posters).
+        Describe the picture in full sentences (subject, setting, light, style); to put text in it, quote the exact words.
+        Pass `seed` to make a prompt reproducible (a request with a seed is cached: the same one again returns the same file, with
+        `cached: true`; `fresh` forces a new take); without one every call is a new picture. `steps` overrides the model's default
+        (4 for klein, 8 for z-image-turbo). `name` prefixes the file name. Starts the model if needed (cold start: tens of seconds,
+        ~10-16 GB, evicting idle models)."""
+        spec = spec_for(model, "image")
+        body = {k: v for k, v in dict(prompt=prompt, width=width, height=height, seed=seed, steps=steps, name=name,
+                                      fresh=fresh or None).items() if v is not None}
+        data, meta = await call(spec, "/generate", body, profile_for(model, "image"))
+        return {**data, "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
+
+    @mcp.tool()
     async def narrate(scenes: list[dict], model: str | None = None, voice: str | None = None, ref_audio: str | None = None,
                       speed: float = 1.0, fresh: bool = False) -> dict:
         """Timed narration for a video explainer. `scenes` = [{"id": "intro", "text": "Narration with [[cue]] markers. [[evict]] Like this."}].

@@ -219,3 +219,34 @@ aliases = ["search", "scala-search"]
 est_mem_gb = 4
 start_timeout_s = 240
 ttl_s = 900
+
+# --- images: text to image on mflux (MLX) ---------------------------------------------------------------------------------------
+# One venv for both models (.venv-image: mflux, python 3.12; `mise run setup-image`). PNGs go to data/images (output_dir). First use
+# downloads the weights (~4-5 min each). Measured on the M5 Pro at 1024x1024: klein 8 s and ~10-12 GB; Z-Image-Turbo 35-40 s and
+# ~12-16 GB peak at 8-bit (4-bit saved neither time nor memory). The first image backend is the default for `generate_image`.
+
+[backends.flux2-klein-4b]
+adapter = "mflux_image"
+description = "FLUX.2 klein 4B (Apache 2.0): the default image model. About 8 s for a 1024x1024 picture in 4 steps, strong photorealism and composition; weak at text inside the picture."
+python = ".venv-image/bin/python"
+family = "flux2"
+config = "flux2_klein_4b"
+quantize = 8
+steps = 4
+est_mem_gb = 12
+ttl_s = 300
+start_timeout_s = 600           # the first start downloads the weights
+aliases = ["image", "klein"]
+
+[backends.z-image-turbo]
+adapter = "mflux_image"
+description = "Z-Image-Turbo (6B, Apache 2.0): about 40 s for a 1024x1024 picture in 8 steps, but renders legible text (signs, labels, posters) in English and Chinese. Use it when the picture must contain words."
+python = ".venv-image/bin/python"
+family = "z_image"
+config = "z_image_turbo"
+quantize = 8
+steps = 8
+est_mem_gb = 16
+ttl_s = 300
+start_timeout_s = 600
+aliases = ["zimage", "z-image"]

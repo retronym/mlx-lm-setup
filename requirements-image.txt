@@ -1,0 +1,2 @@
+# The image backends environment (.venv-image, python 3.12): mise run setup-image
+mflux>=0.21,<0.22

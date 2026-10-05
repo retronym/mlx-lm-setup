@@ -102,6 +102,11 @@ class H(BaseHTTPRequestHandler):
                 return self._err(400, {"error": "ValueError: text is empty"})
             return self._json({"path": "/tmp/fake.wav", "duration_s": 1.5, "sample_rate": 24000, "cached": False, "echo": req,
                                "segments": [{"text": req["text"], "start_s": 0.0, "end_s": 1.5}]})
+        if self.path == "/generate":
+            if not req.get("prompt"):
+                return self._err(400, {"error": "ValueError: prompt is empty"})
+            return self._json({"path": "/tmp/fake.png", "name": "fake.png", "width": req.get("width", 1024), "height": req.get("height", 1024),
+                               "seed": req.get("seed", 7), "steps": 4, "model": "fake", "gen_s": 0.1, "cached": False, "echo": req})
         if self.path == "/v1/audio/speech":
             b = b"RIFFfakewav"
             self.send_response(200); self.send_header("Content-Type", "audio/wav"); self.send_header("Content-Length", str(len(b))); self.end_headers()

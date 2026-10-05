@@ -13,6 +13,7 @@
 | Chat | `/chat` | `chat`, `iterate` | Streaming local LLM with a model picker; `iterate` retries until JSON, regex, length or faithfulness gates pass |
 | Decide | `/jev` | `decide`, `entail` | Score a list of options in one forward pass instead of generating; NLI claim checks |
 | Speech | `/speech` | `speak`, `narrate`, `transcribe`, `voices` | Local text-to-speech and word-timed transcripts ([docs/SPEECH.md](docs/SPEECH.md)) |
+| Image | `/image` | `generate_image` | Text to picture on-device: FLUX.2 klein (fast default) or Z-Image-Turbo (legible text in the picture) |
 | Vision | `/vision` | `look` | Layout checks of stills and screenshots, tables and charts in PDF pages |
 | Translate | `/translate` | `translate` | Text or a screenshot into English in 1–3 s ([pipelines/translate](pipelines/translate/README.md)) |
 | Search | `/search` | `search`, `get` | Hybrid search over Scala sources, docs and issues, returning passages with links ([pipelines/search](pipelines/search/README.md)) |
@@ -60,6 +61,7 @@ Image or Text to Text
 | Generative LLM | Gemma-4-26B-A4B QAT, 4-bit (MoE, 4B active) | `mlx-lm` 0.32 | ~16 GB peak | safest general default (thinking switched off): passed all six benchmark tasks, smallest memory |
 | NLI cross-encoder | OpenJev 4B v5 (Qwen3.5-4B fine-tune; also 2B, 0.8B) | PyTorch on MPS, `.venv-jev` (python 3.12) | ~9 GB | claim verification, PR triage. Slow: no fast kernels for Qwen3.5's linear-attention layers on MPS |
 | Decision model | Jev-Style 2B v3 (Qwen3.5-2B fine-tune), 8-bit | MLX, `.venv-mlxjev` (versions pinned, the runtime refuses others) | ~2 GB weights | emoji, colour, mood, sentiment: one pass scores hundreds of options |
+| Image | FLUX.2 klein 4B (default); Z-Image-Turbo 6B; both 8-bit | `mflux`, `.venv-image` (python 3.12; `mise run setup-image`) | 10-12 GB; 12-16 GB | `generate_image`, `/image`, `/api/image`; PNGs in `data/images`. Klein ~8 s per 1024² picture, Z-Image ~40 s on an idle machine (both slow down when sharing the GPU) |
 | Speech out | Kokoro-82M; Qwen3-TTS 1.7B (voice design, voice clone), 8-bit | `mlx-audio`, `.venv-audio` (python 3.13) | 0.9 GB; 3.7 GB each | narration for video explainers; see [docs/SPEECH.md](docs/SPEECH.md) |
 | Speech in | Whisper large-v3-turbo, fp16 | `mlx-audio`, `.venv-audio` | 2 GB | transcripts with word timestamps (captions) |
 | Embedder + reranker | Qwen3-Embedding-0.6B and Qwen3-Reranker-0.6B, fp16, one process | PyTorch on MPS, `.venv-jev` | ~3 GB | `/search`, `search`, `/v1/embeddings`, `/api/rerank` |
@@ -135,7 +137,7 @@ curl localhost:8090/api/backends                 # state, idle countdown, memory
 
 ### Configuring models
 
-Backends are declared in `gateway.toml`; adding a model is a `[backends.<name>]` table using one of the adapters (`mlx_lm`, `mlx_lm_score`, `mlx_vlm`, `jevstyle`, `openjev_nli`, `search`, `mlx_audio_tts`, `mlx_audio_stt`, `command`). Per backend:
+Backends are declared in `gateway.toml`; adding a model is a `[backends.<name>]` table using one of the adapters (`mlx_lm`, `mlx_lm_score`, `mlx_vlm`, `jevstyle`, `openjev_nli`, `search`, `mlx_audio_tts`, `mlx_audio_stt`, `mflux_image`, `command`). Per backend:
 
 - **Memory**: `weights_gb` + `kv_gb` + `overhead_gb` (+ `context_tokens`) instead of one `est_mem_gb`; the KV cache is what long contexts cost. `ttl_s` and `pinned` control passivation.
 - **Arguments**: `args = ["--kv-bits", "4", ...]` on `mlx_lm` backends (flags the gateway sets itself are rejected).

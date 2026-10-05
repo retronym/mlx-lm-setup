@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Models · Image</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #c2410c; --hi: #fed7aa; --bad: #dc2626; --warn: #d97706; --good: #16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fb923c; --hi: #7c2d12; --bad: #f87171; --warn: #fbbf24; --good: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  header a { color: var(--muted); font-size: 12px; text-decoration: none; } header a:hover { color: var(--ink); }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  input, select, textarea, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:hover { border-color: var(--muted); } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+  textarea { width: 100%; resize: vertical; min-height: 110px; }
+  input[type=text] { width: 100%; }
+  .row { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  small, .hint { color: var(--muted); font-size: 12px; }
+  .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
+  img.out { width: 100%; height: auto; border-radius: 8px; display: block; background: var(--bg); }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+  .gallery img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; } .gallery img.on { border-color: var(--accent); }
+  .seg { display: flex; gap: 10px; padding: 4px 6px; border-radius: 6px; cursor: pointer; align-items: baseline; }
+  .seg:hover { background: var(--bg); } .seg.on { background: var(--hi); }
+  .seg time { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .words span { cursor: pointer; padding: 0 1px; border-radius: 3px; } .words span.on { background: var(--hi); }
+  .words { line-height: 2; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .samples button { font-size: 12px; padding: 1px 10px; border-radius: 12px; background: transparent; color: var(--muted); }
+  .samples button:hover { color: var(--ink); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Local Models · Image</h1>
+  <a href="/">Home</a>
+  <a href="/chat">Chat</a>
+  <a href="/jev">Decide</a>
+  <a href="/speech">Speech</a>
+<a href="/image" style="color:var(--ink)">Image</a>
+  <a href="/vision">Vision</a>
+  <a href="/translate">Translate</a>
+  <a href="/search">Search</a>
+  <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
+</header>
+<main>
+  <section>
+    <h2>Prompt</h2>
+    <textarea id="prompt" placeholder="Describe the picture in full sentences: subject, setting, light, style. To put text in it, quote the exact words (and use Z-Image-Turbo)."></textarea>
+    <div class="samples" id="samples"></div>
+    <div class="row">
+      <label>model <select id="model"></select></label>
+      <label>size <select id="size"><option>1024x1024</option><option>1280x720</option><option>720x1280</option><option>768x768</option><option>512x512</option></select></label>
+      <label>seed <input id="seed" type="number" min="0" placeholder="random" style="width:100px"></label>
+      <label>steps <input id="steps" type="number" min="1" max="50" style="width:60px"></label>
+    </div>
+    <div class="row">
+      <button class="primary" id="go">Generate</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="hint" id="mdesc" style="margin-top:6px"></div>
+  </section>
+  <section id="result" hidden>
+    <h2>Result <span id="meta" style="text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <img class="out" id="img" alt="generated image">
+    <div class="row"><a id="dl" download>download png</a><span class="hint" id="path"></span></div>
+  </section>
+  <section id="gsec" hidden>
+    <h2>This session</h2>
+    <div class="gallery" id="gallery"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id), esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const SAMPLES = [
+  ["Street at night", "A rainy Tokyo alley at night, neon signs reflecting in puddles, a cyclist with a yellow umbrella, photorealistic"],
+  ["Shop sign", 'A hand-painted shop sign reading "CORNER BAKERY — fresh bread daily" above a wooden door, morning light'],
+  ["Diagram-style", "A clean flat illustration of a small server rack with a glowing memory gauge, soft pastel colours, white background"],
+];
+let models = [], shots = [];
+const cur = () => models.find(m => m.model === $("model").value);
+
+async function init() {
+  $("samples").innerHTML = SAMPLES.map(([n], i) => `<button data-i="${i}">${esc(n)}</button>`).join("");
+  $("samples").onclick = e => { const b = e.target.closest("button"); if (b) { $("prompt").value = SAMPLES[b.dataset.i][1]; $("prompt").focus(); } };
+  try { models = (await (await fetch("/api/image/models")).json()).models; } catch {}
+  if (!models.length) { $("status").className = "status err"; $("status").textContent = "No image models in the catalog."; $("go").disabled = true; return; }
+  $("model").innerHTML = models.map(m => `<option>${esc(m.model)}</option>`).join("");
+  try { const s = localStorage.getItem("image.model"); if (s && models.some(m => m.model === s)) $("model").value = s; } catch {}
+  pick();
+}
+function pick() {
+  const m = cur(); try { localStorage.setItem("image.model", m.model); } catch {}
+  $("mdesc").textContent = m.description + ` (about ${m.est_mem_gb} GB while loaded)`;
+  $("steps").placeholder = m.steps || "default";
+}
+$("model").onchange = pick;
+
+function show(r) {
+  $("img").src = "/api/image/file/" + encodeURIComponent(r.name); $("dl").href = $("img").src; $("dl").download = r.name;
+  $("result").hidden = false;
+  $("meta").textContent = `${r.width}×${r.height} · seed ${r.seed} · ${r.steps} steps · ${r.model} · ` + (r.cached ? "cached" : `generated in ${r.gen_s} s`);
+  $("path").textContent = r.path;
+  document.querySelectorAll(".gallery img").forEach((el, i) => el.classList.toggle("on", shots[i] === r));
+}
+$("go").onclick = async () => {
+  const prompt = $("prompt").value.trim(); if (!prompt) return;
+  const [width, height] = $("size").value.split("x").map(Number), b = { model: cur().model, prompt, width, height };
+  if ($("seed").value !== "") b.seed = parseInt($("seed").value);
+  if ($("steps").value !== "") b.steps = parseInt($("steps").value);
+  $("go").disabled = true; $("status").className = "status wait";
+  const t0 = performance.now(), tick = setInterval(() => $("status").textContent = `Generating… ${((performance.now() - t0) / 1000).toFixed(0)}s (the model starts on first use; the first ever start downloads weights)`, 250);
+  try {
+    const r = await fetch("/api/image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || j.error || `HTTP ${r.status}`);
+    shots.unshift(j); $("gsec").hidden = false;
+    $("gallery").innerHTML = shots.map((s, i) => `<img src="/api/image/file/${encodeURIComponent(s.name)}" data-i="${i}" title="${esc(s.prompt || "")}">`).join("");
+    show(j); $("status").className = "status"; $("status").textContent = "";
+  } catch (e) { $("status").className = "status err"; $("status").textContent = String(e.message || e); }
+  finally { clearInterval(tick); $("go").disabled = false; }
+};
+$("gallery").onclick = e => { const i = e.target.closest("img"); if (i) show(shots[+i.dataset.i]); };
+init();
+</script>
+</body>
+</html>

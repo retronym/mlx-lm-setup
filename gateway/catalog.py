@@ -39,7 +39,7 @@ class GatewaySettings:
 class BackendSpec:
     name: str
     adapter: str
-    kind: str                      # llm | vision | decision | nli | score | tts | stt | search | custom
+    kind: str                      # llm | vision | decision | nli | score | tts | stt | image | search | custom
     python: str | None
     est_mem_gb: float
     ttl_s: int
@@ -152,6 +152,16 @@ def _mlx_audio_stt(s: BackendSpec) -> list[str]:
             "--audio-dir", o["output_dir"], "--refs-dir", o["refs_dir"]]
 
 
+def _mflux_image(s: BackendSpec) -> list[str]:
+    o = s.options
+    cmd = [s.python, str(BACKENDS_DIR / "image_server.py"), "--family", o["family"], "--config", o["config"], "--port", str(s.port),
+           "--output-dir", o["output_dir"]]
+    for flag, key in (("--quantize", "quantize"), ("--steps", "steps"), ("--size", "size")):
+        if key in o:
+            cmd += [flag, str(o[key])]
+    return cmd
+
+
 def _mlx_vlm(s: BackendSpec) -> list[str]:
     o = s.options
     return [s.python, str(BACKENDS_DIR / "vision_server.py"), "--model", o["model"], "--port", str(s.port),
@@ -176,6 +186,8 @@ ADAPTERS: dict[str, Adapter] = {
     "mlx_audio_tts": Adapter("tts", ("python", "model"), ("voice", "voices", "lang_code", "max_chars", "ref_audio", "output_dir", "refs_dir"), "/health",
                              _mlx_audio_tts, ("output_dir", "refs_dir")),
     "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
+    "mflux_image": Adapter("image", ("python", "family", "config"), ("quantize", "steps", "size", "output_dir"), "/health", _mflux_image,
+                           ("output_dir",)),
     "mlx_vlm": Adapter("vision", ("python", "model"), ("image_tokens", "max_tokens"), "/health", _mlx_vlm),
     "search": Adapter("search", ("python", "index_dir"), ("config_dir",), "/health", _search, ("index_dir", "config_dir")),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
@@ -267,6 +279,13 @@ def parse(data: dict, base_dir: Path) -> Catalog:
         if adapter in ("mlx_audio_tts", "mlx_audio_stt"):          # shared audio locations: generated clips, named voice references
             opts.setdefault("output_dir", "data/audio")
             opts.setdefault("refs_dir", "data/voices")
+        if adapter == "mflux_image":
+            opts.setdefault("output_dir", "data/images")
+            if opts["family"] not in ("flux2", "z_image"):
+                raise CatalogError(f"backends.{name}.family must be flux2 or z_image")
+            for k in ("quantize", "steps", "size"):
+                if k in opts:
+                    _check_type(name, k, opts[k], (int,))
         for k in ad.path_keys:
             if k in opts:
                 opts[k] = str(_resolve(base_dir, opts[k]))
