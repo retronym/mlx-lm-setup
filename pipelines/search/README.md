@@ -50,11 +50,11 @@ $PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pi
 - The query CLI loads the embedder (and reranker) per call, 4 s hybrid and 7 s with `--rerank`. That disappears when this becomes a gateway backend (`/v1/embeddings`, `/v1/rerank` and a `search` MCP tool).
 - sbt/zinc, the SIPs and Discourse are not indexed yet, so e.g. Zinc invalidation questions only find scala/bug issues.
 
-## Duplicates and clusters
+## Duplicates, clusters and outliers
 
-`neighbours.py` (the refresh's `neighbours` phase, or `neighbours.py [universe] [--force]` on its own) turns the issue and PR vectors that are already in the indexes into two things, written to `data/neighbours/<universe>.db` and read by the gateway: each item's closest matches (`neighbours`, default 5, kept at cosine >= `min_similarity`, default 0.8) and spherical k-means topic clusters (`clusters`, default 80, at most one per ten items) named by their most distinctive title words. Nothing here is a model: the vectors are the search index's own, so a duplicate view costs a file read. One run serves every filter, because filters are applied when reading.
+`neighbours.py` (the refresh's `neighbours` phase, or `neighbours.py [universe] [--force]` on its own) turns the issue and PR vectors that are already in the indexes into two things, written to `data/neighbours/<universe>.db` and read by the gateway: each item's closest matches (`neighbours`, default 5, kept at cosine >= `min_similarity`, default 0.8), spherical k-means topic clusters (`clusters`, default 80, at most one per ten items) named by their most distinctive title words, and two scores per item for the outliers view: `iso`, the cosine to the nearest other item, and `ctr`, the cosine to the centre of its own cluster. Nothing here is a model: the vectors are the search index's own, so a duplicate view costs a file read. One run serves every filter, because filters are applied when reading.
 
-The **Duplicates** and **Clusters** tabs on `/search` (and `GET /api/search/duplicates`, `/api/search/clusters`) filter by state, kind, creation date and repo:
+The **Duplicates**, **Clusters** and **Outliers** tabs on `/search` (and `GET /api/search/duplicates`, `/api/search/clusters`, `/api/search/outliers`) filter by state, kind, creation date and repo:
 
 | Filter | Duplicates (pairs) | Clusters (items) |
 |---|---|---|
@@ -68,6 +68,8 @@ The **Duplicates** and **Clusters** tabs on `/search` (and `GET /api/search/dupl
 Two kinds of pair are hidden by default because they are artifacts, not duplicates. An old import created copies of tickets under adjacent numbers, so a same-repo pair whose numbers differ by at most `adjacent` is dropped when at least one of them is closed (open and open stays: it may be a real duplicate; `adjacent=0` shows them all). Release procedures, `Release 2.13.x`, dependency bumps, dummy tickets and `(Issue was deleted)` placeholders look alike by construction (`templated=1` keeps them).
 
 For clusters, `trend` is the share of a cluster's items created in the last two years divided by the same share over everything matching the filters, so above 1 the topic is heating up (shown from 20 items). Expanding a cluster lists its items newest first.
+
+**Outliers** lists the issues and PRs that are far from everything else, lowest score first, ordered by `iso` (most isolated) or `ctr` (furthest from its own cluster; `by=iso|ctr`), with the same per-item filters as clusters. Dependency-bump PRs and release procedures are hidden by default (`templated=1` keeps them): they are unlike anything else and uninteresting. What it finds in practice: off-topic questions that are not compiler bugs (already closed), leftovers from the old Trac tracker, and, among the open items, real but unusual tickets and design questions. A database written before the scores existed is recomputed on the next run (`version` in its `meta` table).
 
 ## Reranking (`--rerank`)
 
@@ -85,7 +87,7 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 | MCP `search_universes` | universes, their projects and sources, and the kinds of hit each source holds |
 | `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |
 | `POST /api/rerank` | `{"query", "documents": [...]}` -> relevance scores |
-| `GET /api/search/duplicates`, `GET /api/search/clusters` | the Duplicates and Clusters tabs: filtered reads of the neighbours database (below) |
+| `GET /api/search/duplicates`, `/api/search/clusters`, `/api/search/outliers` | the Duplicates, Clusters and Outliers tabs: filtered reads of the neighbours database (below) |
 | `GET /api/search/status` | chunks and embedded chunks per source, last sync position; reads the SQLite file, starts nothing |
 
 The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.

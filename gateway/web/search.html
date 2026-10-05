@@ -86,7 +86,9 @@
   .clhead .lab { font-weight: 650; } .clhead .meta { font-variant-numeric: tabular-nums; }
   .trend.hot { color: var(--warn); font-weight: 650; } .trend.cold { color: var(--muted); }
   .clbody { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
-  .dup-only, .cl-only { display: none; } #nbfilters.dups .dup-only, #nbfilters.cls .cl-only { display: flex; }
+  .dup-only, .cl-only, .ol-only { display: none; } #nbfilters.dups .dup-only, #nbfilters.cls .cl-only, #nbfilters.ols .ol-only { display: flex; }
+  .ol { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ol .where { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -103,7 +105,7 @@
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
 <main>
-  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-duplicates" aria-selected="false">Duplicates</button><button role="tab" id="t-clusters" aria-selected="false">Clusters</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-duplicates" aria-selected="false">Duplicates</button><button role="tab" id="t-clusters" aria-selected="false">Clusters</button><button role="tab" id="t-outliers" aria-selected="false">Outliers</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
   <div id="nbfilters" class="card" style="--c: var(--line)" hidden>
     <div class="row">
       <label><span id="nb-statelabel">state</span> <select id="nb-state"></select></label>
@@ -111,9 +113,11 @@
       <label title="Keep an item if it was created on or after this date">from <input type="date" id="nb-since"></label>
       <label title="Keep an item if it was created before this date">before <input type="date" id="nb-until"></label>
       <label class="dup-only" title="Cosine similarity of the two vectors. Above 0.95 is nearly always the same text; 0.90 to 0.95 real duplicates or follow-ups; below 0.90 related topics">similarity <select id="nb-sim"><option>0.95</option><option selected>0.9</option><option>0.85</option><option>0.8</option></select></label>
+      <label class="ol-only" title="Isolation is the similarity to the nearest other item; cluster is the similarity to the centre of the item's own topic cluster. Lower means more of an outlier">order by <select id="nb-by"><option value="iso">most isolated</option><option value="ctr">furthest from its cluster</option></select></label>
       <label class="cl-only">sort <select id="nb-sort"><option value="size">size</option><option value="trend">heating up</option><option value="open">open items</option></select></label>
     </div>
     <div class="row"><span class="meta">repos</span><div class="chips" id="nb-projects" title="Pick any to limit to those repos; for duplicates, a pair is kept if either issue is in one of them"></div></div>
+    <div class="row ol-only"><label title="Dependency-bump PRs and release procedures are unlike anything else, and uninteresting"><input type="checkbox" id="nb-bumps"> keep dependency bumps and release procedures</label></div>
     <div class="row dup-only">
       <label title="An old import created copies of tickets with adjacent numbers; pairs like that are hidden when one is closed"><input type="checkbox" id="nb-import"> keep adjacent-number copies from the old import</label>
       <label title="Release procedures and dependency bumps look alike by construction"><input type="checkbox" id="nb-templ"> keep release procedures and bumps</label>
@@ -123,6 +127,11 @@
     <div class="meta" id="dupmeta"></div>
     <div id="dups" style="display:flex;flex-direction:column;gap:10px"></div>
     <button type="button" id="dupmore" hidden>Show more</button>
+  </div>
+  <div id="tab-outliers" hidden style="display:none;flex-direction:column;gap:12px">
+    <div class="meta" id="olmeta"></div>
+    <div id="ols" style="display:flex;flex-direction:column;gap:8px"></div>
+    <button type="button" id="olmore" hidden>Show more</button>
   </div>
   <div id="tab-clusters" hidden style="display:none;flex-direction:column;gap:12px">
     <div class="meta" id="clmeta"></div>
@@ -404,19 +413,20 @@ async function pollStatus(force = false) {
   } catch (e) { $("run").replaceChildren(el("div", "", `status unavailable: ${e.message}`)); }
 }
 function tab(name) {
-  const tabs = ["search", "duplicates", "clusters", "status"];
+  const tabs = ["search", "duplicates", "clusters", "outliers", "status"];
   for (const t of tabs) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
-  $("nbfilters").hidden = name !== "duplicates" && name !== "clusters";
+  $("nbfilters").hidden = !["duplicates", "clusters", "outliers"].includes(name);
   clearInterval(pollTimer);
   if (name === "status") { samples.length = 0; pollStatus(true); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
-  else if (name === "duplicates" || name === "clusters") { history.replaceState(null, "", `#${name}`); nbSetup(name); }
+  else if (name === "duplicates" || name === "clusters" || name === "outliers") { history.replaceState(null, "", `#${name}`); nbSetup(name); }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("tab-status").hidden) { samples.length = 0; pollStatus(true); } });
 
 // ---- duplicates and clusters: computed by the refresh (neighbours phase, from vectors already in the index) and filtered here ----
 const NB = { projects: [], picked: new Set((store.get("search.nb.projects") || "").split(",").filter(Boolean)), tab: null, offset: 0 };
-const NB_STATES = { duplicates: [["any", "any"], ["open", "one is open"], ["closed", "both closed"]], clusters: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]] };
-const NB_KINDS = { duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]] };
+const NB_VIEWS = { duplicates: "dups", clusters: "cls", outliers: "ols" };
+const NB_STATES = { outliers: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]], duplicates: [["any", "any"], ["open", "one is open"], ["closed", "both closed"]], clusters: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]] };
+const NB_KINDS = { outliers: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]], duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]] };
 const fill = (sel, opts, value) => { sel.replaceChildren(...opts.map(([v, t]) => Object.assign(el("option", "", t), { value: v }))); sel.value = opts.some(o => o[0] === value) ? value : opts[0][0]; };
 const ghLink = (cls, text, url) => { const a = el("a", cls, text); a.rel = "noopener noreferrer"; a.target = "_blank"; if (/^https:\/\/github\.com\//.test(url)) a.href = url; return a; };
 function itemRow(it) {
@@ -445,23 +455,24 @@ function renderNbProjects() {
 }
 function nbSetup(view) {
   NB.tab = view;
-  $("nbfilters").className = `card ${view === "duplicates" ? "dups" : "cls"}`;
+  $("nbfilters").className = `card ${NB_VIEWS[view]}`;
   fill($("nb-state"), NB_STATES[view], store.get("search.nb.state"));
   fill($("nb-kind"), NB_KINDS[view], store.get(`search.nb.kind.${view}`));
   $("nb-statelabel").textContent = view === "duplicates" ? "pair" : "items";
   $("nb-since").value = store.get("search.nb.since") || ""; $("nb-until").value = store.get("search.nb.until") || "";
   $("nb-sim").value = store.get("search.nb.sim") || "0.9";
-  $("nb-sort").value = store.get("search.nb.sort") || "size";
+  $("nb-sort").value = store.get("search.nb.sort") || "size"; $("nb-by").value = store.get("search.nb.by") || "iso";
+  $("nb-bumps").checked = store.get("search.nb.bumps") === "1";
   $("nb-import").checked = store.get("search.nb.import") === "1"; $("nb-templ").checked = store.get("search.nb.templ") === "1";
   NB.projects = (loadedUniverse?.projects || []).map(p => ({ id: p.id, title: p.title }));
   renderNbProjects();
   nbReload();
 }
-function nbReload() { NB.tab === "duplicates" ? loadDuplicates(false) : loadClusters(); }
-for (const [id, key] of [["nb-state", "state"], ["nb-since", "since"], ["nb-until", "until"], ["nb-sim", "sim"], ["nb-sort", "sort"]])
+function nbReload() { NB.tab === "duplicates" ? loadDuplicates(false) : NB.tab === "outliers" ? loadOutliers(false) : loadClusters(); }
+for (const [id, key] of [["nb-state", "state"], ["nb-since", "since"], ["nb-until", "until"], ["nb-sim", "sim"], ["nb-sort", "sort"], ["nb-by", "by"]])
   $(id).addEventListener("change", () => { store.set(`search.nb.${key}`, $(id).value); nbReload(); });
 $("nb-kind").addEventListener("change", () => { store.set(`search.nb.kind.${NB.tab}`, $("nb-kind").value); nbReload(); });
-for (const [id, key] of [["nb-import", "import"], ["nb-templ", "templ"]]) $(id).addEventListener("change", () => { store.set(`search.nb.${key}`, $(id).checked ? "1" : "0"); nbReload(); });
+for (const [id, key] of [["nb-import", "import"], ["nb-templ", "templ"], ["nb-bumps", "bumps"]]) $(id).addEventListener("change", () => { store.set(`search.nb.${key}`, $(id).checked ? "1" : "0"); nbReload(); });
 
 function nbUnavailable(box, d) { box.replaceChildren(el("div", "", d.error ? d.error.message : "Not computed yet. The refresh builds this (pipelines/search/refresh.sh, or neighbours.py on its own).")); }
 async function nbFetch(path, p) {
@@ -544,10 +555,36 @@ async function loadClusters() {
 }
 $("nb-sort").addEventListener("change", renderClusters);
 
-$("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-clusters").onclick = () => tab("clusters"); $("t-status").onclick = () => tab("status");
+let olSeq = 0;
+async function loadOutliers(more) {
+  if (!more) NB.offset = 0;
+  const p = nbParams(), seq = ++olSeq;
+  p.set("by", $("nb-by").value); p.set("templated", $("nb-bumps").checked ? "1" : "0"); p.set("limit", "50"); p.set("offset", NB.offset);
+  try {
+    const d = await nbFetch("/api/search/outliers", p);
+    if (seq !== olSeq) return;
+    if (!d.available) { $("olmeta").textContent = ""; nbUnavailable($("ols"), d); $("olmore").hidden = true; return; }
+    const cards = d.items.map(it => {
+      const box = el("div", "ol"), score = d.by === "ctr" ? it.ctr : it.iso;
+      const row = itemRow(it), s = el("span", "sim", score.toFixed(3));
+      s.title = d.by === "ctr" ? "similarity to the centre of its cluster" : "similarity to the nearest other item";
+      row.prepend(s);
+      const where = el("div", "where", `${it.label ? `cluster: ${it.label} · ` : ""}nearest other item ${it.iso.toFixed(3)} · cluster centre ${it.ctr.toFixed(3)}`);
+      box.append(row, where);
+      return box;
+    });
+    if (more) $("ols").append(...cards); else $("ols").replaceChildren(...(cards.length ? cards : [el("div", "", "No items match these filters.")]));
+    NB.offset += d.items.length;
+    $("olmore").hidden = NB.offset >= d.total;
+    $("olmeta").textContent = `${d.total.toLocaleString()} items, lowest ${d.by === "ctr" ? "cluster-centre" : "nearest-neighbour"} similarity first${nbWhen(d)}`;
+  } catch (e) { $("olmeta").textContent = e.message; }
+}
+$("olmore").onclick = () => loadOutliers(true);
+
+$("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-clusters").onclick = () => tab("clusters"); $("t-outliers").onclick = () => tab("outliers"); $("t-status").onclick = () => tab("status");
 function fromHash() {                                                      // #status, #duplicates and #clusters are tabs; any other hash is a query
   const h = decodeURIComponent(location.hash.slice(1));
-  if (["status", "duplicates", "clusters"].includes(h)) loadedUniversePromise.then(() => tab(h));
+  if (["status", "duplicates", "clusters", "outliers"].includes(h)) loadedUniversePromise.then(() => tab(h));
   else { tab("search"); if (h && h !== "search") { $("q").value = h; go(); } }
 }
 window.addEventListener("hashchange", fromHash);

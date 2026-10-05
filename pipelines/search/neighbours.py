@@ -4,7 +4,7 @@
   neighbours.py [universe] [--force]
 
 Writes <data>/neighbours/<universe>.db, which the gateway reads for the Duplicates and Clusters tabs:
-  items(idx, project, id, kind, state, created, number, author, title, url, cluster)  one per issue or PR (its first chunk's vector)
+  items(idx, ..., cluster, iso, ctr)                                                  one per issue or PR (its first chunk's vector); iso = cosine to the nearest other item, ctr = cosine to its cluster centre (low = outlier)
   pairs(a, b, sim)                                                                    a < b; each item's `neighbours` best matches >= `min_similarity`
   clusters(k, label, samples)                                                         spherical k-means; label = distinctive title terms, samples = idx closest to the centre
   meta(k, v)                                                                          model, stamp, counts
@@ -18,6 +18,7 @@ import numpy as np
 import config, runstate
 
 BLOCK = 2048
+VERSION = "2"
 STOP = set("the a an of in on to for and or with is not be by as at from when using use fix add remove update support error warning scala scalac compiler "
            "code should does doesn don it its this that are was can cannot no new bug issue pr via into after before than more only also".split())
 
@@ -65,21 +66,23 @@ def stamp(cfg, universe):
 
 
 def neighbour_pairs(X, k, min_sim):
-    """{(a, b): cosine} with a < b: the k best matches of every row, kept if >= min_sim."""
+    """({(a, b): cosine} with a < b: the k best matches of every row, kept if >= min_sim; for every row the cosine to its nearest other row)."""
     n, pairs = len(X), {}
+    nearest = np.zeros(n, dtype=np.float32)
     if n < 2:
-        return pairs
+        return pairs, nearest
     k = min(k, n - 1)
     for a in range(0, n, BLOCK):
         s = X[a:a + BLOCK] @ X.T
         s[np.arange(s.shape[0]), a + np.arange(s.shape[0])] = -1
+        nearest[a:a + BLOCK] = s.max(1)
         top = np.argpartition(-s, k - 1, axis=1)[:, :k]
         for r in range(s.shape[0]):
             for j in top[r]:
                 if s[r, j] >= min_sim:
                     key = (a + r, int(j)) if a + r < j else (int(j), a + r)
                     pairs[key] = max(pairs.get(key, 0.0), float(s[r, j]))
-    return pairs
+    return pairs, nearest
 
 
 def kmeans(X, k, seed=0, iters=50):
@@ -139,7 +142,7 @@ def compute(cfg, universe, run=None, force=False):
             con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             meta = dict(con.execute("SELECT k, v FROM meta"))
             con.close()
-            if meta.get("stamp") == cur and meta.get("model") == model and meta.get("params") == json.dumps(nb, sort_keys=True):
+            if meta.get("stamp") == cur and meta.get("model") == model and meta.get("params") == json.dumps(nb, sort_keys=True) and meta.get("version") == VERSION:
                 log("neighbours: no new or changed issue and PR vectors")
                 return None
         except sqlite3.Error:
@@ -148,7 +151,7 @@ def compute(cfg, universe, run=None, force=False):
     items, X = load_items(cfg, universe)
     n = len(items)
     log(f"neighbours: {n} issues and PRs")
-    pairs = neighbour_pairs(X, nb["neighbours"], nb["min_similarity"]) if n else {}
+    pairs, nearest = neighbour_pairs(X, nb["neighbours"], nb["min_similarity"]) if n else ({}, np.zeros(0, dtype=np.float32))
     k = max(1, min(nb["clusters"], n // 10)) if n else 0
     assign, best = kmeans(X, k) if n else (np.zeros(0, dtype=int), np.zeros(0))
     names = labels(items, assign, k) if n else []
@@ -156,18 +159,19 @@ def compute(cfg, universe, run=None, force=False):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp.unlink(missing_ok=True)
     con = sqlite3.connect(tmp)
-    con.executescript("""CREATE TABLE items(idx INTEGER PRIMARY KEY, project TEXT, id TEXT, kind TEXT, state TEXT, created TEXT, number INTEGER, author TEXT, title TEXT, url TEXT, cluster INTEGER);
+    con.executescript("""CREATE TABLE items(idx INTEGER PRIMARY KEY, project TEXT, id TEXT, kind TEXT, state TEXT, created TEXT, number INTEGER, author TEXT, title TEXT, url TEXT, cluster INTEGER, iso REAL, ctr REAL);
                          CREATE TABLE pairs(a INTEGER, b INTEGER, sim REAL, PRIMARY KEY(a, b));
                          CREATE INDEX pairs_sim ON pairs(sim DESC);
                          CREATE TABLE clusters(k INTEGER PRIMARY KEY, label TEXT, samples TEXT);
                          CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);""")
-    con.executemany("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    [(i, it["project"], it["id"], it["kind"], it["state"], it["created"], it["number"], it["author"], it["title"], it["url"], int(assign[i])) for i, it in enumerate(items)])
+    con.executemany("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    [(i, it["project"], it["id"], it["kind"], it["state"], it["created"], it["number"], it["author"], it["title"], it["url"], int(assign[i]),
+                      round(float(nearest[i]), 4), round(float(best[i]), 4)) for i, it in enumerate(items)])
     con.executemany("INSERT INTO pairs VALUES(?,?,?)", [(a, b, round(s, 4)) for (a, b), s in pairs.items()])
     for c in range(k):
         members = np.nonzero(assign == c)[0]
         con.execute("INSERT INTO clusters VALUES(?,?,?)", (c, names[c], json.dumps([int(i) for i in members[np.argsort(-best[members])][:8]])))
-    meta = {"model": model, "stamp": cur, "params": json.dumps(nb, sort_keys=True), "generated": str(time.time()), "items": str(n), "pairs": str(len(pairs)), "clusters": str(k)}
+    meta = {"version": VERSION, "model": model, "stamp": cur, "params": json.dumps(nb, sort_keys=True), "generated": str(time.time()), "items": str(n), "pairs": str(len(pairs)), "clusters": str(k)}
     con.executemany("INSERT INTO meta VALUES(?,?)", meta.items())
     con.commit()
     con.close()
