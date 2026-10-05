@@ -2,7 +2,7 @@
 reranker so they stay warm between queries; the indexes (one SQLite file per project, built by pipelines/search) are read-only here, and the
 JSON config is re-read on every request, so adding a project or editing labels needs no restart.
 
-  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?}
+  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?}
                   -> {"universe", "results": [...], "timing_ms": {...}, "missing": [projects not indexed yet]}
   POST /embed     {"input": str | [str], "kind"? "document" | "query"}  ->  {"model", "dim", "embeddings": [[...]]}
   POST /rerank    {"query", "documents": [str]}                         ->  {"model", "scores": [P(relevant)]}
@@ -58,13 +58,16 @@ def _search(r):
         index = search.Index(c, r.get("universe"))
     except KeyError as e:
         raise ValueError(e.args[0])
-    projects, sources = _strs(r.get("projects"), "projects"), _strs(r.get("sources"), "sources")
+    projects, sources, kinds = _strs(r.get("projects"), "projects"), _strs(r.get("sources"), "sources"), _strs(r.get("kinds"), "kinds")
+    for kd in kinds or []:
+        if kd not in config.KINDS:
+            raise ValueError(f"kind {kd!r} is not one of {', '.join(config.KINDS)}")
     for p in projects or []:
         if p not in index.universe.projects:
             raise ValueError(f"project {p!r} is not in universe {index.universe.id!r} (has: {', '.join(index.universe.projects)})")
     use_rr = bool(r.get("rerank", True))
     t = time.time()
-    out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), embedder=emb,
+    out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
                       reranker=rr if use_rr else None, pool_docs=c.search["reranker"]["candidates"])
     return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing,
             "timing_ms": {"total": round((time.time() - t) * 1000)}}

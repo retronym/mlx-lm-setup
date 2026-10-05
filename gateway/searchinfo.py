@@ -36,7 +36,7 @@ def run_state(index_dir: str, cfg) -> dict | None:
 def universes(cfg) -> list[dict]:
     return [{"id": u.id, "title": u.title, "description": u.description, "default": u.default or u is cfg.default_universe(),
              "projects": [{"id": p, "title": cfg.projects[p].title,
-                           "sources": [{"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "enabled": s.enabled}
+                           "sources": [{"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "kinds": list(s.kinds), "enabled": s.enabled}
                                        for s in cfg.projects[p].sources]} for p in u.projects]} for u in cfg.universes.values()]
 
 

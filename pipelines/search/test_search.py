@@ -50,9 +50,9 @@ class SearchTests(unittest.TestCase):
             st.apply(sid, chunks); st.commit(); embed.fill(st, emb, source=sid, log=lambda *_: None)
         put("big", "code", [Chunk(f"code:{i}", f"f{i}.scala", f"f{i}.scala  big.F{i}", f"def work{i} = typer implicit scope {i}", f"https://x/{i}") for i in range(30)]
             + [Chunk("code:n", "n.scala", "n.scala  big.N", "the needle method handles implicit shadowing in the typer", "https://x/n")])
-        put("big", "issues", [Chunk("issues:issue:1", "issue:1", "o/r#1 shadowing bug", "implicit shadowing is broken", "https://x/i1", {"state": "closed", "number": 1}),
+        put("big", "issues", [Chunk("issues:issue:1", "issue:1", "o/r#1 shadowing bug", "implicit shadowing is broken", "https://x/i1", {"kind": "issue", "state": "closed", "number": 1}),
                               Chunk("issues:comment:5", "issue:1", "o/r#1 shadowing bug  (comment by a)", "me too, implicit shadowing", "https://x/c5", {"kind": "comment", "number": 1}),
-                              Chunk("issues:issue:2", "issue:2", "o/r#2 other", "implicit shadowing, still open", "https://x/i2", {"state": "open", "number": 2})])
+                              Chunk("issues:issue:2", "issue:2", "o/r#2 other", "implicit shadowing, still open", "https://x/i2", {"kind": "issue", "state": "open", "number": 2})])
         put("small", "code", [Chunk("code:s", "s.java", "s.java  small.S", "needle for the small project: implicit shadowing in asm", "https://x/s")])
         self.idx = search.Index(self.cfg, "all")
 
@@ -84,6 +84,15 @@ class SearchTests(unittest.TestCase):
         self.assertEqual([h["doc"] for h in hs], ["issue:2"])                                         # the comment inherited "closed" from its issue
         hs = search.hits(self.idx, "implicit shadowing", k=20, sources=["issues"], open_only=True, mode="vec", embedder=FakeEmbedder())
         self.assertEqual([h["doc"] for h in hs], ["issue:2"])                                         # same through the vector path
+
+    def test_kinds(self):
+        for mode in ("bm25", "vec"):
+            hs = search.hits(self.idx, "implicit shadowing", k=20, kinds=["comment"], mode=mode, embedder=FakeEmbedder())
+            self.assertEqual([(h["doc"], h["kind"]) for h in hs], [("issue:1", "comment")], mode)         # the comment, not its issue's body
+            hs = search.hits(self.idx, "implicit shadowing needle", k=50, kinds=["file"], mode=mode, embedder=FakeEmbedder())
+            self.assertEqual({(h["key"], h["kind"]) for h in hs}, {("big/code", "file"), ("small/code", "file")}, mode)   # chunks of files carry no kind
+        self.assertEqual(self.keys(k=10, kinds=["commit"]), [])
+        self.assertEqual({k for k in self.keys(k=10, kinds=["file", "comment"], sources=["issues"])}, {"big/issues"})  # combines with sources
 
     def test_vector_scores_merge_across_projects(self):
         keys, detail = search.search(self.idx, "needle small project asm", k=5, mode="vec", embedder=FakeEmbedder())

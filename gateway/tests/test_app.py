@@ -162,10 +162,10 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 400)                                          # llm is not an nli backend
 
     async def test_search_routes_validate_and_pass_through(self):
-        r = await self.http.post("/api/search", json={"query": "eta expansion", "k": 3, "sources": ["scala2/issues"], "projects": ["scala2"], "rerank": False})
+        r = await self.http.post("/api/search", json={"query": "eta expansion", "k": 3, "sources": ["scala2/issues"], "projects": ["scala2"], "kinds": ["comment"], "rerank": False})
         d = r.json()
         self.assertEqual((r.status_code, d["backend"], len(d["results"]), d["reranked"]), (200, "find", 3, False))
-        self.assertEqual((d["echo"]["sources"], d["echo"]["projects"], d["echo"]["rerank"], d["echo"]["mode"]), (["scala2/issues"], ["scala2"], False, "hybrid"))
+        self.assertEqual((d["echo"]["sources"], d["echo"]["projects"], d["echo"]["kinds"], d["echo"]["rerank"], d["echo"]["mode"]), (["scala2/issues"], ["scala2"], ["comment"], False, "hybrid"))
         r = await self.http.post("/api/search", json={"query": "q", "bogus": 1})
         self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_arguments"))
         r = await self.http.post("/api/search", json={"query": ""})
@@ -227,6 +227,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((c["sync"]["streams"][0]["name"], c["sync"]["streams"][0]["mode"], c["position"]), ("commits", "back", "abcdef0123"))
         self.assertAlmostEqual(c["sync"]["frac"], 0.5, delta=0.02)
         self.assertEqual(d["universes"][0]["projects"][0]["sources"][0]["key"], "p/code")
+        self.assertEqual([s["kinds"] for s in d["universes"][0]["projects"][0]["sources"]], [["file"], ["issue"], ["file"], ["commit"]])
         with self.assertRaises(ApiError):
             search_stats(cat, universe="nope")
 

@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 import numpy as np, torch
 from transformers import AutoModel, AutoTokenizer
 import config, runstate
-from store import Store, STATE_SQL
+from store import Store, chunk_filter
 
 MODEL = os.environ.get("EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
 TASK = "Given a question or code snippet about the Scala compiler, standard library or build tools, retrieve the most relevant source code, documentation or issue text"
@@ -112,17 +112,15 @@ def _matrix(st, model):
     return c["ids"], c["m"]
 
 
-def vector_search(st, qvec, model, k, sources=None, open_only=False):
+def vector_search(st, qvec, model, k, sources=None, open_only=False, kinds=None):
     """[(rowid, cosine)] best first. `qvec` is the already-embedded query, so one query serves every store of a universe."""
     ids, m = _matrix(st, model)
     if not len(ids):
         return []
     s = m @ qvec.astype(np.float16)
-    if sources or open_only:
-        marks = ",".join("?" * len(sources)) if sources else ""
-        ok = {r[0] for r in st.db.execute(
-            f"SELECT rowid FROM chunks c WHERE ({'1' if not sources else 'c.source IN (' + marks + ')'}) AND (? = 0 OR COALESCE({STATE_SQL}, 'open') NOT IN ('closed', 'merged'))",
-            (*(sources or ()), int(open_only)))}
+    if sources or open_only or kinds:
+        cond, args = chunk_filter(sources, open_only, kinds)
+        ok = {r[0] for r in st.db.execute(f"SELECT rowid FROM chunks c WHERE 1 {cond}", args)}
         s = np.where(np.isin(ids, list(ok)), s, -np.inf)
     top = np.argsort(-s)[:k]
     return [(int(ids[i]), float(s[i])) for i in top if np.isfinite(s[i])]

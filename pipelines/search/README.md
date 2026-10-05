@@ -28,6 +28,7 @@ $PY pipelines/search/sync.py                      # the default universe, by pri
 $PY pipelines/search/embed.py                     # fill missing/stale vectors in priority order (Qwen3-Embedding-0.6B, MPS, ~80 chunks/s)
 $PY pipelines/search/search.py "where is eta expansion of by-name parameters handled"
 $PY pipelines/search/search.py --rerank --project zinc --source issues "incremental compilation loops"
+$PY pipelines/search/search.py --kind commit --kind release "trait extraHash"   # only commit messages and release notes, from every source
 $PY pipelines/search/migrate.py --old data/search.db   # one-off: split the legacy single index into per-project databases, no re-embedding
 $PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pipelines/search/test_github.py; $PY pipelines/search/test_lifecycle.py
 ```
@@ -59,14 +60,19 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 
 | Surface | What |
 |---|---|
-| `/search` | page: sample questions, source / method / rerank / open-issues-only controls, per-hit links, keyword and vector ranks, rerank scores |
-| MCP `search` | `query`, `k`, `source`, `mode`, `rerank`, `open_only`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
+| `/search` | page: sample questions, source / kind / method / rerank / open-issues-only controls, per-hit links, keyword and vector ranks, rerank scores |
+| MCP `search` | `query`, `k`, `universe`, `projects`, `sources`, `kinds`, `mode`, `rerank`, `open_only`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
 | `POST /api/search` | the same as JSON |
+| MCP `search_universes` | universes, their projects and sources, and the kinds of hit each source holds |
 | `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |
 | `POST /api/rerank` | `{"query", "documents": [...]}` -> relevance scores |
 | `GET /api/search/status` | chunks and embedded chunks per source, last sync position; reads the SQLite file, starts nothing |
 
 The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.
+
+## Kinds
+
+A hit's `kind` is finer than its source and cuts across sources: `file` (a chunk of a file in a git tree: code, docs, spec), `issue`, `pr`, `comment`, `review` (an inline review comment with its diff hunk), `summary` (an LLM summary of a long thread), `commit`, `release`, `tag` (an annotated tag's message). `kinds` filters on it before ranking, in both the keyword and vector passes, so the top-k is the best k of those kinds rather than whatever survived a cut. Each source declares the kinds it writes (`search_universes`), and the page offers only the kinds the universe holds.
 
 ## Who and when
 
