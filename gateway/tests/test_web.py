@@ -153,6 +153,16 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('fetch("/api/search/status")', html)
         self.assertIn('id="idxstrip"', html)
 
+    async def test_the_digest_is_rendered_as_sanitised_markdown_with_the_vendored_libs(self):
+        html = (WEB / "search.html").read_text()
+        self.assertIn('<script src="/vendor/marked.min.js">', html)
+        self.assertIn('<script src="/vendor/purify.min.js">', html)
+        self.assertIn("DOMPurify.sanitize(marked.parse(", html)                        # model-written text containing GitHub titles is never inserted unsanitised
+        self.assertIn('rel = "noopener noreferrer"', html)
+        for name in ("marked.min.js", "purify.min.js"):
+            r = await self.http.get(f"/vendor/{name}")
+            self.assertEqual((r.status_code, r.headers["content-type"].split(";")[0]), (200, "text/javascript"))
+
     async def test_pages_load_nothing_from_other_origins(self):
         for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html", "home.html"):
             html = (WEB / name).read_text()

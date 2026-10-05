@@ -70,7 +70,7 @@ The index lives at `pipelines/search/data/search.db` unless the catalog sets `db
 
 ## Watching progress
 
-The **Index status** tab on `/search` (`#status`) shows, per project and source, how much is synced (git sources: files indexed of files in the tree; GitHub sources: how far back the newest-first backfill has come) and how much is embedded, plus the indexer's current phase and source, rate and ETA, the last refresh phase by phase, and the latest digest. The Home page's Search panel carries a one-line version (chunks, projects, % embedded, what the indexer is doing). Both read the index files and `data/run.json` read-only through `GET /api/search/status`, so they cost no model. From a worktree, `draft.sh` serves them on their own port.
+The **Index status** tab on `/search` (`#status`) shows, per project and source, how much is synced (git sources: files indexed of files in the tree; GitHub sources: how far back the newest-first backfill has come) and how much is embedded, plus the indexer's current phase and source, rate and ETA, the last refresh phase by phase, and the latest digest (rendered as markdown: the digest is model-written text containing GitHub titles, so it goes through marked and DOMPurify, never straight into the page). The Home page's Search panel carries a one-line version (chunks, projects, % embedded, what the indexer is doing). Both read the index files and `data/run.json` read-only through `GET /api/search/status`, so they cost no model. From a worktree, `draft.sh` serves them on their own port.
 
 Backfilling older history is `sync.py bug --since 2000-01-01T00:00:00Z` (then `embed.py`); it is idempotent, so a re-run only costs the API requests.
 
