@@ -264,11 +264,11 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
 
 async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 8, universe: str | None = None,
                      projects: list[str] | None = None, sources: list[str] | None = None, kinds: list[str] | None = None, mode: str = "hybrid",
-                     rerank: bool = True, open_only: bool = False, model: str | None = None) -> dict:
+                     rerank: bool = True, open_only: bool = False, explain: bool = False, model: str | None = None) -> dict:
     """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
     body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
-            **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds)) if v}}
+            **({"explain": True} if explain else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds)) if v}}
     r, meta = await post_json(sup, client, spec, "/search", body)
     if r.status_code != 200:
         try:

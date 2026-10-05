@@ -166,6 +166,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         d = r.json()
         self.assertEqual((r.status_code, d["backend"], len(d["results"]), d["reranked"]), (200, "find", 3, False))
         self.assertEqual((d["echo"]["sources"], d["echo"]["projects"], d["echo"]["kinds"], d["echo"]["rerank"], d["echo"]["mode"]), (["scala2/issues"], ["scala2"], ["comment"], False, "hybrid"))
+        r = await self.http.post("/api/search", json={"query": "q", "explain": True})
+        self.assertEqual((r.status_code, r.json()["echo"]["explain"]), (200, True))
         r = await self.http.post("/api/search", json={"query": "q", "bogus": 1})
         self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_arguments"))
         r = await self.http.post("/api/search", json={"query": ""})

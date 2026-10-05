@@ -285,7 +285,9 @@ function render(d) {
     if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
     top.append(a);
     const sc = [h.rerank != null ? `rerank ${h.rerank.toFixed(2)}` : null, h.bm25 ? `keyword #${h.bm25}` : null, h.vec ? `vector #${h.vec}` : null].filter(Boolean).join(" · ");
-    top.append(el("span", "scores", sc));
+    const scEl = el("span", "scores", sc), x = h.explain;
+    if (x) scEl.title = `fused #${x.fused_rank}: rrf ${x.rrf} (top-rank bonus ${x.top_bonus}), scaled ${x.retrieval}` + (x.weight != null ? `\nfinal ${x.final} = ${x.weight} x retrieval + ${(1 - x.weight).toFixed(2)} x rerank` : "");
+    top.append(scEl);
     const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
     box.append(top, ...[whom(h)].filter(Boolean), el("div", "url", h.url), pre);
     return box;
@@ -300,7 +302,7 @@ async function go() {
   if (!q) return;
   if (aborter) aborter.abort();
   aborter = new AbortController();
-  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked };
+  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked, explain: true };
   const f = $("source").value;
   if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
   if (pickedKinds.size) body.kinds = [...pickedKinds];
