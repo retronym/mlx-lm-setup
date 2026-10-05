@@ -434,7 +434,7 @@ function renderStatus(d) {
     parts.splice(2, 0, el("div", "meta", `last refresh ${ago(lr.started)}${lr.tier ? ` (tier ${lr.tier})` : ""}`), chips);
   }
   if (run && run.message) parts.push(el("div", "runmsg", run.message));
-  for (const e of run?.errors || []) parts.push(el("div", "runmsg", e)).lastChild.style.color = "var(--bad)";
+  for (const e of run?.errors || []) { const m = el("div", "runmsg", e); m.style.color = "var(--bad)"; parts.push(m); }
   $("run").replaceChildren(...parts);
   const dg = d.digest;
   $("digest").hidden = !dg;
