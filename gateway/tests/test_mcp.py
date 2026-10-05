@@ -190,7 +190,8 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(data["results"][0]["text"]), 50)                       # cut to what the caller asked for
             self.assertNotIn("truncated", data["results"][0])
             self.assertNotIn("color", data["results"][0])                               # presentation detail for the page, not for a model
-            err, data, _ = await self.call(s, "search", query="x", linked_to="scala/bug#1", link_type=["closed_by"], has_link=["no_closed_by"])
+            err, data, _ = await self.call(s, "search", query="x", linked_to="scala/bug#1", link_type=["closed_by"], has_link=["no_closed_by"], related=False)
+            self.assertEqual(data["echo"]["related"], False)
             self.assertEqual((err, data["echo"]["linked_to"], data["echo"]["link_type"], data["echo"]["has_link"]), (False, "scala/bug#1", ["closed_by"], ["no_closed_by"]))
             err, data, _ = await self.call(s, "links", ref="scala/bug#1")
             self.assertEqual((err, data["found"]), (False, False))                      # the test backend has no index

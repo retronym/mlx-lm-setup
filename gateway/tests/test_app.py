@@ -192,9 +192,10 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         for bad in ({"ref": 5}, {"ref": "x", "bogus": 1}, {}):
             r = await self.http.post("/api/search/links", json=bad)
             self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), bad)
-        r = await self.http.post("/api/search", json={"query": "q", "linked_to": "#1", "link_type": ["closed_by"], "has_link": ["no_closed_by"], "refs_in_query": False})
+        r = await self.http.post("/api/search", json={"query": "q", "linked_to": "#1", "link_type": ["closed_by"], "has_link": ["no_closed_by"], "refs_in_query": False, "related": 3, "link_boost": 0.5})
         self.assertEqual(r.status_code, 200)
         echo = r.json()["echo"]
+        self.assertEqual((echo["related"], echo["link_boost"]), (3, 0.5))
         self.assertEqual((echo["linked_to"], echo["link_type"], echo["has_link"], echo["refs_in_query"]), ("#1", ["closed_by"], ["no_closed_by"], False))
 
     async def test_embeddings_are_openai_shaped_and_rerank_forwards(self):

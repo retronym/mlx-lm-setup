@@ -287,7 +287,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
     @mcp.tool()
     async def search(query: str, k: int = 20, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
                      kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False,
-                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None) -> dict:
+                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, related: bool | int = True) -> dict:
         """Search the local index of a universe of projects (default: Scala / Zinc: Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, spec,
         issues with comments, pull requests with their comments and review comments, release notes. Natural-language and identifier queries
         both work ("where is eta expansion of by-name parameters handled", "Await.result leaks callbacks"). `projects` limits to project ids,
@@ -299,14 +299,15 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         issue or PR). Each hit has a `line`, a ready-made summary (state, kind, author, dates, source, link): show it to the user instead of just the title. Each hit has a `ref`: pass it to `get` for the whole thread or file. Returns `results` [{ref, project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
         projects not indexed yet. Hits carry `links` (counts per relation, the most important linked documents) and the `line` ends with them ("closed by scala/scala#456 · shipped in release v2.13.12"); a reference spelled out in the query (`scala/bug#1234`, `#123`)
         puts that document and what links to it first. `linked_to` (a hit `ref`, `scala/bug#123`, `#123`, a sha) keeps only documents linked to it, through `link_type` (relations `closes`, `closed_by`, `merged_as`, `merge_of`, `mentions`, `mentioned_by`, `shipped_in`, `ships`, `touches`, `touched_by`, `defines`, `defined_by`).
-        `has_link` keeps documents with a relation (`["closed_by"]`: has a fix) or without (`["no_closed_by"]` with kinds ["issue"] and `open_only`: open issues nobody fixed yet). `links` shows a document's whole neighbourhood or its story.
+        `has_link` keeps documents with a relation (`["closed_by"]`: has a fix) or without (`["no_closed_by"]` with kinds ["issue"] and `open_only`: open issues nobody fixed yet). `links` shows a document's whole neighbourhood or its story. `related` (default on; false or a number) adds a separate `related` list: documents linked to the top hits (the PR that fixed one, the issue a commit closed, what a hit mentions or is mentioned by),
+        not matched by the query, each with `via` (which hit, which relation, how sure) and a `line`; use it to see the story around a hit without a second search.
         Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
-                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link)
+                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link, related=related)
         except ApiError as e:
             raise fail(e) from None
-        for h in res["results"]:
+        for h in res["results"] + res.get("related", []):
             h["text"] = h["text"][:text_chars]
             h.pop("truncated", None)
             h.pop("color", None)

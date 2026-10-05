@@ -14,7 +14,9 @@ REL = {v: k for k, v in NAMES.items()}
 TYPES = sorted({t for t, _ in NAMES.values()})
 TOP_ORDER = ["closes", "closed_by", "merged_as", "merge_of", "shipped_in", "mentions", "mentioned_by", "defines", "defined_by"]     # what a hit's short list shows (not file touches, not a release's whole content)
 SAY = {"closes": "closes", "closed_by": "closed by", "merged_as": "merged as", "merge_of": "merge of", "shipped_in": "shipped in", "mentions": "mentions",
-       "mentioned_by": "mentioned by", "defines": "referenced in code", "defined_by": "referenced by code"}
+       "mentioned_by": "mentioned by", "defines": "referenced in code", "defined_by": "referenced by code", "touches": "touches", "touched_by": "touched by", "ships": "ships"}
+INV = {"closes": "closed_by", "closed_by": "closes", "merged_as": "merge_of", "merge_of": "merged_as", "mentions": "mentioned_by", "mentioned_by": "mentions", "shipped_in": "ships",
+       "ships": "shipped_in", "touches": "touched_by", "touched_by": "touches", "defines": "defined_by", "defined_by": "defines"}
 
 
 def node_id(repo, kind, meta, doc):
@@ -170,6 +172,57 @@ class LinkDB:
                 n = r["node"]
                 if n["indexed"] and n["id"] not in nids:
                     out[n["id"]] = (n["kind"], n["repo"], n["ref"])
+        return out
+
+    def _degree(self, nid, cache={}):
+        r = cache.get((id(self), nid))
+        if r is None:
+            r = cache[(id(self), nid)] = self.db.execute("SELECT (SELECT count(*) FROM edges WHERE src = ?) + (SELECT count(*) FROM edges WHERE dst = ?)", (nid, nid)).fetchone()[0]
+        return r
+
+    def expand(self, seeds, weights, hub_degree=150, depth2=True, exclude=(), per_relation=10):
+        """Documents linked to the `seeds` ({node id: score}), scored: the sum over seeds of each seed's best path, seed score x relation weight x confidence (x 0.5 for the
+        second step, which only goes through closes / merged_as and their other ends: an issue's fixing PR's merge commit). Hubs are not followed or reached:
+        a relation of a seed with more than `hub_degree` edges (a file's `touched_by`, a release's `ships`) is skipped, and so is a target with more than
+        `hub_degree` edges of any kind (an umbrella issue, a release). Indexed documents only, never a seed or in `exclude`.
+        [{node, score, via: [{from, rel, conf, depth, through?, score}]}] best first."""
+        acc, skip = {}, set(seeds) | set(exclude)
+        step2 = ("closes", "closed_by", "merged_as", "merge_of")
+
+        def edges(nid, rels):
+            counts = {}
+            for direction, col in (("out", "src"), ("in", "dst")):
+                for t, n in self.db.execute(f"SELECT type, count(*) FROM edges WHERE {col} = ? GROUP BY type", (nid,)):
+                    counts[REL[(t, direction)]] = n
+            for rel in rels:
+                if not weights.get(rel) or not counts.get(rel) or counts[rel] > hub_degree:
+                    continue
+                t, d = NAMES[rel]
+                mine, other = ("src", "dst") if d == "out" else ("dst", "src")
+                for conf, *n in self.db.execute(f"SELECT e.conf, {', '.join('n.' + c for c in self.COLS.split(', '))} FROM edges e JOIN nodes n ON n.id = e.{other} "
+                                                f"WHERE e.{mine} = ? AND e.type = ? AND n.indexed = 1 ORDER BY e.conf DESC LIMIT ?", (nid, t, per_relation)):
+                    yield rel, conf, self._node(n)
+
+        def add(node, score, via):
+            if node["id"] in skip or self._degree(node["id"]) > hub_degree:
+                return False
+            e = acc.setdefault(node["id"], {"node": node, "score": 0.0, "via": [], "by_seed": {}})
+            e["by_seed"][via["from"]] = max(e["by_seed"].get(via["from"], 0.0), score)         # one seed counts once, by its best path: a PR that closes *and* is mentioned is not twice as related
+            e["score"] = sum(e["by_seed"].values())
+            e["via"].append({**via, "score": round(score, 4)})
+            return True
+
+        for seed, s0 in seeds.items():
+            for rel, conf, node in list(edges(seed, NAMES)):
+                s1 = s0 * weights[rel] * conf
+                add(node, s1, {"from": seed, "rel": rel, "conf": conf, "depth": 1})
+                if depth2 and rel in step2 and node["id"] not in skip:
+                    for rel2, conf2, node2 in list(edges(node["id"], step2)):
+                        add(node2, s1 * 0.5 * weights[rel2] * conf2, {"from": seed, "rel": rel2, "conf": conf2, "depth": 2, "through": node["id"]})
+        out = sorted(acc.values(), key=lambda e: -e["score"])
+        for e in out:
+            e["via"].sort(key=lambda v: -v["score"])
+            del e["by_seed"]
         return out
 
     def story(self, nid, limit=60):

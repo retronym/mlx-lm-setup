@@ -53,6 +53,15 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(srcs["scala3/commits"].priority, srcs["zinc/commits"].priority)
         self.assertEqual(cfg.project_db("zinc").name, "index.db")
 
+    def test_related_settings(self):
+        cfg = self.load(search={"related": {"limit": 3, "weights": {"closes": 2}}}, projects=[proj()], universes=[uni()])
+        self.assertEqual((cfg.search["related"]["limit"], cfg.search["related"]["seeds"], cfg.search["related"]["boost"]), (3, 5, 0.0))
+        self.assertEqual((cfg.search["related"]["weights"]["closes"], cfg.search["related"]["weights"]["mentions"]), (2, 0.5))       # partial weights over the defaults
+        errs = self.errors(search={"related": {"weights": {"nonsense": 1, "closes": -1}, "limit": 0}}, projects=[proj()], universes=[uni()])
+        self.assertTrue(any("related.weights.nonsense" in e for e in errs) and any("related.weights.closes" in e for e in errs) and any("related.limit" in e for e in errs), errs)
+        import linkdb
+        self.assertEqual(set(config.RELATED_WEIGHTS), set(linkdb.NAMES))
+
     def test_defaults_are_filled_in(self):
         cfg = self.load(projects=[proj("p", GIT, GH, REL)], universes=[uni()])
         git, gh, rel = cfg.projects["p"].sources

@@ -9,7 +9,7 @@ usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config
-from linkdb import LinkDB, NAMES, TYPES, node_id, doc_names
+from linkdb import LinkDB, NAMES, INV, SAY, TYPES, node_id, doc_names
 from store import Store, _CAMEL, STATE_SQL, chunk_filter
 
 STOP = set("a an the of in on to is are was be for and or not with how what where why does do this that it as by from at".split())
@@ -102,6 +102,15 @@ def _source_filter(sources, pid):
     return sorted({s.split("/", 1)[1] if "/" in s else s for s in sources if "/" not in s or s.split("/", 1)[0] == pid})
 
 
+def node_of(idx, key):
+    """The links node of a search candidate `(project, rowid)`, or None."""
+    pid, rid = key
+    sid, kind_meta, doc = idx.stores[pid].db.execute("SELECT source, meta, doc FROM chunks WHERE rowid = ?", (rid,)).fetchone()
+    m = json.loads(kind_meta)
+    src = idx.source(pid, sid)
+    return node_id(src.repo, m.get("kind") or "file", m, doc) if src is not None else None
+
+
 def link_filter(idx, linked_to=None, link_type=None, has_link=None):
     """The `linked_to` / `link_type` / `has_link` request as one document restriction: ({"mode": "in" | "out", "nodes": {id: (kind, repo, ref)}} or None, what
     it resolved to). `linked_to` names documents (a hit `ref`, `scala/bug#123`, `#123`, a sha) and keeps those linked to any of them, through `link_type`
@@ -159,7 +168,7 @@ def _pinned(idx, stores, named, cond, args, limit=30):
 
 
 def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None,
-           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True):
+           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True, link_boost=None):
     """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based).
     `fusion` ({k, top_bonus}) tunes the reciprocal rank fusion. Reranked hits are ordered by a position-aware blend of the fused score
     (scaled so the best is 1) and the reranker's P(relevant): the weight of the fused score is `blend_weight(fused rank)`, 75% for the top three,
@@ -214,6 +223,19 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
         if doc(key) not in seen:
             seen.add(doc(key))
             out.append(key)
+    rel_cfg = idx.cfg.search["related"]
+    boost = rel_cfg["boost"] if link_boost is None else link_boost
+    if boost and idx.links and out:            # an experiment, off by default: a candidate linked to the top few gets up to `boost` x the best score on top
+        seeds = {n: 1 / (i + 1) for i, n in enumerate(node_of(idx, key) for key in out[:rel_cfg["seeds"]]) if n}
+        rel = {e["node"]["id"]: e["score"] for e in idx.links.expand(seeds, rel_cfg["weights"], rel_cfg["hub_degree"], rel_cfg["depth2"])} if seeds else {}
+        if rel:
+            best, top0 = max(rel.values()), fused[out[0]][0]
+            for key in out:
+                n = node_of(idx, key)
+                if n in rel:
+                    fused[key] = (fused[key][0] + boost * top0 * rel[n] / best, fused[key][1])
+                    detail.setdefault(key, {})["link_boost"] = round(boost * top0 * rel[n] / best, 4)
+            out.sort(key=lambda key: fused[key][0], reverse=True)
     top = fused[out[0]][0] if out else 1.0
     pos = {key: i + 1 for i, key in enumerate(out)}
     if explain:
@@ -294,6 +316,7 @@ def hits(idx, q, text_chars=1200, **kw):
         nid = node_id(src.repo, out[-1]["kind"], m, doc)
         if nid:
             nodes.append((len(out) - 1, nid))
+            out[-1]["node"] = nid
     if idx.links and nodes:                                              # what each hit is linked to: counts per relation, the few that matter most, a one-line form
         sums = idx.links.summaries([n for _, n in nodes])
         for i, nid in nodes:
@@ -301,6 +324,45 @@ def hits(idx, q, text_chars=1200, **kw):
                 out[i]["links"] = sums[nid]
                 if sums[nid]["line"]:
                     out[i]["line"] += f" · {sums[nid]['line']}"
+    return out
+
+
+def related(idx, results, k=None, kinds=None, projects=None, open_only=False, weights=None, explain=False):
+    """Documents linked to the top hits, for a group of their own under the results (LINKS.md): the first `related.seeds` hits seed an expansion over the links
+    (`LinkDB.expand`), what the hits already show is left out, `kinds` / `projects` / `open_only` apply, and `related.per_kind` keeps one kind of thing (the
+    commits of a big PR) from filling the group. [{ref, node, kind, project, source, label, color, key, title, url, state, created, text, score, via, line}]."""
+    cfg = idx.cfg.search["related"]
+    k = cfg["limit"] if k is None else k
+    if not (idx.links and cfg["enabled"] and k):
+        return []
+    seeds = {h["node"]: 1 / (i + 1) for i, h in enumerate(results[:cfg["seeds"]]) if h.get("node")}
+    if not seeds:
+        return []
+    found = idx.links.expand(seeds, {**cfg["weights"], **(weights or {})}, cfg["hub_degree"], cfg["depth2"], exclude={h["node"] for h in results if h.get("node")})
+    out, per = [], {}
+    for e in found:
+        n = e["node"]
+        if (projects and n["project"] not in projects) or (open_only and n["state"] in ("closed", "merged")) or n["project"] not in idx.stores or not n["chunk"]:
+            continue
+        row = idx.stores[n["project"]].db.execute("SELECT source, title, text, meta FROM chunks WHERE id = ?", (n["chunk"],)).fetchone()
+        if row is None:
+            continue
+        sid, title, text, meta = row
+        m = json.loads(meta)
+        kind = m.get("kind") or "file"
+        if (kinds and kind not in kinds) or per.get(kind, 0) >= cfg["per_kind"]:
+            continue
+        per[kind] = per.get(kind, 0) + 1
+        src = idx.source(n["project"], sid)
+        item = {"ref": n["get_ref"], "node": n["id"], "kind": kind, "project": n["project"], "source": sid, "key": src.key, "label": src.label, "color": src.color,
+                "title": " ".join(title.split()), "url": n["url"], "state": n["state"], "created": n["created"], "text": text[:300], "score": round(e["score"], 4),
+                "via": [{k2: v for k2, v in x.items() if k2 != "score"} for x in e["via"][:3]]}
+        item["line"] = " · ".join(f"{SAY[INV[x['rel']]]} {x['from']}" + (f" (through {x['through']})" if x.get("through") else "") for x in item["via"][:2])
+        if explain:
+            item["explain"] = e["via"]
+        out.append(item)
+        if len(out) >= k:
+            break
     return out
 
 

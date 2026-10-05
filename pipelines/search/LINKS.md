@@ -1,6 +1,6 @@
 # Links between code, issues and PRs
 
-Design. Steps 1 (extraction from what is indexed), 2 (GitHub-native edges, tag-based `shipped_in`) and 3 (direct use in search) are built: see [Status](#status) below and `links.py` / `refs.py`.
+Design. Steps 1 (extraction from what is indexed), 2 (GitHub-native edges, tag-based `shipped_in`), 3 (direct use in search) and 4 (related results) are built: see [Status](#status) below and `links.py` / `refs.py`.
 
 ## Problem
 
@@ -82,7 +82,7 @@ This ties into the still-open evaluation step 7 in [PLAN.md](PLAN.md). Cheap gro
 1. **DONE** Extraction on what's already indexed: reference parser module (project `tracker` / `legacy_prefixes` config, bare `#N` resolution, SHAs, URLs, `SI-N`), links DB schema, `links.py` phase (stamp, version, `--force`), `mentions` / `shipped_in` / `touches` edges from existing metadata, `defines` edges from code comments. Tests with fixture chunks; a stats command (edges per type, dangling %, top hubs). No gateway change. Stop for review of edge counts and a precision sample.
 2. **DONE** GitHub-native edges: closing references and merge commit sha in the adapter (additive, stored in meta; forward and backfill cursors unaffected), `closes` / `merged_as` extractors, `git describe --contains` for `shipped_in`.
 3. **DONE** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
-4. **TODO** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
+4. **DONE** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
 5. **TODO** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
 6. **Future** `blame` / `log -L` edges for a code hit, on demand; NLI-confirmed `mentions` -> `closes` upgrade for prose like "this supersedes #123"; Discourse and SIP links once those sources exist; a graph tab (cluster the link graph, find orphan issues with no PR and orphan PRs with no issue).
 
@@ -115,6 +115,14 @@ On the real index (21k issues and PRs, 61k commits, 3.7k files; builds in 7 s): 
 - **Surfaces**: MCP `links` (neighbourhood or `story`) and the new `search` parameters, `POST /api/search/links`, the search page (a links row under a hit, "all n links ›" restricts to what is linked to that hit, a "links" selector for has a fix / no fix / shipped).
 - **Changed from the plan**: no ref tokens in the FTS text. `unicode61` already tokenizes `scala/bug#1234` into `scala bug 1234`, and a bare `#1234` cannot be told apart from another repo's without the document's repo, which only the links know; resolving the reference in the query through the links database does both and is rebuildable. `link_type` takes relation names only (an edge type such as `closes` would be ambiguous with the outgoing relation of that name; name both ends for either direction). Links are only ever *added* to what search returns by the pin: related results from the top hits (indirect use) are step 4.
 - Parser: `#N` near a JVM constant pool or bytecode listing (`invokestatic`, `Method arguments:`, `Lscala/...`) is no reference; it had given some old tickets hundreds of false links.
+
+**Step 4 done.**
+
+- `search.related` / `LinkDB.expand`: the first `related.seeds` (5) hits seed an expansion over the links; a document's score is the sum over seeds of each seed's *best* path, seed score (1/rank) x relation weight x confidence, so a PR that both closes and is mentioned by a hit is not twice as related, and two hits pointing at one document add up. The second step (x 0.5) only goes through `closes` / `closed_by` / `merged_as` / `merge_of`: an issue's fixing PR's merge commit, not a mention's mentions.
+- **Hub guard**: a relation of a seed with more than `related.hub_degree` (150) edges is skipped (a file's `touched_by`, a release's `ships`), and so is a target with more than that many edges of any kind (an umbrella issue, a release). Weights per relation as seen from the hit (`related.weights` in `search.json`, defaults: closes / closed_by 1, merged_as / merge_of 0.9, defines / defined_by 0.6, mentions / mentioned_by 0.5, shipped_in 0.3, ships 0.2, touches / touched_by 0.15).
+- **A group of its own**: the response's `related` (MCP `search` too; `related: false` or a number; `limit` 8, at most `per_kind` 4 of one kind, hits already shown left out, `kinds` / `projects` / `open_only` respected, not computed under an explicit `linked_to` / `has_link`). Each item has `ref` (for `get`), `via` (which hit, which relation from that hit's side, confidence, `through` for the second step), a `line`, and with `explain` every path and its score. The page shows it under the hits as "Related".
+- **Boost is an experiment and off**: `related.boost` (or `link_boost` in a request) adds up to boost x the best fused score to a candidate that is linked to the top hits, before the rerank; only hits the query already retrieved move, nothing new enters. Whether to turn it on or expansion before the rerank is for the evaluation (step 5).
+- Seen on the real index: for "Future firstCompletedOf memory leak" the top related item is the PR that fixed the second hit (`scala/scala#10927`, closes `scala/bug#13058`), then the issue that mentions it, and PRs and commits around the third and fourth hits.
 
 ## Open questions
 

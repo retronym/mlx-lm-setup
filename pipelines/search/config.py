@@ -238,10 +238,13 @@ class Config:
         return self.project_dir(pid) / "index.db"
 
 
+# How much a linked document counts when it is pulled in by a top hit (see LINKS.md): per relation as seen from the hit (linkdb.NAMES lists the same names).
+RELATED_WEIGHTS = {"closes": 1.0, "closed_by": 1.0, "merged_as": 0.9, "merge_of": 0.9, "shipped_in": 0.3, "ships": 0.2, "mentions": 0.5, "mentioned_by": 0.5,
+                   "touches": 0.15, "touched_by": 0.15, "defines": 0.6, "defined_by": 0.6}
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}), "related": (lambda v: None, {}),
 }
 
 
@@ -278,6 +281,17 @@ def _search(d, errors):
     if isinstance(d, dict):
         s["links"]["github"] = v.obj(d.get("links", {}).get("github", {}) if isinstance(d.get("links"), dict) else {}, "links.github",
                                      {"enabled": (t_bool, True), "max_prs_per_run": (t_int(0), 3000), "batch": (t_int(1, 100), 50), "closing_first": (t_int(1, 100), 10)})
+    s["related"] = v.obj(d.get("related", {}), "related", {"enabled": (t_bool, True), "seeds": (t_int(1, 50), 5), "limit": (t_int(1, 50), 8), "per_kind": (t_int(1, 50), 4),
+                                                           "depth2": (t_bool, True), "hub_degree": (t_int(1), 150), "boost": (t_num(0), 0.0),
+                                                           "weights": (lambda x: None, {})}) if isinstance(d, dict) else {}
+    if isinstance(d, dict):
+        w = d.get("related", {}).get("weights", {}) if isinstance(d.get("related"), dict) else {}
+        s["related"]["weights"] = {**RELATED_WEIGHTS, **(w if isinstance(w, dict) else {})}
+        for k, x in (w.items() if isinstance(w, dict) else []):
+            if k not in RELATED_WEIGHTS:
+                v.err(f"related.weights.{k}", f"unknown relation (have: {', '.join(RELATED_WEIGHTS)})")
+            elif isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
+                v.err(f"related.weights.{k}", "expected a number >= 0")
     r = d.get("refresh", {}) if isinstance(d, dict) else {}
     s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
                                         "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})

@@ -39,6 +39,7 @@
   .whom { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
   .whom a { color: var(--ink); text-decoration: none; font-weight: 600; } .whom a:hover { color: var(--accent); text-decoration: underline; }
   button.lk { font: inherit; font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; } button.lk:hover { color: var(--accent); border-color: var(--accent); }
+  .related { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; } .hit.rel { padding: 6px 12px; opacity: .92; }
   .whom time { border-bottom: 1px dotted var(--line); cursor: help; } .whom .sep::before { content: "·"; margin-right: 6px; }
   .url { color: var(--muted); font-size: 12px; word-break: break-all; }
   pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
@@ -299,6 +300,30 @@ function linksRow(h) {
   row.append(more);
   return row;
 }
+const INV = { closes: "closed by", closed_by: "closes", merged_as: "merge of", merge_of: "merged as", mentions: "mentioned by", mentioned_by: "mentions", shipped_in: "ships",
+              ships: "shipped in", touches: "touched by", touched_by: "touches", defines: "referenced by code", defined_by: "references" };
+function relatedBox(d) {                                                          // documents linked to the top hits, kept apart from what the query matched
+  if (!d.related?.length) return null;
+  const at = Object.fromEntries(d.results.map((h, i) => [h.node, i + 1]));
+  const box = el("div", "related"), head = el("div", "meta", `Related: linked to the top hits, not matched by the query (${d.related.length})`);
+  box.append(head);
+  d.related.forEach(r => {
+    const item = el("div", "hit rel"); item.style.setProperty("--c", r.color);
+    const top = el("div", "top");
+    top.append(el("span", "badge", r.label));
+    if (r.state === "closed" || r.state === "merged") top.append(el("span", "badge closed", r.state));
+    top.append(ghLink("title", r.title, r.url));
+    const via = el("div", "whom");
+    r.via.slice(0, 2).forEach((v, i) => {
+      const span = el("span", i ? "sep" : ""), from = at[v.from] ? `hit ${at[v.from]}` : v.from;
+      span.textContent = `${INV[v.rel] || v.rel} ${from}${v.through ? " (through " + v.through + ")" : ""}`;
+      span.title = `confidence ${v.conf}`; via.append(span);
+    });
+    item.append(top, via);
+    box.append(item);
+  });
+  return box;
+}
 function render(d) {
   $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
     const box = el("div", "hit"); box.style.setProperty("--c", h.color);
@@ -315,7 +340,7 @@ function render(d) {
     const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
     box.append(top, ...[whom(h), linksRow(h)].filter(Boolean), el("div", "url", h.url), pre);
     return box;
-  }) : [el("div", "", "No results.")]));
+  }) : [el("div", "", "No results.")]), ...[relatedBox(d)].filter(Boolean));
   $("meta").textContent = [`${d.results.length} results`, d.universe, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
                            d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null, d.missing?.length ? `not indexed yet: ${d.missing.join(", ")}` : null].filter(Boolean).join(" · ");
 }

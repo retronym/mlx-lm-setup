@@ -67,6 +67,89 @@ class LinkDBTests(Base):
         self.assertEqual(next(x["via"]["rel"] for x in s if x["node"]["id"] == "o/r#2"), "closed_by")
 
 
+class ExpandTests(Base):
+    W = {r: 1.0 for r in NAMES}
+
+    def test_scores_are_seed_x_weight_x_confidence_summed_over_seeds(self):
+        e = {x["node"]["id"]: x for x in self.idx.links.expand({"o/r#1": 1.0}, self.W)}
+        self.assertEqual(e["o/r#2"]["score"], 0.85)                                         # closed_by (0.85); its `mentions` path (0.7) does not add: a seed counts once, by its best path
+        self.assertEqual(len(e["o/r#2"]["via"]), 2)
+        self.assertEqual(e["o/r#2"]["via"][0]["from"], "o/r#1"); self.assertEqual(e["o/r#2"]["via"][0]["rel"], "closed_by")
+        e2 = {x["node"]["id"]: x for x in self.idx.links.expand({"o/r#1": 1.0, "o/r#3": 0.5}, self.W)}
+        self.assertGreater(e2["o/r#2"]["score"], 0.85)                                      # two seeds reach it: the contributions add up
+        self.assertEqual({v["from"] for v in e2["o/r#2"]["via"]}, {"o/r#1", "o/r#3"})
+        self.assertNotIn("o/r#1", e2); self.assertNotIn("o/r#3", e2)                        # a seed is never its own relative
+        self.assertEqual([x["node"]["id"] for x in self.idx.links.expand({"o/r#1": 1.0}, self.W, exclude={"o/r#2"}) if x["node"]["id"] == "o/r#2"], [])
+
+    def test_weights_choose_what_counts(self):
+        only_closes = {**{r: 0.0 for r in NAMES}, "closed_by": 1.0}
+        e = {x["node"]["id"] for x in self.idx.links.expand({"o/r#1": 1.0}, only_closes)}
+        self.assertEqual(e, {"o/r#2", f"commit:o/r@{SHA}", f"commit:o/r@{SHA2}"})           # ...and, a step further, what closes the fixing PR (SHA2 "Fixes old/name#2")
+
+    def test_hubs_are_not_followed_or_reached(self):
+        self.assertEqual(self.idx.links.expand({"o/r#1": 1.0}, self.W, hub_degree=1), [])  # #1 has two `closed_by`, more than one: skipped
+        e = {x["node"]["id"] for x in self.idx.links.expand({"o/r#2": 1.0}, self.W, hub_degree=2)}
+        self.assertNotIn("release:o/r@v1.0", e)                                             # the release has three edges, more than two: not reached
+
+    def test_second_step_only_through_closing_and_merging(self):
+        e = {x["node"]["id"]: x for x in self.idx.links.expand({f"commit:o/r@{SHA}": 1.0}, {**self.W, "touches": 0.0})}
+        self.assertEqual(e["o/r#1"]["via"][0]["depth"], 1)                                  # the issue the commit closes
+        self.assertNotIn("o/r#3", e)                                                        # o/r#3 mentions #1, but a mention does not continue past the first step
+        off = {x["node"]["id"] for x in self.idx.links.expand({f"commit:o/r@{SHA}": 1.0}, self.W, depth2=False)}
+        self.assertTrue(off <= {x["node"]["id"] for x in self.idx.links.expand({f"commit:o/r@{SHA}": 1.0}, self.W)})
+
+
+class RelatedTests(Base):
+    def test_related_are_linked_to_the_top_hits_and_not_among_them(self):
+        rows = self.hits("crash fixes", kinds=["issue"])
+        rel = search.related(self.idx, rows)
+        self.assertTrue(rel)
+        shown = {h["node"] for h in rows}
+        self.assertFalse(any(r["node"] in shown for r in rel))
+        self.assertTrue(all(r["via"] and r["via"][0]["from"] in shown for r in rel))
+        self.assertEqual([r["score"] for r in rel], sorted((r["score"] for r in rel), reverse=True))
+        self.assertTrue(all(r["ref"] and r["line"] for r in rel))
+
+    def test_filters_quota_and_switches(self):
+        rows = search.hits(self.idx, "crash", k=1, mode="bm25")                              # one hit: everything linked to it is related
+        everything = search.related(self.idx, rows, k=20)
+        self.assertEqual({r["kind"] for r in everything} >= {"issue", "commit"} or {r["kind"] for r in everything} >= {"pr", "commit"}, True)
+        self.assertEqual({r["kind"] for r in search.related(self.idx, rows, kinds=["commit"])}, {"commit"})
+        self.assertTrue(all(r["state"] not in ("closed", "merged") for r in search.related(self.idx, rows, open_only=True)))
+        self.assertEqual(len(search.related(self.idx, rows, k=1)), 1)
+        self.assertEqual(search.related(self.idx, rows, k=0), [])
+        self.cfg.search["related"]["per_kind"] = 1
+        kinds = [r["kind"] for r in search.related(self.idx, rows, k=20)]
+        self.assertEqual(len(kinds), len(set(kinds)))                                       # one of each kind at most
+        self.cfg.search["related"]["enabled"] = False
+        self.assertEqual(search.related(self.idx, rows), [])
+
+    def test_explain_gives_every_path(self):
+        rows = search.hits(self.idx, "crash", k=1, mode="bm25")
+        rel = search.related(self.idx, rows, explain=True)
+        self.assertTrue(all(r["explain"] and all("score" in x for x in r["explain"]) for r in rel))
+
+    def test_no_links_database_no_related(self):
+        os.remove(self.root / "data" / "links" / "u.db")
+        idx = search.Index(self.cfg)
+        try:
+            self.assertEqual(search.related(idx, search.hits(idx, "crash", k=3, mode="bm25")), [])
+        finally:
+            idx.close()
+
+
+class BoostTests(Base):
+    def test_boost_is_off_by_default_and_lifts_candidates_linked_to_the_top(self):
+        base = search.hits(self.idx, "crash fixes notes", k=10, mode="bm25", explain=True)
+        self.assertFalse(any("link_boost" in h for h in base))
+        boosted = search.hits(self.idx, "crash fixes notes", k=10, mode="bm25", link_boost=2.0)
+        got = [h for h in boosted if "link_boost" in h]
+        self.assertTrue(got and all(h["link_boost"] > 0 for h in got))
+        self.assertEqual({h["doc"] for h in base}, {h["doc"] for h in boosted})              # nothing new enters: only the order moves
+        self.cfg.search["related"]["boost"] = 0.5
+        self.assertTrue(any("link_boost" in h for h in search.hits(self.idx, "crash fixes notes", k=10, mode="bm25")))   # the configured default applies when not asked
+
+
 class SearchWithLinks(Base):
     def test_hits_carry_links_and_the_line_says_them(self):
         h = next(h for h in self.hits() if h["doc"] == "issue:1")
