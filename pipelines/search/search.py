@@ -179,6 +179,19 @@ def _who_and_when(db, sid, title, m):
     return {"kind": kind, "author": author, "author_name": name, "created": created, "updated": updated, "thread": thread}
 
 
+def _day(t):
+    return (t or "")[:10]
+
+
+def summary_line(h):
+    """One line a client can show as is: [state] kind title, who and when, source, link."""
+    kind = h["kind"] + (f" on {h['thread']['kind']} #{h['thread']['number']}" if h.get("thread") else "")
+    who = h["author"] and f"@{h['author']}" or h.get("author_name")
+    when = _day(h["created"]) + (f" (updated {_day(h['updated'])})" if h["updated"] and _day(h["updated"]) != _day(h["created"]) else "") if h["created"] else _day(h["updated"])
+    flag = f"[{h['state']}] " if h["state"] in ("open", "closed", "merged") else ""
+    return f"{flag}{h['title']} · {kind}" + "".join(f" · {x}" for x in (who, when, h["key"]) if x) + f" · {h['url']}"
+
+
 def hits(idx, q, text_chars=1200, **kw):
     """`search` as plain dicts: ref (`project/chunk id`, what the `get` tool takes), project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
     created and updated times, the thread of a comment), and the ranks and scores."""
@@ -193,6 +206,7 @@ def hits(idx, q, text_chars=1200, **kw):
         out.append({"ref": f"{pid}/{cid}", "project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
                     "doc": doc, "state": state, "labels": m.get("labels"), "text": text[:text_chars], "truncated": len(text) > text_chars,
                     **_who_and_when(db, sid, t, m), **detail.get((pid, rid), {})})
+        out[-1]["line"] = summary_line(out[-1])
     return out
 
 

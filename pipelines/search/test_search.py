@@ -69,7 +69,10 @@ class SearchTests(unittest.TestCase):
         h = search.hits(self.idx, "needle", k=3, embedder=FakeEmbedder())[0]
         self.assertEqual((h["project"], h["source"], h["label"]), ("big", "code", "code"))
         self.assertIn("bm25", h); self.assertIn("vec", h)
-        self.assertEqual(h["ref"], "big/code:n")                                                    # project/chunk id: what the get tool takes
+        self.assertEqual(h["ref"], "big/code:n")
+        self.assertEqual(h["line"], "n.scala big.N · file · big/code · https://x/n")                  # state-less, authorless file chunk
+        iss = search.hits(self.idx, "still open", k=3, sources=["issues"], embedder=FakeEmbedder())[0]
+        self.assertTrue(iss["line"].startswith("[open] o/r#2 other · issue · big/issues"), iss["line"])                                                    # project/chunk id: what the get tool takes
 
     def test_filters(self):
         self.assertEqual({k for k in self.keys(k=10, projects=["small"])}, {"small/code"})

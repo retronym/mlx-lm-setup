@@ -285,7 +285,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
             raise fail(e) from None
 
     @mcp.tool()
-    async def search(query: str, k: int = 8, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
+    async def search(query: str, k: int = 20, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
                      kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False) -> dict:
         """Search the local index of a universe of projects (default: Scala / Zinc: Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, spec,
         issues with comments, pull requests with their comments and review comments, release notes. Natural-language and identifier queries
@@ -295,7 +295,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `search_universes` lists what exists and which kinds each source has. `mode` "hybrid"
         (default: BM25 + embeddings, fused), "bm25" or "vec"; `rerank` re-scores the top 30 with a cross-encoder (about 1 s more, usually better for
         "where is X" questions; the final order blends the fused retrieval rank with the reranker, 75/25 for the top three, so a strong keyword or vector hit is not lost). `explain` adds each hit's `explain` {fused_rank, rrf, top_bonus, retrieval, weight, final}. `open_only` hides closed issues and unmerged-closed PRs. One hit per document (the best chunk of a file, page,
-        issue or PR). Each hit has a `ref`: pass it to `get` for the whole thread or file. Returns `results` [{ref, project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
+        issue or PR). Each hit has a `line`, a ready-made summary (state, kind, author, dates, source, link): show it to the user instead of just the title. Each hit has a `ref`: pass it to `get` for the whole thread or file. Returns `results` [{ref, project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
         projects not indexed yet. Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
