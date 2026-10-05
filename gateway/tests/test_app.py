@@ -193,7 +193,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         src = lambda sid, **kw: {"id": sid, "type": "git", "label": f"label {sid}", "color": "#112233", "priority": 2, "repo": "o/r", "ref": "main", "paths": ["."],
                                  "chunkers": {".scala": "scala"}, **kw}
         (cfgdir / "projects" / "p.json").write_text(json.dumps({"id": "p", "title": "Proj", "sources": [
-            src("code"), {"id": "issues", "type": "github", "label": "label issues", "color": "#112233", "priority": 2, "repo": "o/r", "include": ["issues"]}, src("later")]}))
+            src("code"), {"id": "issues", "type": "github", "label": "label issues", "color": "#112233", "priority": 2, "repo": "o/r", "include": ["issues"]}, src("later"),
+            {"id": "commits", "type": "git_log", "label": "label commits", "color": "#112233", "priority": 2, "repo": "o/r", "ref": "main", "since": "2020-01-01T00:00:00Z"}]}))
         (cfgdir / "projects" / "q.json").write_text(json.dumps({"id": "q", "title": "Not yet", "sources": [src("code")]}))
         (cfgdir / "universes" / "u.json").write_text(json.dumps({"id": "u", "title": "Uni", "projects": ["p", "q"], "default": True}))
         db = root / "data" / "projects" / "p" / "index.db"
@@ -203,7 +204,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
                              CREATE TABLE vec(rowid INTEGER PRIMARY KEY, model TEXT, hash TEXT); CREATE TABLE state(source TEXT, k TEXT, v TEXT);
                              INSERT INTO chunks VALUES (1,'code','h1',5),(2,'code','h2',6),(3,'issues','h3',7);
                              INSERT INTO vec VALUES (1,'Qwen/Qwen3-Embedding-0.6B','h1'),(2,'Qwen/Qwen3-Embedding-0.6B','stale');
-                             INSERT INTO state VALUES ('issues','since_issues','2026-01-01T00:00:00Z');""")
+                             INSERT INTO state VALUES ('issues','since_issues','2026-01-01T00:00:00Z');
+                             INSERT INTO state VALUES ('commits','top_date','2026-01-01T00:00:00Z'),('commits','back_date','2023-01-01T00:00:00Z'),('commits','head','abcdef0123456789');""")
         con.commit(); con.close()
         cat = parse({"backends": {"s": {"adapter": "search", "python": "py", "index_dir": str(Path(__file__).parents[2] / "pipelines" / "search"), "config_dir": str(cfgdir),
                                         "est_mem_gb": 1}}}, Path("/base"))
@@ -221,6 +223,9 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((by["code"]["chunks"], by["code"]["embedded"], by["code"]["color"], by["code"]["label"]), (2, 1, "#112233", "label code"))   # a stale vector does not count
         self.assertEqual((by["issues"]["chunks"], by["issues"]["position"]), (1, "2026-01-01T00:00:00Z"))
         self.assertEqual(by["later"]["chunks"], 0)                                                         # configured but empty
+        c = by["commits"]                                                                                  # the commit backfill: (top - back) / (top - horizon) = 3 of 6 years
+        self.assertEqual((c["sync"]["streams"][0]["name"], c["sync"]["streams"][0]["mode"], c["position"]), ("commits", "back", "abcdef0123"))
+        self.assertAlmostEqual(c["sync"]["frac"], 0.5, delta=0.02)
         self.assertEqual(d["universes"][0]["projects"][0]["sources"][0]["key"], "p/code")
         with self.assertRaises(ApiError):
             search_stats(cat, universe="nope")

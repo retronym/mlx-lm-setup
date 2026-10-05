@@ -18,7 +18,8 @@ from pathlib import Path
 HERE = Path(__file__).parent
 CONFIG_DIR = HERE / "config"
 CHUNKERS = ("scala", "java", "markdown", "plain")
-SOURCE_TYPES = ("git", "github", "github_releases")
+SOURCE_TYPES = ("git", "git_log", "github", "github_releases")
+DEFAULT_SKIP_AUTHORS = ["scala-steward", "dependabot[bot]", "github-actions[bot]", "renovate[bot]"]
 GITHUB_INCLUDE = ("issues", "prs", "comments", "reviews")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -150,6 +151,9 @@ class Source:
     since: str | None = None
     # github_releases
     tag_messages: bool = False
+    # git_log
+    merges: bool = False
+    skip_authors: tuple = ()
 
     @property
     def key(self):
@@ -263,7 +267,9 @@ def _source(project, d, v, i, default_since):
     extra = {"git": {"ref": (t_str, REQUIRED), "paths": (t_list(t_str, 1), REQUIRED), "exclude": (t_list(t_str), []),
                      "chunkers": (t_map(lambda k: None if isinstance(k, str) and k.startswith(".") else "suffix keys start with a dot", t_in(*CHUNKERS)), REQUIRED)},
              "github": {"include": (t_list(t_str, 1, GITHUB_INCLUDE), REQUIRED), "since": (t_re(DATE_RE, "an ISO timestamp like 2020-01-01T00:00:00Z"), default_since)},
-             "github_releases": {"tag_messages": (t_bool, False)}}.get(typ, {})
+             "github_releases": {"tag_messages": (t_bool, False)},
+             "git_log": {"ref": (t_str, REQUIRED), "paths": (t_list(t_str), []), "since": (t_re(DATE_RE, "an ISO timestamp like 2018-01-01T00:00:00Z"), default_since),
+                         "merges": (t_bool, False), "skip_authors": (t_list(t_str), DEFAULT_SKIP_AUTHORS)}}.get(typ, {})
     s = v.obj(d, path, {**base, **extra})
     if typ == "github" and isinstance(d.get("include"), list) and {"comments"} & set(d["include"]) and not {"issues", "prs"} & set(d["include"]):
         v.err(f"{path}.include", "comments need issues and/or prs (they are filtered by what they belong to)")
@@ -272,7 +278,8 @@ def _source(project, d, v, i, default_since):
     return Source(project=project, id=s["id"], type=typ, label=s["label"] or s["id"], color=s["color"], priority=s["priority"], enabled=s["enabled"],
                   min_interval_hours=s["min_interval_hours"], max_items_per_run=s["max_items_per_run"], repo=s["repo"], ref=s.get("ref"),
                   paths=tuple(s.get("paths") or ()), exclude=tuple(s.get("exclude") or ()), chunkers=dict(s.get("chunkers") or {}),
-                  include=tuple(s.get("include") or ()), since=s.get("since"), tag_messages=bool(s.get("tag_messages")))
+                  include=tuple(s.get("include") or ()), since=s.get("since"), tag_messages=bool(s.get("tag_messages")),
+                  merges=bool(s.get("merges")), skip_authors=tuple(s.get("skip_authors") or ()))
 
 
 def _check_overlaps(v, srcs):
@@ -353,7 +360,7 @@ def _tree(cfg, only=None):
             print(f"  project {p.id}  \"{p.title}\"   db: {cfg.project_db(p.id).relative_to(HERE)}")
             for s in sorted(p.sources, key=lambda s: (s.priority, s.id)):
                 what = {"git": f"{s.repo}@{s.ref} {','.join(s.paths)} [{','.join(sorted(set(s.chunkers.values())))}]",
-                        "github": f"{s.repo} {'+'.join(s.include)} since {(s.since or '')[:10]}", "github_releases": f"{s.repo} releases{' + tag messages' if s.tag_messages else ''}"}[s.type]
+                        "github": f"{s.repo} {'+'.join(s.include)} since {(s.since or '')[:10]}", "git_log": f"{s.repo}@{s.ref} commit messages since {(s.since or '')[:10]}{' ' + ','.join(s.paths) if s.paths else ''}", "github_releases": f"{s.repo} releases{' + tag messages' if s.tag_messages else ''}"}[s.type]
                 caps = ", ".join(x for x in (f"max {s.max_items_per_run}/run" if s.max_items_per_run else "", f"every >= {s.min_interval_hours:g} h" if s.min_interval_hours else "",
                                              "DISABLED" if not s.enabled else "") if x)
                 print(f"    p{s.priority} {s.id:9} {s.type:15} {what}{'   (' + caps + ')' if caps else ''}")

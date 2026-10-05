@@ -16,6 +16,8 @@
      "max_items_per_run": 2000, "min_interval_hours": 24},
     {"id": "prs", "type": "github", "label": "scala/scala3 PRs", "color": "#0284c7", "priority": 8,
      "repo": "scala/scala3", "include": ["prs", "comments", "reviews"], "since": "2022-01-01T00:00:00Z",
-     "max_items_per_run": 2000, "min_interval_hours": 24}
+     "max_items_per_run": 2000, "min_interval_hours": 24},
+    {"id": "commits", "type": "git_log", "label": "scala/scala3 commits", "color": "#c2410c", "priority": 6,
+     "repo": "scala/scala3", "ref": "main", "since": "2018-01-01T00:00:00Z", "max_items_per_run": 4000}
   ]
 }

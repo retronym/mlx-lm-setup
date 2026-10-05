@@ -424,7 +424,7 @@ Retrieval over the Scala compiler, docs and issue history is the first thing a l
 
 ### Surfaces
 
-`/search` page, MCP `search` (`query`, `k`, `source`, `mode`, `rerank`, `open_only`, `text_chars`), `POST /api/search`, OpenAI-compatible `POST /v1/embeddings`, `POST /api/rerank`, `GET /api/search/status`, and a stdlib progress dashboard on :8767 (`pipelines/search/dashboard.py`). Details and measured timings: [pipelines/search/README.md](pipelines/search/README.md).
+`/search` page, MCP `search` (`query`, `k`, `source`, `mode`, `rerank`, `open_only`, `text_chars`), `POST /api/search`, OpenAI-compatible `POST /v1/embeddings`, `POST /api/rerank`, `GET /api/search/status`, and an Index status tab (later also a Home strip) showing indexing progress. Details and measured timings: [pipelines/search/README.md](pipelines/search/README.md).
 
 ### Findings
 

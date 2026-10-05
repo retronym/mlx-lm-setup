@@ -40,9 +40,14 @@ def facts(cfg, universe_id, since_ts):
             releases = con.execute("""SELECT json_extract(meta, '$.tag'), title, url, json_extract(meta, '$.published') FROM chunks
                                       WHERE json_extract(meta, '$.kind') = 'release' AND id LIKE '%:header' AND json_extract(meta, '$.published') >= ? ORDER BY 4 DESC""",
                                    (since[:10],)).fetchall()
+            commits = con.execute("""SELECT title FROM chunks WHERE json_extract(meta, '$.kind') = 'commit' AND id NOT LIKE '%~%' AND json_extract(meta, '$.updated') >= ?
+                                     ORDER BY json_extract(meta, '$.updated') DESC""", (since,)).fetchall()
         finally:
             con.close()
         lines = [f"release {t}: {title} (published {when}) {url}" for t, title, url, when in releases[:5]]
+        if commits:
+            subjects = "; ".join(c[0].split(" ", 3)[3][:80] for c in commits[:4] if len(c[0].split(" ", 3)) > 3)
+            lines.append(f"{len(commits)} commit{'s' if len(commits) != 1 else ''} landed on the main branch" + (f"; latest: {subjects}" if subjects else ""))
         merged = sum(1 for i in items if i[2] == "merged")
         closed = sum(1 for i in items if i[2] == "closed")
         if items:

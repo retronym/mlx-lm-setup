@@ -12,6 +12,8 @@
     {"id": "prs", "type": "github", "label": "zinc PRs", "color": "#34d399", "priority": 4,
      "repo": "sbt/zinc", "include": ["prs", "comments", "reviews"]},
     {"id": "releases", "type": "github_releases", "label": "zinc releases", "color": "#ca8a04", "priority": 2,
-     "repo": "sbt/zinc", "tag_messages": true}
+     "repo": "sbt/zinc", "tag_messages": true},
+    {"id": "commits", "type": "git_log", "label": "zinc commits", "color": "#047857", "priority": 3,
+     "repo": "sbt/zinc", "ref": "develop"}
   ]
 }

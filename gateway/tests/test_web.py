@@ -148,8 +148,13 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((r.headers["x-frame-options"], r.headers["x-content-type-options"]), ("DENY", "nosniff"))
             self.assertEqual(r.headers["referrer-policy"], "no-referrer")
 
+    async def test_home_shows_the_search_index_strip_from_the_status_endpoint(self):
+        html = (WEB / "home.html").read_text()
+        self.assertIn('fetch("/api/search/status")', html)
+        self.assertIn('id="idxstrip"', html)
+
     async def test_pages_load_nothing_from_other_origins(self):
-        for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html"):
+        for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html", "home.html"):
             html = (WEB / name).read_text()
             self.assertEqual(re.findall(r"""(?:src|href)\s*=\s*["']https?://""", html), [], name)     # no remote scripts/styles
             self.assertNotRegex(html, r"""url\(\s*["']?https?://""", name)

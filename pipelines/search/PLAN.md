@@ -11,6 +11,8 @@
 - Local models throughout: embeddings through the gateway, reranker, rule-then-`decide` noise filter, thread summaries and the refresh digest via `iterate` with an NLI gate, LLM-written evaluation questions. Chunking, dedup and parsing stay plain code. LLM steps run before embedding so the big LLM and the embedder do not evict each other.
 - Refresh nightly at 03:00 (launchd).
 
+- Commit messages (`git_log`) are a source type: the "why" behind the code, newest-first under the same caps and priorities (scala2 p5, scala3 p6 from 2018, zinc p3, scala-asm p4).
+
 ## Steps
 
 1. **DONE** Config loader, schemas, `check`, shipped config for scala2, scala3, scala-dev, zinc, scala-asm and the `scala-zinc` universe.
@@ -18,7 +20,7 @@
    Interim, to be replaced in step 3: a repo with both an issues and a PRs source has its comment stream walked twice; `max_items_per_run` walks oldest-first (the two-cursor newest-first backfill comes in step 3).
 3. **DONE** (backfill running / see README) Java chunker (`test_chunkers`), `github_releases` with tag messages and `#refs` metadata (`test_releases`), `GhRepo`: one pass per repo for all its sources, newest-first windowed backfill under per-run caps, forward cursor, widening re-opens, legacy cursors upgraded (`test_github`), config rejects overlapping sources. Pulled forward from step 5 because the backfills needed watching: `run.json` (what sync/embed are doing) and the **Index status** tab on `/search` (per-source synced / embedded bars, priority, current source, rate and ETA). Data placement for worktrees: per-checkout `data/`, `SEARCH_DATA_DIR`, `promote_data.sh`, `draft.sh`.
 4. **TODO** Gateway: universe-aware backend, `universe`/`projects` parameters, MCP, page selectors, labels and colours from config. Stop for review.
-5. **TODO (mostly done early)** Remaining: a compact index strip on the Home panel, the last refresh's digest in the tab, remove the standalone `dashboard.py` / `dashboard.html`.
+5. **DONE** The Index status tab (pulled forward into step 3, digest and refresh phases added in step 6), a one-line index strip on the Home page's Search panel, and the standalone `dashboard.py` / `dashboard.html` removed.
 6. **DONE** `refresh.py`: phases (sync, reconcile, enrich, digest, embed, verify), priority tiers, time budget, lock, `--dry-run`, history; embedding through the gateway (`embedder.via`), thread summaries and the digest overview written by the local LLM and checked by the NLI model (unsupported lines dropped, unfaithful summaries not indexed), verify with canary queries, digest and refresh phases on the Index status tab, nightly launchd job (`service/search-refresh.sh`). Tests: `test_refresh` (fake gateway, 21 tests incl. a whole refresh). Verified live against the real models on this machine: summaries (2 of 3 passed the NLI check, 1 refused), digest, embedding through the draft gateway, 9 of 9 canaries.
    Learned: the NLI model is weak on bullet lists of numbers and identifiers (it rejected valid bullets), so digest bullets are rendered from data and only the overview is model-written.
 7. **TODO** Evaluation set; measure rerank, result diversity (for "where is X" queries issue threads can crowd out the code: the implicit-shadowing canary needed k=10), pre-release duplicates in release notes, and the LLM steps (thread summaries, noise filter); decide their defaults on numbers.

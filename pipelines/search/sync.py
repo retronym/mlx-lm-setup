@@ -13,6 +13,7 @@ from embed import targets
 from store import Store
 from sources import ghissues
 from sources.ghreleases import GhReleases
+from sources.gitlog import GitLog
 from sources.gitsrc import GitSource
 
 
@@ -61,6 +62,10 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)
                 GitSource(s, d, max_chars).sync(st, limit=limit, log=run.log)
+            elif s.type == "git_log":
+                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
+                fetched.add(s.repo)
+                GitLog(s, d, max_chars).sync(st, limit=limit, log=run.log)
             elif s.type == "github_releases":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
                 fetched.add(s.repo) if d else None
