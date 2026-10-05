@@ -180,17 +180,17 @@ def _who_and_when(db, sid, title, m):
 
 
 def hits(idx, q, text_chars=1200, **kw):
-    """`search` as plain dicts: project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
+    """`search` as plain dicts: ref (`project/chunk id`, what the `get` tool takes), project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
     created and updated times, the thread of a comment), and the ranks and scores."""
     keys, detail = search(idx, q, **kw)
     out = []
     for pid, rid in keys:
         db = idx.stores[pid].db
-        t, text, url, meta, sid, doc, state = db.execute(
-            f"SELECT title, text, url, meta, source, doc, {STATE_SQL} FROM chunks c WHERE rowid=?", (rid,)).fetchone()
+        t, text, url, meta, sid, doc, state, cid = db.execute(
+            f"SELECT title, text, url, meta, source, doc, {STATE_SQL}, id FROM chunks c WHERE rowid=?", (rid,)).fetchone()
         m = json.loads(meta)
         src = idx.source(pid, sid)
-        out.append({"project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
+        out.append({"ref": f"{pid}/{cid}", "project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
                     "doc": doc, "state": state, "labels": m.get("labels"), "text": text[:text_chars], "truncated": len(text) > text_chars,
                     **_who_and_when(db, sid, t, m), **detail.get((pid, rid), {})})
     return out

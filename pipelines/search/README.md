@@ -71,6 +71,18 @@ For clusters, `trend` is the share of a cluster's items created in the last two 
 
 **Outliers** lists the issues and PRs that are far from everything else, lowest score first, ordered by `iso` (most isolated) or `ctr` (furthest from its own cluster; `by=iso|ctr`), with the same per-item filters as clusters. Dependency-bump PRs and release procedures are hidden by default (`templated=1` keeps them): they are unlike anything else and uninteresting. What it finds in practice: off-topic questions that are not compiler bugs (already closed), leftovers from the old Trac tracker, and, among the open items, real but unusual tickets and design questions. A database written before the scores existed is recomputed on the next run (`version` in its `meta` table).
 
+## How hits are ranked, and why
+
+BM25 and vector lists (each merged across projects by score) are fused by **reciprocal rank fusion** with a **top-rank bonus**: being first in any list adds 0.05, second or third 0.02 (`fusion.top_bonus`; a first place is only worth 0.016 by RRF alone), so an exact keyword hit such as `trait extraHash` is not diluted by fuzzy vector neighbours. When reranking, the order is a **position-aware blend**, not the reranker alone: `final = w * fused + (1 - w) * rerank`, with the fused score scaled so the best is 1 and `w` by fused rank, 0.75 for ranks 1-3, 0.6 for 4-10, 0.4 beyond (`reranker.blend`: `[[rank limit, w], ...]`; `null` = reranker alone). The 0.6B reranker's P(relevant) saturates near 1 for anything on topic, so on its own it reshuffles good hits (it demoted `EtaExpansion.expand` out of the top 5); blended, the retrieval order can only be overturned by a large reranker margin, and a deep hit with a clear reranker win still rises.
+
+`--explain` (CLI), `"explain": true` (`POST /api/search`, MCP `search`; the page always asks and shows it as a tooltip on the scores) adds to each hit `explain` = `{fused_rank, rrf, top_bonus, retrieval, weight, final}`.
+
+**Caches** (`search.json` `cache`): the search backend memoises reranker scores in `data/cache.db`, keyed by model, instruction, query and the document text (so an edited chunk misses by itself; least recently used entries are dropped beyond `max_entries`), and query embeddings in a small in-memory LRU. Repeated queries, the canaries and a page reload cost no model call; the response's `cache` says how many documents were served from it.
+
+## Reading what a hit belongs to (`get`)
+
+Every hit has a `ref` (`project/chunk id`). MCP `get` / `POST /api/search/get` take up to 20 refs and return the document: `scope` `doc` (default) is all chunks of the hit's document in reading order (an issue or PR with every comment and review, a doc file by section, a commit), `chunk` just the hit, `file` the whole source file at the indexed commit from the managed clone (`lines` `"120-180"` for a range). Text is paged by `max_chars` / `offset` (`truncated` and `next_offset` say there is more). It reads the SQLite files and the clone, so it starts no model.
+
 ## Reranking (`--rerank`)
 
 `rerank.py` scores the top 30 documents (after fusion and one-hit-per-document) with Qwen3-Reranker-0.6B, a yes/no relevance judgement per (query, text) pair. Six hand-picked queries, judged by eye: it clearly helps on "where is X implemented" (for the invokedynamic query the top 5 changed from two issues and incidental hits to `Delambdafy.mkLambdaMetaFactoryCall`, `genInvokeDynamicLambda` and `addLambdaDeserialize`) and keeps code, docs and issues together in one list for concept queries (implicit shadowing: issue, issue, Scala 3 doc, `Implicits.LocalShadower`). On duplicate-issue queries it only reshuffles an already good top 3. It can also demote a good hit (`EtaExpansion.expand` fell out of the top 5 for the eta-expansion query), so a real evaluation set is the next step before making it the default.
@@ -82,7 +94,8 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 | Surface | What |
 |---|---|
 | `/search` | page: sample questions, source / kind / method / rerank / open-issues-only controls, per-hit links, keyword and vector ranks, rerank scores |
-| MCP `search` | `query`, `k`, `universe`, `projects`, `sources`, `kinds`, `mode`, `rerank`, `open_only`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
+| MCP `get`, `POST /api/search/get` | the document behind a hit's `ref`: thread, file or lines of it (below) |
+| MCP `search` | `query`, `k`, `universe`, `projects`, `sources`, `kinds`, `mode`, `rerank`, `open_only`, `explain`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
 | `POST /api/search` | the same as JSON |
 | MCP `search_universes` | universes, their projects and sources, and the kinds of hit each source holds |
 | `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |

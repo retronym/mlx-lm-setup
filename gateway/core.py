@@ -333,6 +333,18 @@ def search_clusters(catalog: Catalog, model: str | None = None, universe: str | 
     return _neighbour_view("clusters", catalog, model, universe, **filters)
 
 
+def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw) -> dict:
+    """Whole documents behind search hits (`ref`s): an issue with its comments, a file, a commit. Reads the index files and the managed clones, starts nothing."""
+    from . import searchget, searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        return {"backend": spec.name, "results": [{"ref": r, "found": False, "error": "no search index"} for r in refs]}
+    try:
+        return {"backend": spec.name, **searchget.get(cfg, refs, repos=searchinfo._module(spec.options["index_dir"], "repos"), **kw)}
+    except ValueError as e:
+        raise ApiError(400, "invalid_arguments", str(e)) from None
+
+
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:
     from . import searchinfo
     spec, cfg = _search_config(catalog, model)

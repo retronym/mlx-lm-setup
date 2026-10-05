@@ -177,6 +177,13 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         r = await self.http.post("/api/search", json={"query": "q", "model": "llm"})
         self.assertEqual(r.status_code, 400)                                          # llm is not a search backend
 
+    async def test_search_get_route_validates_and_reports_missing_index(self):
+        r = await self.http.post("/api/search/get", json={"refs": ["p/issues:issue:1"]})
+        self.assertEqual((r.status_code, r.json()["results"][0]["found"]), (200, False))        # the test backend has no index
+        for bad in ({"refs": "p/x"}, {"refs": ["p/x"], "bogus": 1}, {}):
+            r = await self.http.post("/api/search/get", json=bad)
+            self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), bad)
+
     async def test_embeddings_are_openai_shaped_and_rerank_forwards(self):
         r = await self.http.post("/v1/embeddings", json={"input": ["ab", "abcd"], "model": "find", "kind": "query"})
         d = r.json()

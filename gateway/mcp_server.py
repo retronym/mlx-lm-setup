@@ -17,7 +17,7 @@ from . import auth
 from .catalog import Catalog
 from .gates import GateSpecError, parse_gates
 from .iterate import MAX_ATTEMPTS_CAP, run_iterate
-from .core import ApiError, compact_backend, default_narrator, map_errors, run_look, run_narrate, run_search, run_translate, search_universes as search_universes_info, voices_listing, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
+from .core import ApiError, compact_backend, default_narrator, map_errors, run_look, run_narrate, run_search, run_translate, search_get as search_get_docs, search_universes as search_universes_info, voices_listing, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
 from .profiles import apply_defaults
 from .supervisor import Supervisor
 
@@ -295,7 +295,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `search_universes` lists what exists and which kinds each source has. `mode` "hybrid"
         (default: BM25 + embeddings, fused), "bm25" or "vec"; `rerank` re-scores the top 30 with a cross-encoder (about 1 s more, usually better for
         "where is X" questions; the final order blends the fused retrieval rank with the reranker, 75/25 for the top three, so a strong keyword or vector hit is not lost). `explain` adds each hit's `explain` {fused_rank, rrf, top_bonus, retrieval, weight, final}. `open_only` hides closed issues and unmerged-closed PRs. One hit per document (the best chunk of a file, page,
-        issue or PR). Returns `results` [{project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
+        issue or PR). Each hit has a `ref`: pass it to `get` for the whole thread or file. Returns `results` [{ref, project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
         projects not indexed yet. Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
@@ -307,6 +307,17 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
             h.pop("truncated", None)
             h.pop("color", None)
         return res
+
+    @mcp.tool()
+    async def get(refs: list[str], scope: str = "doc", max_chars: int = 6000, offset: int = 0, lines: str | None = None) -> dict:
+        """Read what a `search` hit belongs to. `refs` are the `ref` values of hits ("zinc/issues:issue:100"; up to 20). `scope` "doc" (default)
+        returns every chunk of the hit's document in reading order: an issue or PR with all its comments and review comments, a doc file by
+        section, a commit, a release; "chunk" just the hit; "file" the whole source file at the indexed commit (`lines` "120-180" picks a range).
+        Text is cut to `max_chars` from `offset`; when `truncated`, call again with `next_offset`. Reads the index and the local clones, starts no model."""
+        try:
+            return search_get_docs(catalog, refs, scope=scope, max_chars=max_chars, offset=offset, lines=lines)
+        except ApiError as e:
+            raise fail(e) from None
 
     @mcp.tool()
     async def search_universes() -> dict:
