@@ -226,7 +226,7 @@ class Config:
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
 }
 
 
@@ -249,6 +249,8 @@ def _search(d, errors):
     s["chunking"] = v.obj(d.get("chunking", {}), "chunking", {"max_chars": (t_int(200, 20000), 2400), "min_chars": (t_int(0, 2000), 20)}) if isinstance(d, dict) else {}
     s["github"] = v.obj(d.get("github", {}), "github", {"min_remaining": (t_int(0), 300), "page_delay_s": (t_num(0), 0.2), "page_limit": (t_int(1, 100), 90),
                                                         "default_since": (t_re(DATE_RE, "an ISO timestamp like 2000-01-01T00:00:00Z"), "2000-01-01T00:00:00Z")}) if isinstance(d, dict) else {}
+    s["neighbours"] = v.obj(d.get("neighbours", {}), "neighbours", {"enabled": (t_bool, True), "neighbours": (t_int(1, 50), 5), "min_similarity": (t_num(0), 0.8),
+                                                                  "clusters": (t_int(1, 1000), 80)}) if isinstance(d, dict) else {}
     r = d.get("refresh", {}) if isinstance(d, dict) else {}
     s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
                                         "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})

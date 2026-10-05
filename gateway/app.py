@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -309,6 +309,43 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         q = request.query_params
         return JSONResponse(search_stats(catalog, q.get("model"), q.get("universe")))
 
+    def neighbour_filters(request: Request, allowed: dict) -> dict:
+        """The shared query-string filters of the duplicates and clusters views; `allowed` maps a name to its parser."""
+        q, out = request.query_params, {}
+        for name, parse in allowed.items():
+            vals = q.getlist(name)
+            if not vals:
+                continue
+            try:
+                out[name] = [v for v in vals if v] if name == "projects" else parse(vals[-1])
+            except ValueError:
+                raise ApiError(400, "invalid_arguments", f"`{name}` is invalid: {vals[-1]!r}") from None
+        return out
+
+    def flag(v: str) -> bool:
+        if v not in ("0", "1", "true", "false"):
+            raise ValueError(v)
+        return v in ("1", "true")
+
+    common = {"state": str, "kind": str, "since": str, "until": str, "projects": str}
+    paging = {"limit": lambda v: max(1, min(int(v), 500)), "offset": lambda v: max(0, int(v))}
+
+    async def search_duplicates_view(request: Request):
+        """Duplicate candidates: close issue / PR pairs, best first, from the neighbours database the refresh builds. Query: universe, min_sim
+        (default 0.9), state (any | open: one of the pair is open | closed), kind (issue | pr | mixed | any), since / until (YYYY[-MM[-DD]]; a pair is
+        kept if EITHER item is in range), projects (repeatable; EITHER item), adjacent (default 1: drop same-repo pairs with numbers that close when one
+        is closed, an old import's copies; 0 keeps them), templated (0 | 1), limit, offset."""
+        f = neighbour_filters(request, {**common, "min_sim": float, "adjacent": lambda v: max(0, int(v)), "templated": flag, **paging})
+        if "kind" not in f:
+            f["kind"] = "issue"
+        return JSONResponse(search_duplicates(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
+
+    async def search_clusters_view(request: Request):
+        """Topic clusters with counts under the filters (universe, state, kind issue | pr | any, since, until, projects). With cluster=<k>, that
+        cluster's items (limit, offset) instead."""
+        f = neighbour_filters(request, {**common, "cluster": int, **paging})
+        return JSONResponse(search_clusters(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
+
     async def embeddings(request: Request):
         """OpenAI-compatible embeddings: {"input": str | [str], "model"?} -> {data: [{embedding, index}], model, usage}. Documents are
         embedded as-is; add "kind": "query" for the retrieval-instruction form used for search queries."""
@@ -480,6 +517,8 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/translate", handler(translate), methods=["POST"]),
         Route("/api/search", handler(search), methods=["POST"]),
         Route("/api/search/status", handler(search_status), methods=["GET"]),
+        Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
+        Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/rerank", handler(rerank), methods=["POST"]),
         Route("/v1/embeddings", handler(embeddings), methods=["POST"]),
         Route("/api/look/expand", handler(look_expand), methods=["POST"]),

@@ -324,12 +324,12 @@ class WholeRefresh(Case):
         self.assertEqual(st.db.execute("SELECT count(*) FROM chunks c LEFT JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash WHERE v.rowid IS NULL").fetchone()[0], 0)
         s = refresh.load_state(self.cfg)
         self.assertTrue(s["last_run"]["ok"], s["last_run"])
-        self.assertEqual(list(s["last_run"]["phases"]), ["sync", "enrich", "digest", "embed", "verify"])
+        self.assertEqual(list(s["last_run"]["phases"]), ["sync", "enrich", "digest", "embed", "neighbours", "verify"])
         self.assertEqual(s["last_run"]["phases"]["verify"]["canaries_passed"], 1)
         self.assertEqual(s["history"][0]["ok"], True)
         self.assertTrue(self.cfg.data_path("digest.json").exists())                 # the recent issue made it into a digest
         rs = runstate.read(self.cfg)
-        self.assertEqual((rs["kind"], rs["ok"], rs["running"], rs["phases_done"]), ("refresh", True, False, ["sync", "enrich", "digest", "embed", "verify"]))
+        self.assertEqual((rs["kind"], rs["ok"], rs["running"], rs["phases_done"]), ("refresh", True, False, ["sync", "enrich", "digest", "embed", "neighbours", "verify"]))
 
     def test_a_second_run_while_one_is_active_exits_3(self):
         with runstate.lock(self.cfg):

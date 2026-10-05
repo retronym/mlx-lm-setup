@@ -170,6 +170,15 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         body = html[html.index("function whom("):html.index("function render(")]
         self.assertNotIn("innerHTML", body)                                            # names and handles come from GitHub: text nodes only
 
+    async def test_search_page_has_duplicates_and_clusters_tabs_that_never_inject_html(self):
+        html = (WEB / "search.html").read_text()
+        for needle in ('id="t-duplicates"', 'id="t-clusters"', "/api/search/duplicates", "/api/search/clusters", 'id="nb-since"', 'id="nb-until"', 'id="nb-state"', 'id="nb-kind"',
+                       'id="nb-import"', "function itemRow(", "function fromHash("):
+            self.assertIn(needle, html)
+        body = html[html.index("// ---- duplicates and clusters"):html.index('$("t-search").onclick')]
+        self.assertNotIn("innerHTML", body)                                            # titles come from GitHub: text nodes, and links only to github.com
+        self.assertIn("github\\.com", body)
+
     async def test_pages_load_nothing_from_other_origins(self):
         for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html", "home.html"):
             html = (WEB / name).read_text()

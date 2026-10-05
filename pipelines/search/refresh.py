@@ -10,6 +10,7 @@ Phases, in order (LLM work runs before embedding so the big LLM and the embedder
   enrich     local-LLM thread summaries for long threads, checked against the thread by the NLI model (off unless llm.thread_summaries.enabled)
   digest     a local-LLM digest of what changed since the last refresh, checked against the facts (llm.digest.enabled)
   embed      vectors for everything new, through the gateway's embedder (--local: in this process)
+  neighbours duplicate candidates and topic clusters over issues and PRs, from the vectors (numpy, no model; skipped when nothing changed; neighbours.enabled)
   verify     database integrity, nothing left without a vector, canary queries through the gateway
 
 Tiers choose by source priority (search.json refresh.tiers). `--budget-hours` stops starting new sources or LLM items after that long; the
@@ -21,7 +22,7 @@ import config, runstate
 from embed import targets, run_embed, load as load_embedder
 from sync import run_sync
 
-PHASES = ["sync", "reconcile", "enrich", "digest", "embed", "verify"]
+PHASES = ["sync", "reconcile", "enrich", "digest", "embed", "neighbours", "verify"]
 DEFAULT_SINCE_S = 26 * 3600
 
 
@@ -58,6 +59,8 @@ def plan(cfg, universe, srcs, args, state, now):
             out.append((ph, False, "llm.thread_summaries.enabled is false")); continue
         if ph == "digest" and not (llm["digest"]["enabled"] or "digest" in args["only"]):
             out.append((ph, False, "llm.digest.enabled is false")); continue
+        if ph == "neighbours" and not (cfg.search["neighbours"]["enabled"] or "neighbours" in args["only"]):
+            out.append((ph, False, "neighbours.enabled is false")); continue
         out.append((ph, True, ""))
     return out
 
@@ -128,6 +131,9 @@ def main(argv):
                         emb = load_embedder(cfg, "local" if local else None)
                         n = run_embed(cfg, srcs, run, emb, deadline=deadline)
                         info = {"embedded": n, "via": emb.dev}
+                    elif ph == "neighbours":
+                        import neighbours
+                        info = neighbours.compute(cfg, uid, run, force=force) or {"unchanged": True}
                     elif ph == "verify":
                         import verify
                         problems, counts = verify.integrity(cfg, uid)

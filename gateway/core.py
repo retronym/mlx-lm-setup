@@ -305,6 +305,29 @@ def search_stats(catalog: Catalog, model: str | None = None, universe: str | Non
     return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), "run": run, **searchinfo.refresh_info(cfg), **st}
 
 
+def _neighbour_view(fn_name: str, catalog: Catalog, model: str | None, universe: str | None, **filters) -> dict:
+    from . import searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        return {"backend": spec.name, "available": False}
+    try:
+        return {"backend": spec.name, **getattr(searchinfo, fn_name)(cfg, universe, **filters)}
+    except KeyError as e:
+        raise ApiError(404, "unknown_universe", e.args[0]) from None
+    except ValueError as e:
+        raise ApiError(400, "invalid_arguments", str(e)) from None
+
+
+def search_duplicates(catalog: Catalog, model: str | None = None, universe: str | None = None, **filters) -> dict:
+    """Duplicate candidates (close issue / PR pairs) from the neighbours database the refresh builds; reads a file, starts nothing."""
+    return _neighbour_view("duplicates", catalog, model, universe, **filters)
+
+
+def search_clusters(catalog: Catalog, model: str | None = None, universe: str | None = None, **filters) -> dict:
+    """Topic clusters of issues and PRs, or one cluster's items, from the neighbours database the refresh builds; reads a file, starts nothing."""
+    return _neighbour_view("clusters", catalog, model, universe, **filters)
+
+
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:
     from . import searchinfo
     spec, cfg = _search_config(catalog, model)

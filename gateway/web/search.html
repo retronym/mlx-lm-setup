@@ -76,6 +76,17 @@
   .md code { font: 12.5px ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .runmsg { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 640px) { .bar { grid-template-columns: 64px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
+  .pair { gap: 8px; } .pair .items { display: flex; flex-direction: column; gap: 4px; }
+  .item { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 14px; min-width: 0; }
+  .item .when { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sim { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent); }
+  .badge.open { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); text-transform: none; font-weight: 500; }
+  .cl { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .clhead { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; cursor: pointer; }
+  .clhead .lab { font-weight: 650; } .clhead .meta { font-variant-numeric: tabular-nums; }
+  .trend.hot { color: var(--warn); font-weight: 650; } .trend.cold { color: var(--muted); }
+  .clbody { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+  .dup-only, .cl-only { display: none; } #nbfilters.dups .dup-only, #nbfilters.cls .cl-only { display: flex; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -92,7 +103,31 @@
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
 <main>
-  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-duplicates" aria-selected="false">Duplicates</button><button role="tab" id="t-clusters" aria-selected="false">Clusters</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <div id="nbfilters" class="card" style="--c: var(--line)" hidden>
+    <div class="row">
+      <label><span id="nb-statelabel">state</span> <select id="nb-state"></select></label>
+      <label>kind <select id="nb-kind"></select></label>
+      <label title="Keep an item if it was created on or after this date">from <input type="date" id="nb-since"></label>
+      <label title="Keep an item if it was created before this date">before <input type="date" id="nb-until"></label>
+      <label class="dup-only" title="Cosine similarity of the two vectors. Above 0.95 is nearly always the same text; 0.90 to 0.95 real duplicates or follow-ups; below 0.90 related topics">similarity <select id="nb-sim"><option>0.95</option><option selected>0.9</option><option>0.85</option><option>0.8</option></select></label>
+      <label class="cl-only">sort <select id="nb-sort"><option value="size">size</option><option value="trend">heating up</option><option value="open">open items</option></select></label>
+    </div>
+    <div class="row"><span class="meta">repos</span><div class="chips" id="nb-projects" title="Pick any to limit to those repos; for duplicates, a pair is kept if either issue is in one of them"></div></div>
+    <div class="row dup-only">
+      <label title="An old import created copies of tickets with adjacent numbers; pairs like that are hidden when one is closed"><input type="checkbox" id="nb-import"> keep adjacent-number copies from the old import</label>
+      <label title="Release procedures and dependency bumps look alike by construction"><input type="checkbox" id="nb-templ"> keep release procedures and bumps</label>
+    </div>
+  </div>
+  <div id="tab-duplicates" hidden style="display:none;flex-direction:column;gap:12px">
+    <div class="meta" id="dupmeta"></div>
+    <div id="dups" style="display:flex;flex-direction:column;gap:10px"></div>
+    <button type="button" id="dupmore" hidden>Show more</button>
+  </div>
+  <div id="tab-clusters" hidden style="display:none;flex-direction:column;gap:12px">
+    <div class="meta" id="clmeta"></div>
+    <div id="cls" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
   <div id="tab-search" style="display:flex;flex-direction:column;gap:12px">
   <form class="row" id="form">
     <input id="q" type="search" placeholder="Ask about the Scala compiler, library or build tools…" autocomplete="off" autofocus>
@@ -165,8 +200,10 @@ function status(msg, cls = "") { $("status").textContent = msg; $("status").clas
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 // ---- universes, projects and sources come from the config (GET /api/search/status), never from this page ----
+let loadedUniverse = null;
 async function loadUniverse(id) {
   const d = await (await fetch("/api/search/status" + (id ? `?universe=${encodeURIComponent(id)}` : ""))).json();
+  loadedUniverse = d;
   if (d.error) { $("index").textContent = d.error.message; return d; }
   if (d.universes.length > 1) {
     $("unilabel").hidden = false;
@@ -189,8 +226,8 @@ async function loadUniverse(id) {
   })));
   return d;
 }
-loadUniverse().catch(() => {});
-$("universe").addEventListener("change", () => loadUniverse($("universe").value));
+const loadedUniversePromise = loadUniverse().catch(() => {});
+$("universe").addEventListener("change", () => loadUniverse($("universe").value).then(() => { if (NB.tab) nbSetup(NB.tab); }));
 
 // ---- who and when: "opened by @x 3 y ago · updated 2 d ago", "@y commented 2 y ago · on PR #12 opened by @x 3 y ago", "committed by @z 5 mo ago" ----
 function relTime(iso) {
@@ -367,14 +404,154 @@ async function pollStatus(force = false) {
   } catch (e) { $("run").replaceChildren(el("div", "", `status unavailable: ${e.message}`)); }
 }
 function tab(name) {
-  for (const t of ["search", "status"]) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
+  const tabs = ["search", "duplicates", "clusters", "status"];
+  for (const t of tabs) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
+  $("nbfilters").hidden = name !== "duplicates" && name !== "clusters";
   clearInterval(pollTimer);
   if (name === "status") { samples.length = 0; pollStatus(true); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
+  else if (name === "duplicates" || name === "clusters") { history.replaceState(null, "", `#${name}`); nbSetup(name); }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("tab-status").hidden) { samples.length = 0; pollStatus(true); } });
-$("t-search").onclick = () => tab("search"); $("t-status").onclick = () => tab("status");
-if (location.hash === "#status") tab("status");
-else if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
+
+// ---- duplicates and clusters: computed by the refresh (neighbours phase, from vectors already in the index) and filtered here ----
+const NB = { projects: [], picked: new Set((store.get("search.nb.projects") || "").split(",").filter(Boolean)), tab: null, offset: 0 };
+const NB_STATES = { duplicates: [["any", "any"], ["open", "one is open"], ["closed", "both closed"]], clusters: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]] };
+const NB_KINDS = { duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]] };
+const fill = (sel, opts, value) => { sel.replaceChildren(...opts.map(([v, t]) => Object.assign(el("option", "", t), { value: v }))); sel.value = opts.some(o => o[0] === value) ? value : opts[0][0]; };
+const ghLink = (cls, text, url) => { const a = el("a", cls, text); a.rel = "noopener noreferrer"; a.target = "_blank"; if (/^https:\/\/github\.com\//.test(url)) a.href = url; return a; };
+function itemRow(it) {
+  const row = el("div", "item");
+  row.append(el("span", "badge", it.project), el("span", "badge", it.kind === "pr" ? "PR" : "issue"));
+  row.append(it.state === "open" ? el("span", "badge open", "open") : el("span", "badge closed", it.state || "closed"));
+  row.append(ghLink("title", it.title, it.url));
+  if (it.created) { const w = el("span", "when"); w.append(timeEl(it.created)); w.title = it.created.slice(0, 10); row.append(w); }
+  return row;
+}
+function nbParams() {
+  const p = new URLSearchParams(), u = $("universe").value;
+  if (u && !$("unilabel").hidden) p.set("universe", u);
+  for (const id of ["state", "kind", "since", "until"]) if ($(`nb-${id}`).value) p.set(id, $(`nb-${id}`).value);
+  for (const x of NB.picked) p.append("projects", x);
+  return p;
+}
+function renderNbProjects() {
+  for (const k of [...NB.picked]) if (!NB.projects.some(p => p.id === k)) NB.picked.delete(k);
+  $("nb-projects").replaceChildren(...NB.projects.map(p => {
+    const b = Object.assign(el("button", "", p.title), { type: "button" });
+    b.setAttribute("aria-pressed", NB.picked.has(p.id));
+    b.onclick = () => { NB.picked.has(p.id) ? NB.picked.delete(p.id) : NB.picked.add(p.id); b.setAttribute("aria-pressed", NB.picked.has(p.id)); store.set("search.nb.projects", [...NB.picked].join(",")); nbReload(); };
+    return b;
+  }));
+}
+function nbSetup(view) {
+  NB.tab = view;
+  $("nbfilters").className = `card ${view === "duplicates" ? "dups" : "cls"}`;
+  fill($("nb-state"), NB_STATES[view], store.get("search.nb.state"));
+  fill($("nb-kind"), NB_KINDS[view], store.get(`search.nb.kind.${view}`));
+  $("nb-statelabel").textContent = view === "duplicates" ? "pair" : "items";
+  $("nb-since").value = store.get("search.nb.since") || ""; $("nb-until").value = store.get("search.nb.until") || "";
+  $("nb-sim").value = store.get("search.nb.sim") || "0.9";
+  $("nb-sort").value = store.get("search.nb.sort") || "size";
+  $("nb-import").checked = store.get("search.nb.import") === "1"; $("nb-templ").checked = store.get("search.nb.templ") === "1";
+  NB.projects = (loadedUniverse?.projects || []).map(p => ({ id: p.id, title: p.title }));
+  renderNbProjects();
+  nbReload();
+}
+function nbReload() { NB.tab === "duplicates" ? loadDuplicates(false) : loadClusters(); }
+for (const [id, key] of [["nb-state", "state"], ["nb-since", "since"], ["nb-until", "until"], ["nb-sim", "sim"], ["nb-sort", "sort"]])
+  $(id).addEventListener("change", () => { store.set(`search.nb.${key}`, $(id).value); nbReload(); });
+$("nb-kind").addEventListener("change", () => { store.set(`search.nb.kind.${NB.tab}`, $("nb-kind").value); nbReload(); });
+for (const [id, key] of [["nb-import", "import"], ["nb-templ", "templ"]]) $(id).addEventListener("change", () => { store.set(`search.nb.${key}`, $(id).checked ? "1" : "0"); nbReload(); });
+
+function nbUnavailable(box, d) { box.replaceChildren(el("div", "", d.error ? d.error.message : "Not computed yet. The refresh builds this (pipelines/search/refresh.sh, or neighbours.py on its own).")); }
+async function nbFetch(path, p) {
+  const r = await fetch(`${path}?${p}`), d = await r.json();
+  if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+  return d;
+}
+const nbWhen = d => d.generated ? ` · computed ${relTime(new Date(d.generated * 1000).toISOString())}` : "";
+let dupSeq = 0;
+async function loadDuplicates(more) {
+  if (!more) NB.offset = 0;
+  const p = nbParams(), seq = ++dupSeq;
+  p.set("min_sim", $("nb-sim").value); p.set("adjacent", $("nb-import").checked ? "0" : "1"); p.set("templated", $("nb-templ").checked ? "1" : "0");
+  p.set("limit", "50"); p.set("offset", NB.offset);
+  try {
+    const d = await nbFetch("/api/search/duplicates", p);
+    if (seq !== dupSeq) return;
+    if (!d.available) { $("dupmeta").textContent = ""; nbUnavailable($("dups"), d); $("dupmore").hidden = true; return; }
+    const cards = d.pairs.map(x => {
+      const box = el("div", "hit pair"), top = el("div", "top");
+      top.append(el("span", "sim", `${(x.sim * 100).toFixed(1)}%`), el("span", "meta", "similar"));
+      box.append(top, ...[(() => { const w = el("div", "items"); w.append(itemRow(x.a), itemRow(x.b)); return w; })()]);
+      return box;
+    });
+    if (more) $("dups").append(...cards); else $("dups").replaceChildren(...(cards.length ? cards : [el("div", "", "No pairs match these filters.")]));
+    NB.offset += d.pairs.length;
+    $("dupmore").hidden = NB.offset >= d.total;
+    $("dupmeta").textContent = `${d.total.toLocaleString()} pairs${nbWhen(d)}`;
+  } catch (e) { $("dupmeta").textContent = e.message; }
+}
+$("dupmore").onclick = () => loadDuplicates(true);
+
+let clSeq = 0, clData = null;
+function trendEl(c) {
+  if (c.trend == null || c.size < 20) return null;
+  const t = el("span", `meta trend ${c.trend >= 1.5 ? "hot" : c.trend <= 0.5 ? "cold" : ""}`, `${c.trend >= 1.5 ? "▲" : c.trend <= 0.5 ? "▼" : "·"} ${c.trend.toFixed(1)}×`);
+  t.title = `${c.recent} of ${c.size} created in the last two years; ${(clData.recent_share * 100).toFixed(0)}% of everything matching was`;
+  return t;
+}
+function renderClusters() {
+  if (!clData?.available) return;
+  const sort = $("nb-sort").value;
+  const list = [...clData.clusters].sort((a, b) => sort === "trend" ? (b.size >= 20) - (a.size >= 20) || (b.trend ?? 0) - (a.trend ?? 0) : sort === "open" ? b.open - a.open : b.size - a.size);
+  $("cls").replaceChildren(...(list.length ? list.map(c => {
+    const box = el("div", "cl"), head = el("div", "clhead"), body = el("div", "clbody");
+    body.hidden = true;
+    const mix = Object.entries(c.projects).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v}`).join(", ");
+    head.append(el("span", "lab", c.label || `cluster ${c.k}`), el("span", "meta", `${c.size.toLocaleString()} items · ${c.open} open · ${mix}`), ...[trendEl(c)].filter(Boolean));
+    let loaded = false;
+    head.onclick = () => {
+      body.hidden = !body.hidden;
+      if (body.hidden || loaded) return;
+      loaded = true;
+      body.append(...c.samples.map(itemRow), ...c.size > c.samples.length ? [Object.assign(el("button", "", `Show all ${c.size.toLocaleString()}`), { type: "button", onclick: ev => showCluster(c, body, ev.target) })] : []);
+    };
+    box.append(head, body);
+    return box;
+  }) : [el("div", "", "No clusters match these filters.")]));
+}
+async function showCluster(c, body, button, offset = 0) {
+  const p = nbParams(); p.set("cluster", c.k); p.set("limit", "50"); p.set("offset", offset);
+  try {
+    const d = await nbFetch("/api/search/clusters", p);
+    if (!offset) body.replaceChildren();
+    button.remove();
+    body.append(...d.items.map(itemRow));
+    if (offset + d.items.length < d.total) body.append(Object.assign(el("button", "", `Show more (${(d.total - offset - d.items.length).toLocaleString()} left)`), { type: "button", onclick: ev => showCluster(c, body, ev.target, offset + d.items.length) }));
+  } catch (e) { body.append(el("div", "status err", e.message)); }
+}
+async function loadClusters() {
+  const seq = ++clSeq;
+  try {
+    const d = await nbFetch("/api/search/clusters", nbParams());
+    if (seq !== clSeq) return;
+    clData = d;
+    if (!d.available) { $("clmeta").textContent = ""; nbUnavailable($("cls"), d); return; }
+    $("clmeta").textContent = `${d.items.toLocaleString()} items in ${d.clusters.length} clusters${nbWhen(d)} · labels are the most distinctive title words; ▲ means a larger share was created in the last two years than overall`;
+    renderClusters();
+  } catch (e) { $("clmeta").textContent = e.message; }
+}
+$("nb-sort").addEventListener("change", renderClusters);
+
+$("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-clusters").onclick = () => tab("clusters"); $("t-status").onclick = () => tab("status");
+function fromHash() {                                                      // #status, #duplicates and #clusters are tabs; any other hash is a query
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (["status", "duplicates", "clusters"].includes(h)) loadedUniversePromise.then(() => tab(h));
+  else { tab("search"); if (h && h !== "search") { $("q").value = h; go(); } }
+}
+window.addEventListener("hashchange", fromHash);
+fromHash();
 </script>
 </body>
 </html>

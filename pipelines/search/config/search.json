@@ -6,6 +6,7 @@
   "reranker": {"model": "Qwen/Qwen3-Reranker-0.6B", "candidates": 30},
   "chunking": {"max_chars": 2400, "min_chars": 20},
   "github": {"min_remaining": 300, "page_delay_s": 0.2, "page_limit": 90, "default_since": "2000-01-01T00:00:00Z"},
+  "neighbours": {"enabled": true, "neighbours": 5, "min_similarity": 0.8, "clusters": 80},
   "refresh": {
     "at": "03:00",
     "tiers": {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}},
