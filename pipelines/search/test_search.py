@@ -162,6 +162,13 @@ class SearchTests(unittest.TestCase):
         rel = commits["release:v1"]
         self.assertEqual((rel["created"], rel["updated"]), ("2026-01-15", "2026-01-15"))                              # a release's time falls back to its tag date
 
+    def test_close_releases_the_databases(self):
+        import sqlite3
+        idx = search.Index(self.cfg, "all")
+        idx.close()
+        with self.assertRaises(sqlite3.ProgrammingError):
+            idx.stores["big"].db.execute("SELECT 1")                                                  # a per-request Index must not leave connections to the GC
+
     def test_universe_selection(self):
         self.assertEqual({h["project"] for h in search.hits(search.Index(self.cfg, "small-only"), "needle", k=10, embedder=FakeEmbedder())}, {"small"})
         self.assertEqual(search.Index(self.cfg).universe.id, "all")                                   # the default universe

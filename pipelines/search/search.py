@@ -27,6 +27,11 @@ class Index:
     def source(self, pid, sid):
         return self.cfg.projects[pid].source(sid)
 
+    def close(self):
+        """Close the databases: a long-running server makes an Index per request, and connections left to the garbage collector pile up against the fd limit."""
+        for st in self.stores.values():
+            st.db.close()
+
 
 def fts_query(q):
     """OR of the query's words and their camelCase parts."""

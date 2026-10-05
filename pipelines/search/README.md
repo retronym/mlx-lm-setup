@@ -12,7 +12,7 @@ config/universes/<id>.json  a universe: a named list of projects
 
 | Source type | Fields | What it indexes |
 |---|---|---|
-| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala` / `java` / `markdown`; `plain` not yet) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
+| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala_ts` / `java_ts` (tree-sitter, [below](#chunking-code)), `scala` / `java` (heuristic, kept for fallback and comparison) or `markdown`; `plain` not yet) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
 | `git_log` | `repo`, `ref`, `paths` (optional), `since`, `merges` (default false), `skip_authors` (default: dependency-bump bots) | commit messages, one chunk per commit: the full message plus the paths it changed, with `#123` / `scala/bug#123` references in the metadata. History is walked newest-first from the ref under `max_items_per_run` (a forward walk first picks up new commits), like the GitHub sources; merges and bots are left out; a rewritten branch is re-walked |
 | `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped. All the sources of a project on one repo share one pass over its streams; two sources may not index the same kind of item (the config says so) |
 | `github_releases` | `repo`, `tag_messages` | GitHub release notes (a header chunk, then one chunk per heading for long notes; `#123` and `/pull/123` references go into the chunk metadata) plus annotated tag messages for tags without a release |
@@ -46,9 +46,43 @@ $PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pi
 - A rename re-embeds the moved file's chunks (vectors are keyed by chunk id, not content hash; keying by hash would reuse them).
 - Issue deletions and transfers are only caught by `sync.py reconcile`. Comment deletions are not caught at all.
 - The issue backfill starts at 2023-01-01 unless `--since` says otherwise; GitHub PRs, Discourse and the SIPs repository are not wired in (each is an adapter that yields chunks and is written like `ghissues.py`).
-- Chunking is heuristic (indentation and keywords), not a parser; one-liners under 20 characters are dropped. Tree-sitter or Scalameta would give exact definition boundaries.
+- Markdown chunking is heuristic (headings), and the `plain` chunker does not exist. Code is chunked by tree-sitter ([below](#chunking-code)).
 - The query CLI loads the embedder (and reranker) per call, 4 s hybrid and 7 s with `--rerank`. That disappears when this becomes a gateway backend (`/v1/embeddings`, `/v1/rerank` and a `search` MCP tool).
 - sbt/zinc, the SIPs and Discourse are not indexed yet, so e.g. Zinc invalidation questions only find scala/bug issues.
+
+## Chunking code
+
+`scala_ts` and `java_ts` (`sources/treesitter.py`) cut code along the parse tree. The heuristic chunkers they replace started a chunk at any line that looked like a definition at indent <= 4: half the chunks were under 100 characters (a lone `val`, a one-line `def`), 14-21% were *local* definitions split out of their method under a wrong parent title, members indented deeper were swallowed into their neighbour, and a long method was cut at blank lines into continuations that no longer said what they belonged to. Now:
+
+- a declaration with its doc comment and annotations is one unit; a class, object, trait, enum, given, extension or interface that fits `chunking.max_chars` (2400) stays whole, whatever its members;
+- one that does not becomes a **header** chunk (doc, signature, a `// members:` outline) plus its members, recursively, each titled `path  package  Enclosing.name`; local definitions are never split out;
+- a method that does not fit (up to 1.5x `max_chars` it stays whole) is cut **between statements** (or `case` clauses), and each continuation starts with the method's signature;
+- runs of small siblings (vals, one-liners, imports) are **packed** into one chunk up to `chunking.pack_chars` (1000), titled with the first member and `(+n more)`;
+- metadata gains `end` (last line) and `sym` (class, function, imports, members...); a file the parser reports errors for falls back to the heuristic chunker and says `fallback` in its metadata (none of the ~3,400 files of the five code sources does).
+
+Measured on the real sources: chunks 2.4-3x fewer (scala/scala 36.7k -> 12.8k, Scala 3 45.8k -> 17.1k), median 123 -> 720 characters, under 100 characters 41% -> 6%, the same text overall.
+
+**Changing a source's chunker is a controlled move**, because it re-embeds that source (chunks get new ids and hashes):
+
+```bash
+$PY pipelines/search/rechunk.py zinc/code --sample 8      # the plan, touching nothing: chunk counts and sizes both ways, parse fallbacks, embedding time
+$PY pipelines/search/eval_code.py build zinc/code          # once: 150 queries "first sentence of a definition's doc comment -> that definition"
+$PY pipelines/search/eval_code.py run data/eval/zinc-code.json --label before [--mask]    # --mask removes the definition's name from the query
+# set "chunkers": {".scala": "scala_ts", ".java": "java_ts"} in config/projects/zinc.json, then
+$PY pipelines/search/sync.py zinc/code --no-fetch && $PY pipelines/search/embed.py zinc/code
+$PY pipelines/search/eval_code.py run data/eval/zinc-code.json --label after [--mask]    # compare recall@1/5/10 and MRR with the stored before run
+```
+
+Sync re-chunks each file once (the file's state carries the chunker's version) and replaces its chunks; keyword search works throughout and the old vectors go with the old chunks. Embedding is the only slow step (`rechunk.py` prints the estimate). The eval is a regression guard more than a measure of gain: a doc comment is part of the chunk, so it is a lexical-ish known-item test. Results of the move on this machine (150 queries per source, hybrid, no rerank; plain / name masked):
+
+| Source | Chunks | recall@1 | recall@5 | MRR |
+|---|---|---|---|---|
+| zinc | 6.8k -> 2.3k | .807 -> .787 / .780 -> .760 | .880 -> .900 / .880 -> .887 | .841 -> .836 / .827 -> .817 |
+| scala-asm | 3.1k -> 1.0k | .887 -> .873 / .853 -> .833 | .920 -> .933 / .900 -> .907 | .902 -> .902 / .875 -> .867 |
+| scala3 | 45.8k -> 17.0k | .847 -> .813 / .800 -> .773 | .920 -> .927 / .880 -> .893 | .879 -> .863 / .837 -> .826 |
+| scala2 | 36.7k -> 12.7k | .867 -> .813 / .833 -> .793 | .920 -> .907 / .900 -> .893 | .891 -> .857 / .862 -> .838 |
+
+Recall@5 is level (-0.013 to +0.020); recall@1 gives up 0.014-0.054, because a chunk now holds a whole class or a run of members, so a query for one method competes with its neighbours' words. scala2 is the one source that fell outside the 0.03 gate (MRR -0.034). The test favours small chunks (the query is text inside the chunk), and it was run without the reranker, which reorders the top 30 and is on by default.
 
 ## Duplicates, clusters and outliers
 

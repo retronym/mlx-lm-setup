@@ -5,7 +5,7 @@
   "sources": [
     {"id": "code", "type": "git", "label": "scala-asm code", "color": "#b45309", "priority": 3,
      "repo": "scala/scala-asm", "ref": "main", "paths": ["src"],
-     "exclude": ["**/test/**"], "chunkers": {".java": "java"}},
+     "exclude": ["**/test/**"], "chunkers": {".java": "java_ts"}},
     {"id": "issues", "type": "github", "label": "scala-asm issues", "color": "#d97706", "priority": 4,
      "repo": "scala/scala-asm", "include": ["issues", "comments"]},
     {"id": "prs", "type": "github", "label": "scala-asm PRs", "color": "#f59e0b", "priority": 5,

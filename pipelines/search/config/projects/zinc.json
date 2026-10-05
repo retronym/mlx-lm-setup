@@ -6,7 +6,7 @@
     {"id": "code", "type": "git", "label": "zinc code", "color": "#059669", "priority": 2,
      "repo": "sbt/zinc", "ref": "develop", "paths": ["internal", "zinc", "contributing-docs"],
      "exclude": ["**/src/test/**", "**/test-data/**"],
-     "chunkers": {".scala": "scala", ".java": "java", ".md": "markdown"}},
+     "chunkers": {".scala": "scala_ts", ".java": "java_ts", ".md": "markdown"}},
     {"id": "issues", "type": "github", "label": "zinc issues", "color": "#10b981", "priority": 3,
      "repo": "sbt/zinc", "include": ["issues", "comments"]},
     {"id": "prs", "type": "github", "label": "zinc PRs", "color": "#34d399", "priority": 4,

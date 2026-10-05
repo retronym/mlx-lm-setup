@@ -81,7 +81,7 @@ def run(path, k, mode, rerank, label, mask=False):
     ranks, sizes, t0 = [], [], time.time()
     for c in ev["queries"]:
         q = re.sub(re.escape(c["name"]), "", c["q"], flags=re.I) if mask else c["q"]          # --mask: the definition's own name is removed from its description
-        r = gateway_client.post("/api/search", {"query": q, "k": k, "mode": mode, "rerank": rerank, "projects": [pid], "sources": [f"{pid}/{sid}"], "kinds": ["file"]}, timeout=300)
+        r = gateway_client.post("/api/search", {"query": q, "k": k, "mode": mode, "rerank": rerank, "text_chars": 50000, "projects": [pid], "sources": [f"{pid}/{sid}"], "kinds": ["file"]}, timeout=300)
         hit = next((i + 1 for i, h in enumerate(r["results"]) if is_right(h, c)), None)
         ranks.append(hit)
         sizes += [len(h["text"]) for h in r["results"][:3]]
