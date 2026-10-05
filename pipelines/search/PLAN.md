@@ -11,6 +11,8 @@
 - Local models throughout: embeddings through the gateway, reranker, rule-then-`decide` noise filter, thread summaries and the refresh digest via `iterate` with an NLI gate, LLM-written evaluation questions. Chunking, dedup and parsing stay plain code. LLM steps run before embedding so the big LLM and the embedder do not evict each other.
 - Refresh nightly at 03:00 (launchd).
 
+- Commit messages (`git_log`) are a source type: the "why" behind the code, newest-first under the same caps and priorities (scala2 p5, scala3 p6 from 2018, zinc p3, scala-asm p4).
+
 ## Steps
 
 1. **DONE** Config loader, schemas, `check`, shipped config for scala2, scala3, scala-dev, zinc, scala-asm and the `scala-zinc` universe.

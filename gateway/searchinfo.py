@@ -90,6 +90,19 @@ def _github_progress(src, state: dict, now: float) -> dict:
             "frac": min((x["frac"] for x in streams), default=1.0)}
 
 
+def _commits_progress(src, state, now: float) -> dict:
+    """How far the newest-first commit backfill has come: (top - back) / (top - horizon), complete when it reached the horizon or the root."""
+    top, back, horizon = _epoch(state.get((src.id, "top_date"))), _epoch(state.get((src.id, "back_date"))), _epoch(src.since) or 0.0
+    if state.get((src.id, "bf_done")) == "1":
+        frac, at, mode = 1.0, src.since, "done"
+    elif top and back and top > horizon:
+        frac, at, mode = (top - back) / (top - horizon), state.get((src.id, "back_date")), "back"
+    else:
+        frac, at, mode = 0.0, None, None
+    frac = max(0.0, min(1.0, frac))
+    return {"kind": "timeline", "horizon": (src.since or "")[:10], "streams": [{"name": "commits", "frac": frac, "at": at, "mode": mode}], "frac": frac}
+
+
 def stats(cfg, universe_id: str | None = None, run: dict | None = None) -> dict:
     """Per project and source: chunks, how many have a vector for the configured embedder, last write, sync position and progress. `run` is the
     indexer's current run state; the source it is working on is marked active."""
@@ -118,6 +131,8 @@ def stats(cfg, universe_id: str | None = None, run: dict | None = None) -> dict:
                 sync = {"kind": "files", "done": files.get(s.id, 0), "total": total, "frac": min(1.0, files.get(s.id, 0) / total) if total else (1.0 if files.get(s.id) else 0.0)}
             elif s.type == "github":
                 sync = _github_progress(s, state, now)
+            elif s.type == "git_log":
+                sync = _commits_progress(s, state, now)
             else:
                 sync = {"kind": "snapshot", "frac": 1.0 if chunks else 0.0}
             out.append({"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "enabled": s.enabled,

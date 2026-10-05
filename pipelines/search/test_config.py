@@ -49,6 +49,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNotNone(srcs["scala3/issues"].max_items_per_run)
         self.assertEqual(srcs["scala-asm/code"].ref, "main")
         self.assertTrue(all(any(s.type == "github_releases" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm")))
+        self.assertTrue(all(any(s.type == "git_log" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm")))     # commit messages are indexed
+        self.assertGreater(srcs["scala3/commits"].priority, srcs["zinc/commits"].priority)
         self.assertEqual(cfg.project_db("zinc").name, "index.db")
 
     def test_defaults_are_filled_in(self):
@@ -93,6 +95,16 @@ class ConfigTests(unittest.TestCase):
         errs = "\n".join(self.errors(projects=[proj("p", {**GH, "id": "a", "include": ["issues", "prs", "comments"]}, b)], universes=[uni()]))
         self.assertIn("both index comments on PRs of o/r", errs)
         self.load(projects=[proj("p", a, {**GH, "id": "other", "repo": "o/elsewhere"})], universes=[uni()])   # a different repo is no overlap
+
+    def test_git_log_sources(self):
+        log = {"id": "commits", "type": "git_log", "label": "commits", "repo": "o/r", "ref": "main"}
+        s = self.load(projects=[proj("p", log)], universes=[uni()]).projects["p"].sources[0]
+        self.assertEqual((s.merges, s.paths, s.since), (False, (), "2000-01-01T00:00:00Z"))
+        self.assertIn("scala-steward", s.skip_authors)                                            # dependency bumps are skipped by default
+        s = self.load(projects=[proj("p", {**log, "merges": True, "paths": ["src"], "since": "2018-01-01T00:00:00Z", "skip_authors": []})], universes=[uni()]).projects["p"].sources[0]
+        self.assertEqual((s.merges, s.paths, s.since, s.skip_authors), (True, ("src",), "2018-01-01T00:00:00Z", ()))
+        errs = "\n".join(self.errors(projects=[proj("p", {k: v for k, v in {**log, "merges": "yes", "include": ["issues"]}.items() if k != "ref"})], universes=[uni()]))
+        self.assertIn("ref: required", errs); self.assertIn("merges: expected true or false", errs); self.assertIn("include: unknown key", errs)
 
     def test_invalid_json_and_missing_files(self):
         with tempfile.TemporaryDirectory() as d:

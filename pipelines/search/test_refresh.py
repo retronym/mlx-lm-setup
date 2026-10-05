@@ -207,6 +207,17 @@ class Digest(Case):
         self.assertEqual(json.loads(self.cfg.data_path("digest.json").read_text())["text"], d["text"])
         self.assertTrue(list(self.cfg.data_path("digests", "u").glob("*.md")))
 
+    def test_commits_appear_in_the_facts(self):
+        st = self.store()
+        recent = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        st.apply("code", [Chunk(f"code:commit:{i:040x}", f"commit:{i}", f"o/r commit {i:08x} Fix the typer {i}", f"Fix the typer {i}\n\nFiles changed: a.scala", "u",
+                                {"kind": "commit", "updated": recent}) for i in range(5)]
+                 + [Chunk("code:commit:old", "commit:old", "o/r commit 00000000 An old one", "old", "u", {"kind": "commit", "updated": "2020-01-01T00:00:00Z"})])
+        st.commit()
+        lines = digest.facts(self.cfg, "u", time.time() - 3600)[0][1]
+        line = next(l for l in lines if "commits landed" in l)
+        self.assertIn("5 commits landed", line); self.assertIn("Fix the typer", line); self.assertNotIn("An old one", line)
+
     def test_unsupported_lines_are_pruned_after_the_retries(self):
         self.thread(self.store(), 7, 1, issue_updated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         self.gw.partly_unfaithful = True
