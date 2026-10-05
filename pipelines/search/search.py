@@ -125,17 +125,44 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
     return out[:k], detail
 
 
+_TITLE_AUTHOR = re.compile(r"\((?:comment|review comment on .+?) by ([A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?)\)\s*$")
+
+
+def _who_and_when(db, sid, title, m):
+    """Author (GitHub login), git author name (commits), created and updated times, and for comments and review comments the thread they belong to.
+    Chunks written before a field was captured fall back: a comment's author from its title, a commit's `author` was the git name, a release's
+    time from its tag date."""
+    kind = m.get("kind")
+    author, name = m.get("author"), m.get("author_name")
+    if kind == "commit" and name is None:
+        author, name = None, author                                      # written before the GitHub handle was captured
+    if not author and kind in ("comment", "review"):
+        author = (_TITLE_AUTHOR.search(title) or [None, None])[1]
+    created = m.get("created") or (m.get("updated") if kind == "commit" else None) or (m.get("published") if kind == "release" else None)
+    updated = m.get("updated") or (m.get("published") if kind == "release" else None)
+    thread = None
+    if kind in ("comment", "review") and m.get("number") is not None:
+        r = db.execute("SELECT json_extract(meta, '$.author'), json_extract(meta, '$.created'), json_extract(meta, '$.kind') FROM chunks WHERE id = ?",
+                       (f"{sid}:issue:{m['number']}",)).fetchone()
+        if r:
+            thread = {"number": m["number"], "kind": r[2], "author": r[0], "created": r[1]}
+    return {"kind": kind, "author": author, "author_name": name, "created": created, "updated": updated, "thread": thread}
+
+
 def hits(idx, q, text_chars=1200, **kw):
-    """`search` as plain dicts: project, source, label and colour (from config), title, url, state, text (the chunk, cut), ranks and scores."""
+    """`search` as plain dicts: project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
+    created and updated times, the thread of a comment), and the ranks and scores."""
     keys, detail = search(idx, q, **kw)
     out = []
     for pid, rid in keys:
-        t, text, url, meta, sid, doc, state = idx.stores[pid].db.execute(
+        db = idx.stores[pid].db
+        t, text, url, meta, sid, doc, state = db.execute(
             f"SELECT title, text, url, meta, source, doc, {STATE_SQL} FROM chunks c WHERE rowid=?", (rid,)).fetchone()
+        m = json.loads(meta)
         src = idx.source(pid, sid)
         out.append({"project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
-                    "doc": doc, "state": state, "labels": json.loads(meta).get("labels"), "text": text[:text_chars], "truncated": len(text) > text_chars,
-                    **detail.get((pid, rid), {})})
+                    "doc": doc, "state": state, "labels": m.get("labels"), "text": text[:text_chars], "truncated": len(text) > text_chars,
+                    **_who_and_when(db, sid, t, m), **detail.get((pid, rid), {})})
     return out
 
 

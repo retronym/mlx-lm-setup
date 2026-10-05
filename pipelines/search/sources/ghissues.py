@@ -137,7 +137,7 @@ class GhRepo:
                 state = "merged" if pr and pr.get("merged_at") else i["state"]
                 return m.id, list(self._chunks(m, f"issue:{n}", f"issue:{n}", f"{self.repo}#{n} {i['title']}", i["body"], i["html_url"],
                                                {"state": state, "labels": [l["name"] for l in i["labels"]], "number": n, "kind": "pr" if pr else "issue",
-                                                "updated": i["updated_at"]}))
+                                                "updated": i["updated_at"], "created": i.get("created_at"), "author": (i.get("user") or {}).get("login")}))
         elif stream == "comments":
             def route(c):
                 m = self.member("comments", "prs" if "/pull/" in c["html_url"] else "issues")
@@ -146,7 +146,8 @@ class GhRepo:
                 n = int(c["issue_url"].rsplit("/", 1)[1])
                 t = titles.get(n) or self._title(store, n)
                 return m.id, list(self._chunks(m, f"comment:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (comment by {c['user']['login']})", c["body"],
-                                               c["html_url"], {"kind": "comment", "number": n, "updated": c["updated_at"]}))
+                                               c["html_url"], {"kind": "comment", "number": n, "updated": c["updated_at"], "created": c.get("created_at"),
+                                                               "author": c["user"]["login"]}))
         else:
             def route(c):
                 m = self.member("reviews")
@@ -156,15 +157,16 @@ class GhRepo:
                 t = titles.get(n) or self._title(store, n)
                 hunk = "\n".join((c.get("diff_hunk") or "").splitlines()[-6:])
                 return m.id, list(self._chunks(m, f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {c['user']['login']})",
-                                               f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"]}))
+                                               f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"], "created": c.get("created_at"),
+                                               "author": c["user"]["login"]}))
         return route
 
-    def _ingest(self, store, route, items, tot):
+    def _ingest(self, store, route, items, tot, existing_only=False):
         n = 0
         for it in items:
             r = route(it)
             if r:
-                for k, v in enumerate(store.apply(r[0], r[1])):
+                for k, v in enumerate(store.apply(r[0], r[1], existing_only=existing_only)):
                     tot[k] += v
             n += 1
         return n
@@ -220,13 +222,27 @@ class GhRepo:
                 break
         return seen + done_items, tot
 
-    def sync(self, store, since=None, limit=None, log=print):
+    def _meta_walk(self, store, stream, path, route, since, log, extra):
+        """Re-read the items from the part of history that is indexed (the backfill frontier up to now) and refresh the metadata of chunks that
+        already exist, ingesting nothing new and touching no cursor. This is how new metadata fields reach data indexed before they existed."""
+        tot, seen = [0, 0, 0, 0], 0
+        start = since or store.get(self.owner, f"back_{stream}") or self.horizon
+        for page in pages(path, log, sort="updated", direction="asc", since=start, **extra):
+            seen += self._ingest(store, route, page, tot, existing_only=True)
+            store.commit()
+            log(f"  {self.repo} {stream}: metadata, {seen} items up to {page[-1]['updated_at'][:10]}")
+        return seen, tot
+
+    def sync(self, store, since=None, limit=None, log=print, meta_only=False):
         cap = limit or self.cap
         titles, out = {}, []
         for stream, path, needs in self.STREAMS:
             if not any(needs & set(m.include) for m in self.members):
                 continue
             extra = {"state": "all"} if stream == "issues" else {}
+            if meta_only:
+                out.append((stream, self._meta_walk(store, stream, f"repos/{self.repo}/{path}", self._router(store, stream, titles), since, log, extra)))
+                continue
             out.append((stream, self._sync_stream(store, stream, f"repos/{self.repo}/{path}", self._router(store, stream, titles), since, cap, log, extra)))
         store.commit()
         for what, (n, t) in out:

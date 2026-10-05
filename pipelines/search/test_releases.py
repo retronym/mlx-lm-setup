@@ -9,7 +9,7 @@ from store import Store
 from sources import ghreleases
 
 SHORT = {"tag_name": "v1.0.0", "name": "1.0.0", "body": "Fixes #12 and #34.", "html_url": "https://github.com/o/r/releases/tag/v1.0.0",
-         "published_at": "2026-01-01T00:00:00Z", "prerelease": False, "draft": False}
+         "published_at": "2026-01-01T00:00:00Z", "prerelease": False, "draft": False, "author": {"login": "releaser"}}
 LONG_BODY = "## Highlights\n" + "A highlight about the compiler. " * 40 + "See #101.\n\n## Fixes\n" + "A fix line. " * 60 + "Closes https://github.com/o/r/pull/202\n"
 LONG = {**SHORT, "tag_name": "v2.0.0", "name": "Big release", "body": LONG_BODY, "html_url": "https://github.com/o/r/releases/tag/v2.0.0", "prerelease": True,
         "published_at": "2026-02-01T00:00:00Z"}
@@ -46,6 +46,13 @@ class ReleaseTests(unittest.TestCase):
             self.assertFalse([k for k in rows if "draft" in k])                                                           # drafts are not published
             self.assertEqual(json.loads(rows["rel:release:v1.0.0:header"][2]), [12, 34])                                  # issue and PR numbers it mentions
             self.assertEqual(st.get("rel", "last_release"), "2026-02-01")
+
+    def test_created_and_author_are_in_the_metadata(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = Store(Path(d) / "t.db")
+            self.sync(st, [SHORT])
+            m = json.loads(st.db.execute("SELECT meta FROM chunks LIMIT 1").fetchone()[0])
+            self.assertEqual((m["created"], m["updated"], m["author"]), ("2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "releaser"))
 
     def test_refs_from_pr_urls_and_sections(self):
         with tempfile.TemporaryDirectory() as d:

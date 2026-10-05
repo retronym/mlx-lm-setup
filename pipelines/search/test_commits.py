@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 import config
 from store import Store
-from sources.gitlog import GitLog, _refs
+from sources.gitlog import GitLog, _refs, handle_from_email
 
 DAY = 86400
 T0 = 1767225600          # 2026-01-01T00:00:00Z
@@ -22,7 +22,7 @@ class Repo:
         e = {**os.environ, "GIT_AUTHOR_NAME": "Dev One", "GIT_AUTHOR_EMAIL": "d@x", "GIT_COMMITTER_NAME": "Dev One", "GIT_COMMITTER_EMAIL": "d@x", **env}
         return subprocess.run(["git", "-C", str(self.path), *a], check=True, capture_output=True, text=True, env=e).stdout.strip()
 
-    def commit(self, subject, body="", files=("src/a.scala",), day=None, author="Dev One"):
+    def commit(self, subject, body="", files=("src/a.scala",), day=None, author="Dev One", email="d@x"):
         self.n += 1
         day = self.n if day is None else day
         for f in files:
@@ -31,7 +31,7 @@ class Repo:
             p.write_text(f"{self.n}\n")
         self.git("add", ".")
         when = f"@{T0 + day * DAY} +0000"
-        self.git("commit", "-q", "-m", subject + (f"\n\n{body}" if body else ""), GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when, GIT_AUTHOR_NAME=author)
+        self.git("commit", "-q", "-m", subject + (f"\n\n{body}" if body else ""), GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when, GIT_AUTHOR_NAME=author, GIT_AUTHOR_EMAIL=email)
         return self.git("rev-parse", "HEAD")
 
 
@@ -87,8 +87,9 @@ class Backfill(Case):
         self.assertIn("The reason is that x was null.", row[3]); self.assertIn("Files changed: src/a.scala, test/b.scala", row[3])
         self.assertEqual(row[4], f"https://github.com/o/r/commit/{sha}")
         m = json.loads(row[5])
-        self.assertEqual((m["kind"], m["author"], m["refs"], m["files"]), ("commit", "Dev One", [77, 1234], 2))
-        self.assertTrue(m["updated"].endswith("Z"))
+        self.assertEqual((m["kind"], m["author_name"], m["refs"], m["files"]), ("commit", "Dev One", [77, 1234], 2))
+        self.assertIsNone(m["author"])                                                           # d@x says nothing about a GitHub handle
+        self.assertTrue(m["updated"].endswith("Z")); self.assertEqual(m["created"], m["updated"])
 
     def test_bots_and_merges_are_skipped_unless_asked(self):
         self.repo.commit("a real change")
@@ -103,6 +104,27 @@ class Backfill(Case):
             st2 = Store(Path(d) / "m.db")
             GitLog(source(merges=True), self.repo.path).sync(st2, log=lambda *_: None)
             self.assertIn("Merge pull request #5 from feature", [r[0] for r in st2.db.execute("SELECT substr(title, instr(title, ' commit ') + 17) FROM chunks")])
+
+    def test_the_github_handle_comes_from_a_noreply_email(self):
+        self.repo.commit("by a github user", email="12345+octocat@users.noreply.github.com", author="The Octocat")
+        self.sync()
+        m = json.loads(self.st.db.execute("SELECT meta FROM chunks").fetchone()[0])
+        self.assertEqual((m["author"], m["author_name"]), ("octocat", "The Octocat"))
+
+    def test_meta_only_refreshes_existing_commits_and_ingests_nothing(self):
+        for i in range(1, 5):
+            self.repo.commit(f"commit {i}", email="7+dev@users.noreply.github.com")
+        self.sync(max_items_per_run=2)                                                           # only the two newest are indexed
+        for r in self.st.db.execute("SELECT rowid, meta FROM chunks").fetchall():                # as written before handles were captured: `author` was the git name
+            m = json.loads(r[1]); m["author"] = m.pop("author_name"); m.pop("created", None)
+            self.st.db.execute("UPDATE chunks SET meta = ? WHERE rowid = ?", (json.dumps(m), r[0]))
+        self.st.commit()
+        state = dict(self.st.db.execute("SELECT k, v FROM state"))
+        GitLog(source(max_items_per_run=2), self.repo.path).sync(self.st, log=lambda *_: None, meta_only=True)
+        rows = [json.loads(r[0]) for r in self.st.db.execute("SELECT meta FROM chunks")]
+        self.assertEqual(len(rows), 2)                                                           # commits 1 and 2 were not indexed and are not now
+        self.assertTrue(all(m["author"] == "dev" and m["author_name"] == "Dev One" and m["created"] for m in rows))
+        self.assertEqual(dict(self.st.db.execute("SELECT k, v FROM state")), state)
 
     def test_paths_filter(self):
         self.repo.commit("touches the compiler", files=("src/compiler/a.scala",))
@@ -136,6 +158,13 @@ class Backfill(Case):
         self.assertGreater(self.st.db.execute("SELECT count(*) FROM chunks").fetchone()[0], 3)
         self.assertEqual(len({r[0] for r in self.st.db.execute("SELECT doc FROM chunks")}), 1)   # all parts belong to one document
         self.assertEqual(self.state("bf_done"), "1")
+
+
+class Handles(unittest.TestCase):
+    def test_noreply_addresses(self):
+        for email, want in (("12345+octocat@users.noreply.github.com", "octocat"), ("octocat@users.noreply.github.com", "octocat"), ("Foo-Bar@users.noreply.github.com", "Foo-Bar"),
+                            ("someone@gmail.com", None), ("", None), ("a@users.noreply.github.com.evil.example", None)):
+            self.assertEqual(handle_from_email(email), want, email)
 
 
 class Refs(unittest.TestCase):

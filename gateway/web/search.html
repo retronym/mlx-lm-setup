@@ -35,6 +35,9 @@
   .badge.closed { color: var(--muted); border-color: var(--line); text-transform: none; font-weight: 500; }
   a.title { color: var(--ink); font-weight: 600; text-decoration: none; word-break: break-word; } a.title:hover { text-decoration: underline; color: var(--accent); }
   .scores { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .whom { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+  .whom a { color: var(--ink); text-decoration: none; font-weight: 600; } .whom a:hover { color: var(--accent); text-decoration: underline; }
+  .whom time { border-bottom: 1px dotted var(--line); cursor: help; } .whom .sep::before { content: "·"; margin-right: 6px; }
   .url { color: var(--muted); font-size: 12px; word-break: break-all; }
   pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
   pre.open { max-height: none; }
@@ -165,6 +168,43 @@ async function loadUniverse(id) {
 loadUniverse().catch(() => {});
 $("universe").addEventListener("change", () => loadUniverse($("universe").value));
 
+// ---- who and when: "opened by @x 3 y ago · updated 2 d ago", "@y commented 2 y ago · on PR #12 opened by @x 3 y ago", "committed by @z 5 mo ago" ----
+function relTime(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (!(s >= 0)) return "just now";
+  const u = [[60, "just now"], [3600, 60, "min"], [86400, 3600, "h"], [30 * 86400, 86400, "d"], [365 * 86400, 30 * 86400, "mo"]].find(x => s < x[0]);
+  return u ? (u.length === 2 ? u[1] : `${Math.floor(s / u[1])} ${u[2]} ago`) : `${(s / (365 * 86400)).toFixed(s < 3 * 365 * 86400 ? 1 : 0).replace(/\.0$/, "")} y ago`;
+}
+const GITHUB = "https://github.com/";                                          // an outbound link, never a resource the page loads
+function whoEl(login, name) {
+  if (login) { const a = el("a", "", "@" + login); a.href = GITHUB + encodeURIComponent(login); a.target = "_blank"; a.rel = "noopener noreferrer"; return a; }
+  return name ? el("span", "", name) : null;
+}
+function timeEl(iso) { const t = el("time", "", relTime(iso)); t.dateTime = iso; t.title = new Date(iso).toISOString().replace("T", " ").slice(0, 16) + " UTC"; return t; }
+function whom(h) {
+  const parts = [];                                                             // each part is a list of nodes; parts are joined with a middle dot
+  const add = (...nodes) => parts.push(nodes.filter(x => x != null));
+  const kindName = { issue: "issue", pr: "PR" };
+  if (h.kind === "issue" || h.kind === "pr") {
+    add(...[h.author ? "opened by " : "opened ", whoEl(h.author), h.created ? " " : null, h.created ? timeEl(h.created) : null].filter(x => x !== null));
+    if (h.updated && h.created && Date.parse(h.updated) - Date.parse(h.created) > 86400e3) add("updated ", timeEl(h.updated));
+  } else if (h.kind === "comment" || h.kind === "review") {
+    add(...[whoEl(h.author, h.author_name) || "someone", h.kind === "review" ? " reviewed " : " commented ", h.created ? timeEl(h.created) : ""]);
+    if (h.thread) add(`on ${kindName[h.thread.kind] || "thread"} #${h.thread.number}${h.thread.author || h.thread.created ? " opened " : ""}`, h.thread.author ? "by " : null, whoEl(h.thread.author), h.thread.created ? " " : null, h.thread.created ? timeEl(h.thread.created) : null);
+    if (h.created && h.updated && Date.parse(h.updated) - Date.parse(h.created) > 60e3) add("edited ", timeEl(h.updated));
+  } else if (h.kind === "commit") {
+    add("committed by ", whoEl(h.author, h.author_name) || "unknown", h.created ? " " : null, h.created ? timeEl(h.created) : null);
+  } else if (h.kind === "release" || h.kind === "tag") {
+    add(h.kind === "tag" ? "tagged " : "released ", h.created ? timeEl(h.created) : null, h.author ? " by " : null, whoEl(h.author));
+  }
+  const line = el("div", "whom");
+  parts.filter(p => p.length).forEach((p, i) => {
+    const span = el("span", i ? "sep" : "");
+    p.forEach(n => span.append(typeof n === "string" ? document.createTextNode(n) : n));
+    line.append(span);
+  });
+  return line.childNodes.length ? line : null;
+}
 function render(d) {
   $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
     const box = el("div", "hit"); box.style.setProperty("--c", h.color);
@@ -177,7 +217,7 @@ function render(d) {
     const sc = [h.rerank != null ? `rerank ${h.rerank.toFixed(2)}` : null, h.bm25 ? `keyword #${h.bm25}` : null, h.vec ? `vector #${h.vec}` : null].filter(Boolean).join(" · ");
     top.append(el("span", "scores", sc));
     const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
-    box.append(top, el("div", "url", h.url), pre);
+    box.append(top, ...[whom(h)].filter(Boolean), el("div", "url", h.url), pre);
     return box;
   }) : [el("div", "", "No results.")]));
   $("meta").textContent = [`${d.results.length} results`, d.universe, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,

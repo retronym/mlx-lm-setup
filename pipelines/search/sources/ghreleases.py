@@ -20,7 +20,8 @@ def _release_chunks(src, r, max_chars):
     name = r.get("name") or tag
     when = (r.get("published_at") or r.get("created_at") or "")[:10]
     meta = {"kind": "release", "tag": tag, "published": when, "prerelease": bool(r.get("prerelease")), "refs": _refs(body),
-            "state": "prerelease" if r.get("prerelease") else None}
+            "state": "prerelease" if r.get("prerelease") else None, "created": r.get("published_at") or r.get("created_at"),
+            "updated": r.get("published_at") or r.get("created_at"), "author": (r.get("author") or {}).get("login")}
     title = f"{src.repo} release {tag}" + (f" ({name})" if name != tag else "")
     doc, url = f"release:{tag}", r["html_url"]
     head = f"{title}\npublished {when}{' (pre-release)' if r.get('prerelease') else ''}\n\n{body[:HEADER_CHARS]}".strip()

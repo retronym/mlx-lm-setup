@@ -13,6 +13,7 @@ from store import Chunk
 from sources.gitsrc import _split_big, MAX
 
 _REF = re.compile(r"(?<!\w)(?:[\w.-]+/[\w.-]+)?#(\d{1,6})\b")           # #123, (#123), scala/bug#123, Fixes sbt/zinc#123
+_NOREPLY = re.compile(r"^(?:\d+\+)?([A-Za-z0-9][A-Za-z0-9-]*)@users\.noreply\.github\.com$", re.I)
 MAX_FILES = 20
 BATCH = 500
 
@@ -25,6 +26,12 @@ def _refs(text):
     return sorted({int(n) for n in _REF.findall(text or "")})[:50]
 
 
+def handle_from_email(email):
+    """The GitHub handle behind a `12345+login@users.noreply.github.com` (or `login@users.noreply.github.com`) address; None for any other email."""
+    m = _NOREPLY.match(email or "")
+    return m.group(1) if m else None
+
+
 def _git(repo, *args, check=True):
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=check, errors="replace")
 
@@ -35,8 +42,8 @@ class GitLog:
         self.skip = {a.lower() for a in src.skip_authors}
 
     def _log(self, rev, *extra):
-        """Commits reachable from `rev` (newest first) as [(sha, author, epoch, message, [paths])]."""
-        args = ["log", "--name-only", "--format=%x1e%H%x1f%an%x1f%at%x1f%B%x1f", f"--since={self.src.since}"] + ([] if self.src.merges else ["--no-merges"]) + list(extra) + [rev]
+        """Commits reachable from `rev` (newest first) as [(sha, author, email, epoch, message, [paths])]."""
+        args = ["log", "--name-only", "--format=%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%B%x1f", f"--since={self.src.since}"] + ([] if self.src.merges else ["--no-merges"]) + list(extra) + [rev]
         if self.src.paths:
             args += ["--", *self.src.paths]
         out = _git(self.repo, *args).stdout
@@ -44,35 +51,42 @@ class GitLog:
         for rec in out.split("\x1e"):
             if not rec.strip():
                 continue
-            sha, author, at, rest = rec.split("\x1f", 3)
+            sha, author, email, at, rest = rec.split("\x1f", 4)
             msg, _, files = rest.rpartition("\x1f")
-            res.append((sha.strip(), author, int(at), msg.strip(), [f for f in files.split("\n") if f.strip()]))
+            res.append((sha.strip(), author, email, int(at), msg.strip(), [f for f in files.split("\n") if f.strip()]))
         return res
 
-    def _chunks(self, sha, author, at, msg, files):
+    def _chunks(self, sha, author, email, at, msg, files):
         if author.lower() in self.skip or not msg:
             return []
         subject = msg.splitlines()[0][:120]
         fl = ", ".join(files[:MAX_FILES]) + (f" and {len(files) - MAX_FILES} more" if len(files) > MAX_FILES else "")
         title = f"{self.src.repo} commit {sha[:8]} {subject}"
-        meta = {"kind": "commit", "sha": sha, "author": author, "updated": _iso(at), "files": len(files), "refs": _refs(msg)}
+        meta = {"kind": "commit", "sha": sha, "author_name": author, "author": handle_from_email(email), "updated": _iso(at), "created": _iso(at),
+                "files": len(files), "refs": _refs(msg)}
         url, doc = f"https://github.com/{self.src.repo}/commit/{sha}", f"commit:{sha}"
         text = f"{msg}\n\nFiles changed: {fl}" if fl else msg
         return [Chunk(f"{self.name}:commit:{sha}" + (f"~{n}" if n else ""), doc, title, "\n".join(part).strip(), url, meta)
                 for n, part in enumerate(_split_big(text.splitlines(), self.max_chars))]
 
-    def _ingest(self, store, commits, tot):
+    def _ingest(self, store, commits, tot, existing_only=False):
         for i, c in enumerate(commits, 1):
-            for k, v in enumerate(store.apply(self.name, self._chunks(*c))):
+            for k, v in enumerate(store.apply(self.name, self._chunks(*c), existing_only=existing_only)):
                 tot[k] += v
             if i % BATCH == 0:
                 store.commit()
         store.commit()
 
-    def sync(self, store, limit=None, since=None, log=print):
+    def sync(self, store, limit=None, since=None, log=print, meta_only=False):
         g, put = (lambda k: store.get(self.name, k)), (lambda k, v: store.put(self.name, k, v))
         cap = limit or self.src.max_items_per_run
         ref = _git(self.repo, "rev-parse", self.src.ref).stdout.strip()
+        if meta_only:                                                  # refresh the metadata of commits already indexed; ingest nothing, move no cursor
+            tot = [0, 0, 0, 0]
+            self._ingest(store, self._log(ref), tot, existing_only=True)
+            store.commit()
+            log(f"{self.src.key} @ {ref[:8]}: metadata refreshed -> ~{tot[1]} ={tot[3]} chunks")
+            return
         tot, seen = [0, 0, 0, 0], 0
         if g("horizon") and self.src.since < g("horizon"):
             put("bf_done", "")                                         # the config reaches further back now: keep filling
@@ -107,11 +121,11 @@ class GitLog:
             self._ingest(store, batch, tot)
             seen += len(batch)
             if restart and batch and not g("top_date"):
-                put("top_date", _iso(batch[0][2]))
+                put("top_date", _iso(batch[0][3]))
             if batch:
-                put("back", batch[-1][0]); put("back_date", _iso(batch[-1][2]))
+                put("back", batch[-1][0]); put("back_date", _iso(batch[-1][3]))
             if not batch or not cap or len(batch) < cap:
                 put("bf_done", "1")
-            log(f"  {self.src.key}: backfill, {len(batch)} commits back to {_iso(batch[-1][2])[:10] if batch else '(none)'}" + (" (history complete)" if g("bf_done") == "1" else ""))
+            log(f"  {self.src.key}: backfill, {len(batch)} commits back to {_iso(batch[-1][3])[:10] if batch else '(none)'}" + (" (history complete)" if g("bf_done") == "1" else ""))
         store.commit()
         log(f"{self.src.key} @ {ref[:8]}: {seen} commits touched -> +{tot[0]} ~{tot[1]} -{tot[2]} ={tot[3]} chunks")

@@ -163,6 +163,13 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             r = await self.http.get(f"/vendor/{name}")
             self.assertEqual((r.status_code, r.headers["content-type"].split(";")[0]), (200, "text/javascript"))
 
+    async def test_search_results_show_who_and_when_without_injecting_html(self):
+        html = (WEB / "search.html").read_text()
+        for needle in ("function relTime(", "function whoEl(", "function whom(", "GITHUB + encodeURIComponent(login)", 'rel = "noopener noreferrer"'):
+            self.assertIn(needle, html)
+        body = html[html.index("function whom("):html.index("function render(")]
+        self.assertNotIn("innerHTML", body)                                            # names and handles come from GitHub: text nodes only
+
     async def test_pages_load_nothing_from_other_origins(self):
         for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html", "home.html"):
             html = (WEB / name).read_text()

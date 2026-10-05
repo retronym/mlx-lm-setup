@@ -97,6 +97,33 @@ class SearchTests(unittest.TestCase):
         self.assertIn("rerank", hs[0])
         self.assertIn("needle", hs[0]["text"])                                                        # the reranker's pick comes first
 
+    def test_hits_say_who_and_when_with_fallbacks_for_older_chunks(self):
+        st = Store(self.cfg.project_db("big"))
+        st.apply("issues", [
+            Chunk("issues:issue:40", "issue:40", "o/r#40 who wrote this", "zebra quagga thread body", "https://x/i40",
+                  {"kind": "pr", "state": "open", "number": 40, "updated": "2026-03-01T00:00:00Z", "created": "2026-01-01T00:00:00Z", "author": "alice"}),
+            Chunk("issues:comment:41", "issue:40", "o/r#40 who wrote this  (comment by bob)", "zebra quagga comment that is the best hit", "https://x/c41",
+                  {"kind": "comment", "number": 40, "updated": "2026-03-02T00:00:00Z"}),                                    # an older comment: no author or created in its metadata
+            Chunk("issues:review:42", "issue:40", "o/r#40 who wrote this  (review comment on a/b.scala by carol[bot])", "zebra quagga review remark", "https://x/r42",
+                  {"kind": "review", "number": 40, "updated": "2026-03-03T00:00:00Z", "created": "2026-03-03T00:00:00Z", "author": "carol[bot]"})])
+        st.apply("code", [Chunk("code:commit:abc", "commit:abc", "o/r commit abcd1234 quokka fix", "quokka fix in the typer", "https://x/abc",
+                                {"kind": "commit", "author": "Dev One", "updated": "2026-02-01T00:00:00Z"}),               # written before handles: `author` is the git name
+                          Chunk("code:commit:def", "commit:def", "o/r commit def56789 quokka again", "quokka again in the typer", "https://x/def",
+                                {"kind": "commit", "author": "octocat", "author_name": "The Octocat", "updated": "2026-02-02T00:00:00Z", "created": "2026-02-02T00:00:00Z"}),
+                          Chunk("code:release:v1", "release:v1", "o/r release v1", "quokka release", "https://x/v1", {"kind": "release", "published": "2026-01-15"})])
+        st.commit(); embed.fill(st, FakeEmbedder(), log=lambda *_: None)
+        idx = search.Index(self.cfg, "all")
+        by_doc = {h["doc"]: h for h in search.hits(idx, "best hit", k=10, mode="bm25", sources=["big/issues"])}
+        h = by_doc["issue:40"]                                                                                         # one hit per thread: the comment won
+        self.assertEqual((h["kind"], h["author"]), ("comment", "bob"))                                                 # author recovered from the title
+        self.assertEqual(h["thread"], {"number": 40, "kind": "pr", "author": "alice", "created": "2026-01-01T00:00:00Z"})
+        self.assertEqual(h["updated"], "2026-03-02T00:00:00Z")
+        commits = {h["doc"]: h for h in search.hits(idx, "quokka", k=10, mode="bm25", sources=["big/code"])}
+        self.assertEqual((commits["commit:abc"]["author"], commits["commit:abc"]["author_name"], commits["commit:abc"]["created"]), (None, "Dev One", "2026-02-01T00:00:00Z"))
+        self.assertEqual((commits["commit:def"]["author"], commits["commit:def"]["author_name"]), ("octocat", "The Octocat"))
+        rel = commits["release:v1"]
+        self.assertEqual((rel["created"], rel["updated"]), ("2026-01-15", "2026-01-15"))                              # a release's time falls back to its tag date
+
     def test_universe_selection(self):
         self.assertEqual({h["project"] for h in search.hits(search.Index(self.cfg, "small-only"), "needle", k=10, embedder=FakeEmbedder())}, {"small"})
         self.assertEqual(search.Index(self.cfg).universe.id, "all")                                   # the default universe
