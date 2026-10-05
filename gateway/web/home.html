@@ -86,13 +86,14 @@
   .tlempty { font-size: 12px; color: var(--muted); padding: 4px 0; }
   @media (max-width: 520px) { .lane, .axis { grid-template-columns: 90px 1fr; } }
   @media (max-width: 520px) { main { padding: 18px 14px; } .grid { grid-template-columns: 1fr; } }
+  .logo { display: inline-flex; color: var(--ink); margin-right: 6px; vertical-align: middle; } .logo svg { display: block; }
 </style>
 </head>
 <body>
 <main>
   <div class="top">
     <div>
-      <h1>Local Models</h1>
+      <h1 style="display:flex;align-items:center"><a href="/" class="logo" title="Local Models home" aria-label="Local Models home"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5" style="stroke:var(--accent,currentColor)"/><path d="M7.5 9h9M7.5 12.5h6M7.5 16h3.5"/></svg></a>Local Models</h1>
       <div class="sub">Models on this Mac, started on first use and stopped when idle.</div>
     </div>
     <div class="mem">

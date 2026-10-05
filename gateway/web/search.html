@@ -93,11 +93,12 @@
   .ol { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .ol .where { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   [hidden] { display: none !important; }
+  .logo { display: inline-flex; color: var(--ink); margin-right: 6px; vertical-align: middle; } .logo svg { display: block; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Local Models · Search</h1>
+  <h1 style="display:flex;align-items:center"><a href="/" class="logo" title="Local Models home" aria-label="Local Models home"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5" style="stroke:var(--accent,currentColor)"/><path d="M7.5 9h9M7.5 12.5h6M7.5 16h3.5"/></svg></a>Local Models · Search</h1>
   <a href="/">Home</a>
   <a href="/chat">Chat</a>
   <a href="/jev">Decide</a>
