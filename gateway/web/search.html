@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Local Models · Search</title>
 <style>
-  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706; }
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706; --ok: #16a34a; --track: #ece9e6; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24; }
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24; --ok: #4ade80; --track: #2a2725; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
@@ -41,6 +41,27 @@
   #index { display: flex; flex-wrap: wrap; gap: 4px 16px; }
   #index span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
   #empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 6px 14px; font-weight: 600; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .pill { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); } .pill.on::before { content: "● "; animation: pulse 1.4s ease-in-out infinite; }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card h3 { margin: 0; font-size: 15px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; } .card h3 .meta { font-weight: 400; }
+  .src { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); } .src:first-of-type { border-top: 0; padding-top: 0; }
+  .src.off { opacity: .55; }
+  .shead { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: 13px; } .shead .r { margin-left: auto; }
+  .prio { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+  .bar { display: grid; grid-template-columns: 72px 1fr 200px; gap: 10px; align-items: center; font-size: 12px; } .bar.sub { padding-left: 14px; } .bar .nm { color: var(--muted); }
+  .bar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .track { height: 9px; background: var(--track); border-radius: 5px; overflow: hidden; position: relative; }
+  .fill { height: 100%; background: var(--c); border-radius: 5px; transition: width .6s ease; } .fill.done { background: var(--ok); }
+  .track.live .fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sheen 1.6s linear infinite; }
+  @keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .runmsg { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 640px) { .bar { grid-template-columns: 64px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -57,6 +78,8 @@
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
 <main>
+  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <div id="tab-search" style="display:flex;flex-direction:column;gap:12px">
   <form class="row" id="form">
     <input id="q" type="search" placeholder="Ask about the Scala compiler, library or build tools…" autocomplete="off" autofocus>
     <button class="primary" id="go">Search</button>
@@ -74,6 +97,12 @@
   <div id="index" class="meta"></div>
   <div class="meta" id="meta"></div>
   <div id="results"><div id="empty">Results appear here: passages with links back to GitHub, not generated answers.</div></div>
+  </div>
+  <div id="tab-status" hidden style="display:flex;flex-direction:column;gap:12px">
+    <div class="card" style="--c: var(--ink)" id="run"></div>
+    <div id="cards" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="meta">Counts are read from the index files, refreshing every 2 s. "synced" is text in the index (git sources: files indexed of files in the tree; GitHub sources: how far each stream has walked back from now to its start date); "embedded" is chunks with a current vector, which is what hybrid and vector search can see. Lower priority numbers are processed first.</div>
+  </div>
 </main>
 <script>
 "use strict";
@@ -162,7 +191,7 @@ async function go() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
     render(d); status("");
-    history.replaceState(null, "", `#${encodeURIComponent(q)}`);
+    if (location.hash !== "#status") history.replaceState(null, "", `#${encodeURIComponent(q)}`);
   } catch (e) {
     if (e.name !== "AbortError") status(e.message, "err");
   } finally {
@@ -170,7 +199,78 @@ async function go() {
   }
 }
 $("form").onsubmit = e => { e.preventDefault(); go(); };
-if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
+
+// ---- index status tab ------------------------------------------------------------------------------------------------
+const pct = f => `${(f * 100).toFixed(f > .995 && f < 1 ? 2 : 1)}%`;
+const num = x => x.toLocaleString();
+const dur = s => s == null ? "" : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+const ago = t => dur(Date.now() / 1000 - t) + " ago";
+function bar(name, f, text, live, sub, color) {
+  const row = el("div", `bar${sub ? " sub" : ""}`);
+  const fill = el("div", `fill${f >= 1 ? " done" : ""}`); fill.style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
+  const track = el("div", `track${live && f < 1 ? " live" : ""}`); track.append(fill);
+  if (color) row.style.setProperty("--c", color);
+  row.append(el("div", "nm", name), track, el("div", "val", text));
+  return row;
+}
+const samples = [];                                    // (time, embedded total) for the rate and ETA
+function renderStatus(d) {
+  const run = d.run, working = run && run.running;
+  const pill = el("span", `pill${working ? " on" : run && (run.stale || run.ok === false) ? " bad" : ""}`,
+                  working ? `${run.kind} running` : !run ? "never run" : run.stale ? "run died" : run.ok === false ? `${run.kind} finished with errors` : `${run.kind} finished`);
+  const head = el("h3", "", "Indexer "); head.append(pill);
+  const total = d.projects.flatMap(p => p.sources).reduce((a, s) => [a[0] + s.chunks, a[1] + s.embedded], [0, 0]);
+  const now = Date.now() / 1000; samples.push([now, total[1]]); while (samples.length > 1 && now - samples[0][0] > 45) samples.shift();
+  const rate = samples.length > 1 ? (total[1] - samples[0][1]) / (now - samples[0][0]) : 0, left = total[0] - total[1];
+  const bits = [];
+  if (run) {
+    if (working) bits.push(`started ${ago(run.started)}`, run.source ? `now: ${run.source} (${run.phase})` : run.phase, `${run.done.length} of ${run.plan.length} sources`);
+    else if (run.finished) bits.push(`finished ${ago(run.finished)}`);
+  }
+  if (rate > 0.5) bits.push(`embedding ${rate.toFixed(0)} chunks/s`, left ? `about ${dur(left / rate)} left` : "");
+  const parts = [head, el("div", "meta", bits.filter(Boolean).join(" · ")), bar("embedded", total[0] ? total[1] / total[0] : 1, `${num(total[1])} / ${num(total[0])}`, working && run.kind === "embed", false)];
+  if (run && run.message) parts.push(el("div", "runmsg", run.message));
+  for (const e of run?.errors || []) parts.push(el("div", "runmsg", e)).lastChild.style.color = "var(--bad)";
+  $("run").replaceChildren(...parts);
+  $("cards").replaceChildren(...d.projects.map(p => {
+    const card = el("div", "card"); const h = el("h3", "", p.title); h.append(el("span", "meta", p.indexed ? p.id : `${p.id} · not indexed yet`));
+    card.append(h);
+    for (const s of p.sources) {
+      const box = el("div", `src${s.enabled ? "" : " off"}`);
+      const sh = el("div", "shead"); sh.append(el("b", "", s.label), el("span", "prio", `p${s.priority}`), el("span", "meta", s.type));
+      if (!s.enabled) sh.append(el("span", "meta", "disabled"));
+      if (s.active) sh.append(el("span", "pill on", "working"));
+      sh.append(Object.assign(el("span", "meta r", s.position ? `@ ${s.position}` : ""), {}));
+      box.append(sh);
+      const sy = s.sync, live = s.active;
+      if (sy?.kind === "files") box.append(bar("synced", sy.frac, sy.total ? `${num(sy.done)} of ${num(sy.total)} files` : sy.done ? `${num(sy.done)} files` : "not started", live, false, s.color));
+      else if (sy?.kind === "timeline") {
+        box.append(bar("synced", sy.frac, `${pct(sy.frac)} · back to ${sy.horizon}`, live, false, s.color));
+        for (const st of sy.streams) box.append(bar(st.name, st.frac, st.at ? `${st.mode === "done" ? "complete" : (st.mode === "back" ? "back to " : "up to ") + st.at.slice(0, 10)} · ${pct(st.frac)}` : "not started", live, true, s.color));
+      } else box.append(bar("synced", 0, "not implemented yet", false, false, s.color));
+      box.append(bar("embedded", s.chunks ? s.embedded / s.chunks : 0, `${num(s.embedded)} / ${num(s.chunks)}`, working && run.kind === "embed" && live, false, s.color));
+      card.append(box);
+    }
+    return card;
+  }));
+}
+let pollTimer = null;
+async function pollStatus() {
+  if (document.hidden) return;
+  try {
+    const d = await (await fetch("/api/search/status" + ($("universe").value && !$("unilabel").hidden ? `?universe=${encodeURIComponent($("universe").value)}` : ""))).json();
+    if (d.error) throw new Error(d.error.message);
+    renderStatus(d);
+  } catch (e) { $("run").replaceChildren(el("div", "", `status unavailable: ${e.message}`)); }
+}
+function tab(name) {
+  for (const t of ["search", "status"]) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
+  clearInterval(pollTimer);
+  if (name === "status") { samples.length = 0; pollStatus(); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
+}
+$("t-search").onclick = () => tab("search"); $("t-status").onclick = () => tab("status");
+if (location.hash === "#status") tab("status");
+else if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
 </script>
 </body>
 </html>

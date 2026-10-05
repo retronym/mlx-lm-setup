@@ -6,7 +6,7 @@ import os, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 import numpy as np, torch
 from transformers import AutoModel, AutoTokenizer
-import config
+import config, runstate
 from store import Store, STATE_SQL
 
 MODEL = os.environ.get("EMBED_MODEL", "Qwen/Qwen3-Embedding-0.6B")
@@ -124,12 +124,16 @@ if __name__ == "__main__":
     limit, maxp = opt("--limit"), int(opt("--max-priority", 9))
     cfg = config.load()
     srcs = targets(cfg, a, maxp)
+    run = runstate.Run(cfg, "embed", [s.key for s in srcs])
     t = time.time()
+    run.s["phase"] = "loading the embedding model"; run._write(force=True)
     emb = load(cfg)
-    print(f"loaded {emb.name} on {emb.dev} in {time.time() - t:.0f}s")
+    run.log(f"loaded {emb.name} on {emb.dev} in {time.time() - t:.0f}s")
     for s in srcs:
         if not cfg.project_db(s.project).exists():
             continue
-        n = fill(Store(cfg.project_db(s.project)), emb, source=s.id, limit=int(limit) if limit else None)
+        run.source(s.key, "embed")
+        n = fill(Store(cfg.project_db(s.project)), emb, source=s.id, limit=int(limit) if limit else None, log=lambda m, k=s.key: run.log(f"{k}: {m.strip()}"))
         if n:
-            print(f"{s.key}: {n} chunks embedded")
+            run.log(f"{s.key}: {n} chunks embedded")
+    run.finish()

@@ -297,11 +297,12 @@ def search_stats(catalog: Catalog, model: str | None = None, universe: str | Non
     spec, cfg = _search_config(catalog, model)
     if cfg is None:
         return {"backend": spec.name, "indexed": False, "universes": [], "projects": []}
+    run = searchinfo.run_state(spec.options["index_dir"], cfg)
     try:
-        st = searchinfo.stats(cfg, universe)
+        st = searchinfo.stats(cfg, universe, run)
     except KeyError as e:
         raise ApiError(404, "unknown_universe", e.args[0]) from None
-    return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), **st}
+    return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), "run": run, **st}
 
 
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:

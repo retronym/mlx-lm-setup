@@ -146,6 +146,7 @@ class GitSource:
         known = {r[0][5:]: r[1] for r in store.db.execute("SELECT k, v FROM state WHERE source=? AND k LIKE 'file:%'", (self.name,))}
         todo = [p for p, b in files.items() if known.get(p) != f"{CHUNKER_VERSION}:{b}"]
         gone = [p for p in known if p not in files]
+        store.put(self.name, "files_total", str(len(files))); store.commit()           # the page shows files indexed of files_total while this runs
         tot = [0, 0, 0, 0]
         for p in gone:
             tot[2] += store.delete_doc(self.name, p)
@@ -166,7 +167,7 @@ class GitSource:
             for i, v in enumerate(store.apply(self.name, chunks, doc=p)):
                 tot[i] += v
             store.put(self.name, "file:" + p, f"{CHUNKER_VERSION}:{files[p]}")
-            if n % 200 == 199:
+            if n % 50 == 49:
                 store.commit()
                 log(f"  {self.name}: {n + 1}/{len(todo)} files")
         store.put(self.name, "head", head)

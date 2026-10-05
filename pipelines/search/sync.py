@@ -8,7 +8,7 @@ than their min_interval_hours (--force ignores that). A failing source is report
 --reconcile drops issues and PRs that no longer exist upstream."""
 import sys, time
 sys.path.insert(0, __import__("os").path.dirname(__file__))
-import config, repos
+import config, repos, runstate
 from embed import targets
 from store import Store
 from sources import ghissues
@@ -33,26 +33,31 @@ def main(argv):
     ghissues.configure(cfg.search["github"])
     max_chars = cfg.search["chunking"]["max_chars"]
     fetched, failed = set(), 0
-    for s in targets(cfg, a, maxp):
+    srcs = targets(cfg, a, maxp)
+    run = runstate.Run(cfg, "sync", [s.key for s in srcs])
+    for s in srcs:
         st = Store(cfg.project_db(s.project))
         if not due(st, s, force):
-            print(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
+            run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
             continue
+        run.source(s.key)
         try:
             if s.type == "git":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)
-                GitSource(s, d, max_chars).sync(st, limit=int(limit) if limit else None)
+                GitSource(s, d, max_chars).sync(st, limit=int(limit) if limit else None, log=run.log)
             elif s.type == "github":
                 g = ghissues.GhIssues(s, max_chars)
-                (g.reconcile(st) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None))
+                (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None, log=run.log))
             else:
-                print(f"{s.key}: source type {s.type!r} is not implemented yet, skipped")
+                run.log(f"{s.key}: source type {s.type!r} is not implemented yet, skipped")
                 continue
             st.put(s.id, "last_sync", str(time.time())); st.commit()
         except Exception as e:                                           # noqa: BLE001  one source failing must not stop the rest
             failed += 1
             print(f"{s.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+            run.error(f"{s.key}: {type(e).__name__}: {e}")
+    run.finish(not failed)
     return 1 if failed else 0
 
 
