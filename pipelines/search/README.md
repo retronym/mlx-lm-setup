@@ -1,30 +1,43 @@
-# Semantic search over Scala compiler and build sources (PoC)
+# Semantic search over Scala compiler and build sources
 
-One SQLite file (`data/search.db`, git-ignored) holding chunks, an FTS5 keyword index and embeddings; hybrid retrieval (BM25 + vector, reciprocal rank fusion). Everything runs locally; the only network use is `gh api` for issues and the one-time model download.
+Projects are indexed independently, one SQLite file each (chunks, an FTS5 keyword index, embeddings), and composed into **universes** that are searched together: BM25 and vector hits from every member database are merged by score, fused by reciprocal rank, and optionally reranked. Everything runs locally; the only network use is `git` and `gh api` for syncing and the one-time model download. See [PLAN.md](PLAN.md) for the design decisions and what is still to do.
 
-| Source | What | Change detection |
+## Configuration (JSON)
+
+```
+config/search.json          global: data dirs, models, chunking, GitHub politeness, refresh tiers, local-model steps
+config/projects/<id>.json   a project: title and sources
+config/universes/<id>.json  a universe: a named list of projects
+```
+
+| Source type | Fields | What it indexes |
 |---|---|---|
-| `scalac` | scala/scala `src/{compiler,reflect,library}` (one chunk per member-level definition, prefixed with path, package and enclosing definition) and `spec/` (per heading section) | git blob sha per file; only changed files are re-chunked, vanished files are deleted |
-| `scala3` | scala/scala3 `compiler/src`, `library/src`, `tasty-core/src`, `sbt-bridge/src` (same chunker; tests excluded) | same |
-| `scala3docs` | Scala 3 `docs/_docs/{reference,internals}` (per heading section) | same |
-| `bug` | scala/bug issues (title + body) and every comment as its own chunk | per stream (issues, comments) `since=<cursor>` on `updated`, ascending; paged, committed and cursor-saved after every page, so an interrupted run resumes; rate limit checked every 25 pages (sleeps to the reset below 300 left), 403/429 waited out; state and labels are metadata, so closing an issue re-embeds nothing |
-| `scalapr` | scala/scala pull requests (title + body; state open / merged / closed), conversation comments and inline review comments (with the diff hunk) | same three streams; bots and `/rebuild`-style commands skipped; default horizon 2020-01-01 (`--since` widens) |
+| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala` / `java` / `markdown`; `plain` not yet) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
+| `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped. All the sources of a project on one repo share one pass over its streams; two sources may not index the same kind of item (the config says so) |
+| `github_releases` | `repo`, `tag_messages` | GitHub release notes (a header chunk, then one chunk per heading for long notes; `#123` and `/pull/123` references go into the chunk metadata) plus annotated tag messages for tags without a release |
+
+Every source also takes `id`, `label`, `color`, `priority` (1 highest .. 9), `enabled`, `min_interval_hours`, `max_items_per_run`. Labels and colours are what the web page shows, so adding a project needs no code change. `python config.py check` validates everything (all problems at once, with file and key path) and prints the tree; `python config.py show <universe>`.
+
+The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
 
 ```bash
-PY=/path/to/.venv-jev/bin/python           # numpy, torch, transformers
-$PY pipelines/search/sync.py               # scalac scala3 scala3docs bug scalapr; add `reconcile` to drop deleted issues; --since ISO8601 widens the issue backfill
-$PY pipelines/search/embed.py              # fill missing/stale vectors (Qwen3-Embedding-0.6B, MPS, ~50 chunks/s); resumable
+PY=/path/to/.venv-jev/bin/python                  # numpy, torch, transformers
+$PY pipelines/search/config.py check
+$PY pipelines/search/sync.py                      # the default universe, by priority; or: sync.py zinc | zinc/issues | scala-zinc --max-priority 3
+$PY pipelines/search/embed.py                     # fill missing/stale vectors in priority order (Qwen3-Embedding-0.6B, MPS, ~80 chunks/s)
 $PY pipelines/search/search.py "where is eta expansion of by-name parameters handled"
-$PY pipelines/search/search.py --rerank "where does the backend decide to emit invokedynamic for lambdas"   # + Qwen3-Reranker-0.6B over the top 30 (~3 s more)
-$PY pipelines/search/search.py --source bug --open "Await.result leaks callbacks"     # --bm25 / --vec to see each half
-$PY pipelines/search/test_lifecycle.py     # add / edit / rename / delete on a scratch repo: only the changed chunks are touched
+$PY pipelines/search/search.py --rerank --project zinc --source issues "incremental compilation loops"
+$PY pipelines/search/migrate.py --old data/search.db   # one-off: split the legacy single index into per-project databases, no re-embedding
+$PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pipelines/search/test_github.py; $PY pipelines/search/test_lifecycle.py
 ```
+
+`sync.py` skips disabled sources and sources synced less than `min_interval_hours` ago (`--force` overrides), runs a failing source's error to the end of the run, and takes `--since`, `--limit`, `--no-fetch`, `--reconcile` (drop issues and PRs deleted upstream).
 
 ## Lifecycle: why re-indexing is cheap
 
 - **Sync and embed are separate passes.** Sync diffs chunk content hashes (`store.apply`): new → insert, changed → update, missing → delete, same → skip. Embedding fills whatever has no vector for the current model or whose hash moved on. Keyword search works before any model exists; a model change is just a refill (vectors carry their model name).
 - **Chunk identity is stable under edits elsewhere**: `path:Enclosing.name#n`, `issue:N`, `comment:ID`. Editing one method changes one chunk; adding a method leaves the others' ids alone.
-- Measured on this machine: initial sync of scalac (37k chunks) 18 s, scala/bug since 2020 (2.8k issues, 8k comments) 75 s, an incremental issue sync 1.5 s; embedding is the only slow step (~17 min for everything, once).
+- Measured on this machine: initial sync of scala/scala (37k chunks) 18 s, scala/bug since 2020 (2.8k issues, 8k comments) 75 s, an incremental issue sync 1.5 s; embedding is the only slow step (~17 min for everything, once).
 
 ## Known gaps (PoC)
 
@@ -63,3 +76,41 @@ python3 pipelines/search/dashboard.py        # http://127.0.0.1:8767/  (stdlib o
 One card per source with a "synced" bar (git sources: files indexed of files in the tree; GitHub sources: where each stream's cursor is between its start date and now, per stream) and an "embedded" bar (chunks that have a current vector), plus an overall bar with the embedding rate and ETA, running sync / embed indicators, and the latest log lines.
 
 Backfilling older history is `sync.py bug --since 2000-01-01T00:00:00Z` (then `embed.py`); it is idempotent, so a re-run only costs the API requests.
+
+## GitHub sync: priorities, caps and the two cursors
+
+Each stream (issues and PRs, comments, review comments) of a repo has a **forward cursor** (newest item ingested: every run first walks from there, so new and edited items arrive at once) and a **backfill frontier** that fills history newest-first in time windows until the source's `since` horizon. `max_items_per_run` caps the backfill per run (the current window always finishes), so a huge low-priority tracker such as scala/scala3 (priority 8) drains over several runs with the recent past first and never starves the rest. Widening a source's `since` re-opens its backfill. The page's "synced" bar for a GitHub source is how far back the frontier has come. Pages are fetched politely: the rate limit is checked every 25 pages (sleeping to the reset below `github.min_remaining`), a 403/429 is waited out, and long lists are re-anchored before GitHub's 10,000-item `page=` cap.
+
+## Where data lives, and moving it between checkouts
+
+Everything generated is under `pipelines/search/data/` (git-ignored) **of the checkout you run in**: `projects/<id>/index.db`, `repos/` (managed bare clones) and `run.json` (what the indexer is doing). A worktree therefore has its own index and never touches the one a running service reads from the main checkout. `SEARCH_DATA_DIR=/some/dir` overrides the location (relative paths are relative to `pipelines/search`).
+
+```bash
+pipelines/search/draft.sh start          # a draft gateway for THIS checkout on :8091 (search backend only; venvs come from the main checkout): http://127.0.0.1:8091/search#status
+pipelines/search/promote_data.sh <worktree> <main-checkout>     # copy indexes and clones across with APFS clones (instant, no extra disk); --only zinc,scala-asm; --force replaces (old kept as .bak)
+```
+
+After merging to `main`: `promote_data.sh` from the worktree into the main checkout, then `service/service.sh restart`. The main checkout's legacy `data/search.db` is no longer read once the service runs the new code and can be deleted after you have checked the new indexes.
+
+## Refresh: one command, local models throughout
+
+```bash
+pipelines/search/refresh.sh                 # everything, in priority order (needs the gateway: embeddings, LLM and NLI come from it)
+pipelines/search/refresh.sh --tier high     # only sources with priority <= 3 (tiers are in search.json refresh.tiers)
+pipelines/search/refresh.sh --dry-run       # the plan: which phases run and why, which sources in what order, caps and intervals
+pipelines/search/refresh.sh --only embed,verify --budget-hours 2 --local     # pick phases, stop starting new work after 2 h, embed in-process
+service/search-refresh.sh install           # a nightly launchd job (search.json refresh.at, default 03:00; low CPU and I/O priority; caffeinate)
+```
+
+| Phase | What | Local model |
+|---|---|---|
+| `sync` | fetch the managed clones and sync every source in priority order; GitHub: forward walk, then the capped newest-first backfill | none |
+| `reconcile` | drop issues and PRs deleted upstream (weekly, `refresh.reconcile_every_days`) | none |
+| `enrich` | for long threads (>= `min_comments` comments), a summary chunk written by `llm.thread_summaries.model`, **checked sentence by sentence against the thread by the NLI model** and retried with the problems; unfaithful summaries are not indexed. Newest threads first, `max_per_run` per run, re-done when a thread has grown by half. Off by default | Qwen3-Coder + OpenJev NLI |
+| `digest` | what changed since the last refresh: exact bullets rendered from the indexes, plus a short LLM overview checked against them (unsupported lines dropped, the overview left out if nothing faithful remains). Shown on the Index status tab | Qwen3-Coder + OpenJev NLI |
+| `embed` | vectors for everything new, through the gateway's `/v1/embeddings` (one managed copy of the model, started and stopped by the gateway's memory manager; `--local` runs it in-process) | Qwen3-Embedding |
+| `verify` | database integrity, nothing left without a vector, and the canary queries (`config/canaries.json`: a query passes when an expected string is in the title or URL of the top `k` results) through the gateway, which also proves the search backend end to end | the search backend |
+
+The LLM phases run before `embed` so the large LLM and the embedder do not evict each other from the gateway's memory budget. `--budget-hours` (or `refresh.budget_hours`) stops starting new sources, LLM items and embedding work after that long; the rest comes first next time. One indexer run at a time (a lock shared with `sync.py` and `embed.py`; a second one exits with status 3). Progress is `data/run.json` (what the Index status tab shows live: phase chips, current source, rate), history is `data/refresh.json`, digests are `data/digest.json` and `data/digests/<universe>/`. Exit status: 0 ok, 1 something failed, 3 busy.
+
+Why the NLI model checks prose but not the digest bullets: it is good at "is this sentence supported by that text" and weak on lists of identifiers and numbers, so the bullets are rendered from the data (exact by construction) and only the overview is model-written. `noise_filter` (rules, then the decision model for borderline comments) is configured but not wired yet: it waits for the evaluation set to show it helps.

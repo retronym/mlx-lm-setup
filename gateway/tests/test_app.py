@@ -6,7 +6,7 @@ import uvicorn
 
 from gateway.app import create_app
 from gateway.catalog import parse
-from gateway.core import search_stats
+from gateway.core import ApiError, search_stats
 from gateway.supervisor import State, Supervisor
 from gateway.tests.test_supervisor import catalog, until
 
@@ -162,10 +162,10 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code, 400)                                          # llm is not an nli backend
 
     async def test_search_routes_validate_and_pass_through(self):
-        r = await self.http.post("/api/search", json={"query": "eta expansion", "k": 3, "source": "bug", "rerank": False})
+        r = await self.http.post("/api/search", json={"query": "eta expansion", "k": 3, "sources": ["scala2/issues"], "projects": ["scala2"], "rerank": False})
         d = r.json()
         self.assertEqual((r.status_code, d["backend"], len(d["results"]), d["reranked"]), (200, "find", 3, False))
-        self.assertEqual((d["echo"]["source"], d["echo"]["rerank"], d["echo"]["mode"]), ("bug", False, "hybrid"))
+        self.assertEqual((d["echo"]["sources"], d["echo"]["projects"], d["echo"]["rerank"], d["echo"]["mode"]), (["scala2/issues"], ["scala2"], False, "hybrid"))
         r = await self.http.post("/api/search", json={"query": "q", "bogus": 1})
         self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_arguments"))
         r = await self.http.post("/api/search", json={"query": ""})
@@ -183,21 +183,47 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         r = await self.http.post("/api/rerank", json={"query": "q", "documents": ["a", "b"]})
         self.assertEqual((r.status_code, r.json()["scores"], r.headers["x-gateway-backend"]), (200, [1.0, 0.5], "find"))
 
-    async def test_search_status_reads_the_index_without_starting_anything(self):
+    async def test_search_status_reads_config_and_indexes_without_starting_anything(self):
         r = await self.http.get("/api/search/status")
         self.assertEqual((r.status_code, r.json()["indexed"]), (200, False))          # the test backend has no index
-        db = Path(self.tmp.name) / "s.db"
+        root = Path(self.tmp.name)
+        cfgdir = root / "cfg"
+        (cfgdir / "projects").mkdir(parents=True); (cfgdir / "universes").mkdir()
+        (cfgdir / "search.json").write_text(json.dumps({"data_dir": str(root / "data")}))
+        src = lambda sid, **kw: {"id": sid, "type": "git", "label": f"label {sid}", "color": "#112233", "priority": 2, "repo": "o/r", "ref": "main", "paths": ["."],
+                                 "chunkers": {".scala": "scala"}, **kw}
+        (cfgdir / "projects" / "p.json").write_text(json.dumps({"id": "p", "title": "Proj", "sources": [
+            src("code"), {"id": "issues", "type": "github", "label": "label issues", "color": "#112233", "priority": 2, "repo": "o/r", "include": ["issues"]}, src("later")]}))
+        (cfgdir / "projects" / "q.json").write_text(json.dumps({"id": "q", "title": "Not yet", "sources": [src("code")]}))
+        (cfgdir / "universes" / "u.json").write_text(json.dumps({"id": "u", "title": "Uni", "projects": ["p", "q"], "default": True}))
+        db = root / "data" / "projects" / "p" / "index.db"
+        db.parent.mkdir(parents=True)
         con = sqlite3.connect(db)
         con.executescript("""CREATE TABLE chunks(rowid INTEGER PRIMARY KEY, source TEXT, hash TEXT, updated REAL);
-                             CREATE TABLE vec(rowid INTEGER PRIMARY KEY, hash TEXT); CREATE TABLE state(source TEXT, k TEXT, v TEXT);
-                             INSERT INTO chunks VALUES (1,'bug','h1',5),(2,'bug','h2',6),(3,'scalac','h3',7);
-                             INSERT INTO vec VALUES (1,'h1'),(2,'stale'); INSERT INTO state VALUES ('bug','since','2026-01-01');""")
+                             CREATE TABLE vec(rowid INTEGER PRIMARY KEY, model TEXT, hash TEXT); CREATE TABLE state(source TEXT, k TEXT, v TEXT);
+                             INSERT INTO chunks VALUES (1,'code','h1',5),(2,'code','h2',6),(3,'issues','h3',7);
+                             INSERT INTO vec VALUES (1,'Qwen/Qwen3-Embedding-0.6B','h1'),(2,'Qwen/Qwen3-Embedding-0.6B','stale');
+                             INSERT INTO state VALUES ('issues','since_issues','2026-01-01T00:00:00Z');""")
         con.commit(); con.close()
-        cat = parse({"backends": {"s": {"adapter": "search", "python": "py", "index_dir": self.tmp.name, "db": str(db), "est_mem_gb": 1}}}, Path("/base"))
+        cat = parse({"backends": {"s": {"adapter": "search", "python": "py", "index_dir": str(Path(__file__).parents[2] / "pipelines" / "search"), "config_dir": str(cfgdir),
+                                        "est_mem_gb": 1}}}, Path("/base"))
         d = search_stats(cat)
-        by = {s["source"]: s for s in d["sources"]}
-        self.assertEqual((by["bug"]["chunks"], by["bug"]["embedded"], by["bug"]["position"]), (2, 1, "2026-01-01"))   # a stale vector does not count
-        self.assertEqual((by["scalac"]["chunks"], by["scalac"]["embedded"]), (1, 0))
+        self.assertEqual((d["digest"], d["refresh"]), (None, None))                                       # nothing refreshed yet
+        (root / "data" / "digest.json").write_text(json.dumps({"universe": "u", "generated": 1.0, "since": "2026-01-01T00:00:00Z", "model": "m", "checked": True, "attempts": 1, "facts": 3, "text": "A digest.", "source_facts": "x"}))
+        (root / "data" / "refresh.json").write_text(json.dumps({"last_run": {"ok": True, "phases": {"sync": {"ok": True, "secs": 1.0}}}, "history": [{"ok": True}] * 8}))
+        d = search_stats(cat)
+        self.assertEqual((d["digest"]["text"], d["digest"]["checked"], "source_facts" in d["digest"]), ("A digest.", True, False))   # the facts stay on disk
+        self.assertEqual((d["refresh"]["last_run"]["ok"], len(d["refresh"]["history"])), (True, 5))
+        self.assertEqual((d["universe"]["id"], d["indexed"], [u["id"] for u in d["universes"]]), ("u", True, ["u"]))
+        p, q = d["projects"]
+        self.assertEqual((p["id"], p["indexed"], q["indexed"]), ("p", True, False))                       # q has no database yet
+        by = {s["id"]: s for s in p["sources"]}
+        self.assertEqual((by["code"]["chunks"], by["code"]["embedded"], by["code"]["color"], by["code"]["label"]), (2, 1, "#112233", "label code"))   # a stale vector does not count
+        self.assertEqual((by["issues"]["chunks"], by["issues"]["position"]), (1, "2026-01-01T00:00:00Z"))
+        self.assertEqual(by["later"]["chunks"], 0)                                                         # configured but empty
+        self.assertEqual(d["universes"][0]["projects"][0]["sources"][0]["key"], "p/code")
+        with self.assertRaises(ApiError):
+            search_stats(cat, universe="nope")
 
     async def test_score_routes_to_the_score_backend(self):
         r = await self.http.post("/api/score", json={"prompt": "p", "candidates": [" a", " bb"]})

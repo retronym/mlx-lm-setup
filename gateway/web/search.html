@@ -5,11 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Local Models · Search</title>
 <style>
-  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706;
-          --scalac: #4f46e5; --scala3: #ea580c; --docs: #0d9488; --bug: #be185d; --scalapr: #0369a1; }
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706; --ok: #16a34a; --track: #ece9e6; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24;
-            --scalac: #818cf8; --scala3: #fb923c; --docs: #2dd4bf; --bug: #f472b6; --scalapr: #38bdf8; }
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24; --ok: #4ade80; --track: #2a2725; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
@@ -31,7 +29,6 @@
   .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .hit { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .hit.scalac { --c: var(--scalac); } .hit.scala3 { --c: var(--scala3); } .hit.scala3docs { --c: var(--docs); } .hit.bug { --c: var(--bug); } .hit.scalapr { --c: var(--scalapr); }
   .top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
   .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; width: 1.6em; }
   .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 4px; padding: 0 5px; }
@@ -44,6 +41,31 @@
   #index { display: flex; flex-wrap: wrap; gap: 4px 16px; }
   #index span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
   #empty { color: var(--muted); text-align: center; padding: 30px 0; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 6px 14px; font-weight: 600; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .pill { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); } .pill.on::before { content: "● "; animation: pulse 1.4s ease-in-out infinite; }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .card h3 { margin: 0; font-size: 15px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; } .card h3 .meta { font-weight: 400; }
+  .src { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); } .src:first-of-type { border-top: 0; padding-top: 0; }
+  .src.off { opacity: .55; }
+  .shead { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: 13px; } .shead .r { margin-left: auto; }
+  .prio { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+  .bar { display: grid; grid-template-columns: 72px 1fr 200px; gap: 10px; align-items: center; font-size: 12px; } .bar.sub { padding-left: 14px; } .bar .nm { color: var(--muted); }
+  .bar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .track { height: 9px; background: var(--track); border-radius: 5px; overflow: hidden; position: relative; }
+  .fill { height: 100%; background: var(--c); border-radius: 5px; transition: width .6s ease; } .fill.done { background: var(--ok); }
+  .track.live .fill::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent); animation: sheen 1.6s linear infinite; }
+  @keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .phases { display: flex; flex-wrap: wrap; gap: 6px; } .phases span { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 0 10px; color: var(--muted); }
+  .phases span.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); } .phases span.cur { color: var(--ink); border-color: var(--accent); font-weight: 600; }
+  .phases span.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .digesttext { white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
+  .runmsg { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 640px) { .bar { grid-template-columns: 64px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -60,14 +82,16 @@
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
 <main>
+  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <div id="tab-search" style="display:flex;flex-direction:column;gap:12px">
   <form class="row" id="form">
     <input id="q" type="search" placeholder="Ask about the Scala compiler, library or build tools…" autocomplete="off" autofocus>
     <button class="primary" id="go">Search</button>
     <span class="status" id="status"></span>
   </form>
   <div class="row">
-    <label>in <select id="source"><option value="">everything</option><option value="scalac">scala/scala code and spec</option><option value="scala3">scala/scala3 code</option>
-      <option value="scala3docs">Scala 3 docs</option><option value="bug">scala/bug issues</option><option value="scalapr">scala/scala PRs</option></select></label>
+    <label id="unilabel" hidden>universe <select id="universe"></select></label>
+    <label>in <select id="source"><option value="">everything</option></select></label>
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label><input type="checkbox" id="open"> open issues and PRs only</label>
@@ -77,6 +101,13 @@
   <div id="index" class="meta"></div>
   <div class="meta" id="meta"></div>
   <div id="results"><div id="empty">Results appear here: passages with links back to GitHub, not generated answers.</div></div>
+  </div>
+  <div id="tab-status" hidden style="display:flex;flex-direction:column;gap:12px">
+    <div class="card" style="--c: var(--ink)" id="run"></div>
+    <div class="card" style="--c: var(--accent)" id="digest" hidden></div>
+    <div id="cards" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div class="meta">Counts are read from the index files, refreshing every 2 s. "synced" is text in the index (git sources: files indexed of files in the tree; GitHub sources: how far each stream has walked back from now to its start date); "embedded" is chunks with a current vector, which is what hybrid and vector search can see. Lower priority numbers are processed first.</div>
+  </div>
 </main>
 <script>
 "use strict";
@@ -93,27 +124,44 @@ const SAMPLES = [
 $("samples").replaceChildren(...SAMPLES.map(s => Object.assign(document.createElement("button"), { type: "button", textContent: s, onclick: () => { $("q").value = s; go(); } })));
 
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-for (const id of ["source", "mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
+for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 function status(msg, cls = "") { $("status").textContent = msg; $("status").className = `status ${cls}`; }
-const COLOR = { scalac: "var(--scalac)", scala3: "var(--scala3)", scala3docs: "var(--docs)", bug: "var(--bug)", scalapr: "var(--scalapr)" };
-const LABEL = { scalac: "scala/scala", scala3: "scala/scala3 code", scala3docs: "Scala 3 docs", bug: "scala/bug", scalapr: "scala/scala PRs" };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-fetch("/api/search/status").then(r => r.json()).then(d => {
-  if (!d.indexed) { $("index").textContent = `No index yet at ${d.db}. Build it with pipelines/search/sync.py and embed.py.`; return; }
-  $("index").replaceChildren(...d.sources.map(s => {
-    const e = el("span", "", `${LABEL[s.source] || s.source}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
-    e.style.setProperty("--c", COLOR[s.source] || "var(--muted)"); e.title = `${s.description} · synced to ${s.position || "?"}`; return e;
-  }));
-}).catch(() => {});
+// ---- universes, projects and sources come from the config (GET /api/search/status), never from this page ----
+async function loadUniverse(id) {
+  const d = await (await fetch("/api/search/status" + (id ? `?universe=${encodeURIComponent(id)}` : ""))).json();
+  if (d.error) { $("index").textContent = d.error.message; return d; }
+  if (d.universes.length > 1) {
+    $("unilabel").hidden = false;
+    $("universe").replaceChildren(...d.universes.map(u => Object.assign(el("option", "", u.title), { value: u.id })));
+    $("universe").value = d.universe.id;
+  }
+  const prev = $("source").value;
+  const opts = [Object.assign(el("option", "", "everything"), { value: "" })];
+  for (const p of d.projects) {
+    opts.push(Object.assign(el("option", "", `${p.title}${p.indexed ? "" : " (not indexed yet)"}`), { value: `project:${p.id}` }));
+    for (const s of p.sources) opts.push(Object.assign(el("option", "", `   ${s.label}`), { value: `source:${s.key}` }));
+  }
+  $("source").replaceChildren(...opts);
+  if ([...$("source").options].some(o => o.value === prev)) $("source").value = prev;
+  if (!d.indexed) { $("index").textContent = "Nothing is indexed yet. Build it with pipelines/search/sync.py and embed.py."; return d; }
+  $("index").replaceChildren(...d.projects.flatMap(p => p.sources.filter(s => s.chunks).map(s => {
+    const e = el("span", "", `${s.label}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
+    e.style.setProperty("--c", s.color); e.title = `${p.title} · priority ${s.priority}${s.position ? ` · synced to ${s.position}` : ""}`; return e;
+  })));
+  return d;
+}
+loadUniverse().catch(() => {});
+$("universe").addEventListener("change", () => loadUniverse($("universe").value));
 
 function render(d) {
   $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
-    const box = el("div", `hit ${h.source}`);
+    const box = el("div", "hit"); box.style.setProperty("--c", h.color);
     const top = el("div", "top");
-    top.append(el("span", "n", i + 1), el("span", "badge", LABEL[h.source] || h.source));
+    top.append(el("span", "n", i + 1), el("span", "badge", h.label));
     if (h.state === "closed" || h.state === "merged") top.append(el("span", "badge closed", h.state));
     const a = el("a", "title", h.title); a.rel = "noopener noreferrer"; a.target = "_blank";
     if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
@@ -124,8 +172,8 @@ function render(d) {
     box.append(top, el("div", "url", h.url), pre);
     return box;
   }) : [el("div", "", "No results.")]));
-  $("meta").textContent = [`${d.results.length} results`, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
-                           d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null].filter(Boolean).join(" · ");
+  $("meta").textContent = [`${d.results.length} results`, d.universe, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
+                           d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null, d.missing?.length ? `not indexed yet: ${d.missing.join(", ")}` : null].filter(Boolean).join(" · ");
 }
 
 let aborter = null, timer = null;
@@ -135,7 +183,9 @@ async function go() {
   if (aborter) aborter.abort();
   aborter = new AbortController();
   const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked };
-  if ($("source").value) body.source = $("source").value;
+  const f = $("source").value;
+  if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
+  if (!$("unilabel").hidden) body.universe = $("universe").value;
   const t0 = performance.now();
   clearInterval(timer);
   const tick = () => { const s = (performance.now() - t0) / 1000; status(s > 3 ? `searching… ${s.toFixed(0)} s (the first query loads the models)` : "searching…", "wait"); };
@@ -146,7 +196,7 @@ async function go() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
     render(d); status("");
-    history.replaceState(null, "", `#${encodeURIComponent(q)}`);
+    if (location.hash !== "#status") history.replaceState(null, "", `#${encodeURIComponent(q)}`);
   } catch (e) {
     if (e.name !== "AbortError") status(e.message, "err");
   } finally {
@@ -154,7 +204,93 @@ async function go() {
   }
 }
 $("form").onsubmit = e => { e.preventDefault(); go(); };
-if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
+
+// ---- index status tab ------------------------------------------------------------------------------------------------
+const pct = f => `${(f * 100).toFixed(f > .995 && f < 1 ? 2 : 1)}%`;
+const num = x => x.toLocaleString();
+const dur = s => s == null ? "" : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+const ago = t => dur(Date.now() / 1000 - t) + " ago";
+function bar(name, f, text, live, sub, color) {
+  const row = el("div", `bar${sub ? " sub" : ""}`);
+  const fill = el("div", `fill${f >= 1 ? " done" : ""}`); fill.style.width = `${Math.max(0, Math.min(1, f)) * 100}%`;
+  const track = el("div", `track${live && f < 1 ? " live" : ""}`); track.append(fill);
+  if (color) row.style.setProperty("--c", color);
+  row.append(el("div", "nm", name), track, el("div", "val", text));
+  return row;
+}
+const samples = [];                                    // (time, embedded total) for the rate and ETA
+function renderStatus(d) {
+  const run = d.run, working = run && run.running;
+  const pill = el("span", `pill${working ? " on" : run && (run.stale || run.ok === false) ? " bad" : ""}`,
+                  working ? `${run.kind} running` : !run ? "never run" : run.stale ? "run died" : run.ok === false ? `${run.kind} finished with errors` : `${run.kind} finished`);
+  const head = el("h3", "", "Indexer "); head.append(pill);
+  const total = d.projects.flatMap(p => p.sources).reduce((a, s) => [a[0] + s.chunks, a[1] + s.embedded], [0, 0]);
+  const now = Date.now() / 1000; samples.push([now, total[1]]); while (samples.length > 1 && now - samples[0][0] > 45) samples.shift();
+  const rate = samples.length > 1 ? (total[1] - samples[0][1]) / (now - samples[0][0]) : 0, left = total[0] - total[1];
+  const bits = [];
+  if (run) {
+    if (working) bits.push(`started ${ago(run.started)}`, run.source ? `now: ${run.source} (${run.phase})` : run.phase, `${run.done.length} of ${run.plan.length} sources`);
+    else if (run.finished) bits.push(`finished ${ago(run.finished)}`);
+  }
+  if (rate > 0.5) bits.push(`embedding ${rate.toFixed(0)} chunks/s`, left ? `about ${dur(left / rate)} left` : "");
+  const parts = [head, el("div", "meta", bits.filter(Boolean).join(" · ")), bar("embedded", total[0] ? total[1] / total[0] : 1, `${num(total[1])} / ${num(total[0])}`, working && run.kind === "embed", false)];
+  if (run && run.phases?.length) {                           // refresh: where it is among its phases
+    const chips = el("div", "phases");
+    for (const ph of run.phases) chips.append(el("span", run.phases_done.includes(ph) ? "done" : ph === run.phase && working ? "cur" : "", ph));
+    parts.splice(2, 0, chips);
+  }
+  if (!working && d.refresh?.last_run) {                    // idle: how the last refresh went, phase by phase
+    const lr = d.refresh.last_run, chips = el("div", "phases");
+    for (const [ph, v] of Object.entries(lr.phases || {})) chips.append(el("span", v.ok ? "done" : "bad", `${ph} ${v.ok ? "ok" : "FAILED"} · ${dur(v.secs)}`));
+    parts.splice(2, 0, el("div", "meta", `last refresh ${ago(lr.started)}${lr.tier ? ` (tier ${lr.tier})` : ""}`), chips);
+  }
+  if (run && run.message) parts.push(el("div", "runmsg", run.message));
+  for (const e of run?.errors || []) parts.push(el("div", "runmsg", e)).lastChild.style.color = "var(--bad)";
+  $("run").replaceChildren(...parts);
+  const dg = d.digest;
+  $("digest").hidden = !dg;
+  if (dg) $("digest").replaceChildren(Object.assign(el("h3", "", "What changed "), {}), el("div", "meta", `since ${dg.since.slice(0, 16).replace("T", " ")} UTC · written ${ago(dg.generated)} by ${dg.model}, ${dg.overview ? "overview checked against the facts" : "model overview left out (it did not pass the check against the facts)"}${dg.pruned ? `, ${dg.pruned} unsupported line${dg.pruned > 1 ? "s" : ""} removed` : ""} · ${dg.facts} facts`), el("div", "digesttext", dg.text));
+  $("cards").replaceChildren(...d.projects.map(p => {
+    const card = el("div", "card"); const h = el("h3", "", p.title); h.append(el("span", "meta", p.indexed ? p.id : `${p.id} · not indexed yet`));
+    card.append(h);
+    for (const s of p.sources) {
+      const box = el("div", `src${s.enabled ? "" : " off"}`);
+      const sh = el("div", "shead"); sh.append(el("b", "", s.label), el("span", "prio", `p${s.priority}`), el("span", "meta", s.type));
+      if (!s.enabled) sh.append(el("span", "meta", "disabled"));
+      if (s.active) sh.append(el("span", "pill on", "working"));
+      sh.append(Object.assign(el("span", "meta r", s.position ? `@ ${s.position}` : ""), {}));
+      box.append(sh);
+      const sy = s.sync, live = s.active;
+      if (sy?.kind === "files") box.append(bar("synced", sy.frac, sy.total ? `${num(sy.done)} of ${num(sy.total)} files` : sy.done ? `${num(sy.done)} files` : "not started", live, false, s.color));
+      else if (sy?.kind === "timeline") {
+        box.append(bar("synced", sy.frac, `${pct(sy.frac)} · back to ${sy.horizon}`, live, false, s.color));
+        for (const st of sy.streams) box.append(bar(st.name, st.frac, st.at ? `${st.mode === "done" ? "complete" : (st.mode === "back" ? "back to " : "up to ") + st.at.slice(0, 10)} · ${pct(st.frac)}` : "not started", live, true, s.color));
+      } else if (sy?.kind === "snapshot") box.append(bar("synced", sy.frac, s.chunks ? `${num(s.chunks)} chunks${s.position ? ` · latest ${s.position}` : ""}` : "not started", live, false, s.color));
+      else box.append(bar("synced", 0, "–", false, false, s.color));
+      box.append(bar("embedded", s.chunks ? s.embedded / s.chunks : 0, `${num(s.embedded)} / ${num(s.chunks)}`, working && run.kind === "embed" && live, false, s.color));
+      card.append(box);
+    }
+    return card;
+  }));
+}
+let pollTimer = null;
+async function pollStatus(force = false) {
+  if (document.hidden && !force) return;                   // no polling in a background tab, but the first fetch and a return to the tab always run
+  try {
+    const d = await (await fetch("/api/search/status" + ($("universe").value && !$("unilabel").hidden ? `?universe=${encodeURIComponent($("universe").value)}` : ""))).json();
+    if (d.error) throw new Error(d.error.message);
+    renderStatus(d);
+  } catch (e) { $("run").replaceChildren(el("div", "", `status unavailable: ${e.message}`)); }
+}
+function tab(name) {
+  for (const t of ["search", "status"]) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
+  clearInterval(pollTimer);
+  if (name === "status") { samples.length = 0; pollStatus(true); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("tab-status").hidden) { samples.length = 0; pollStatus(true); } });
+$("t-search").onclick = () => tab("search"); $("t-status").onclick = () => tab("status");
+if (location.hash === "#status") tab("status");
+else if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }
 </script>
 </body>
 </html>

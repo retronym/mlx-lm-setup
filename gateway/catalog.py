@@ -160,8 +160,8 @@ def _mlx_vlm(s: BackendSpec) -> list[str]:
 
 def _search(s: BackendSpec) -> list[str]:
     o = s.options
-    return [s.python, str(BACKENDS_DIR / "search_server.py"), "--index-dir", o["index_dir"],
-            "--db", o.get("db") or str(Path(o["index_dir"]) / "data" / "search.db"), "--port", str(s.port)]
+    cmd = [s.python, str(BACKENDS_DIR / "search_server.py"), "--index-dir", o["index_dir"], "--port", str(s.port)]
+    return cmd + (["--config-dir", o["config_dir"]] if o.get("config_dir") else [])
 
 
 def _command(s: BackendSpec) -> list[str]:
@@ -177,7 +177,7 @@ ADAPTERS: dict[str, Adapter] = {
                              _mlx_audio_tts, ("output_dir", "refs_dir")),
     "mlx_audio_stt": Adapter("stt", ("python", "model"), ("output_dir", "refs_dir"), "/health", _mlx_audio_stt, ("output_dir", "refs_dir")),
     "mlx_vlm": Adapter("vision", ("python", "model"), ("image_tokens", "max_tokens"), "/health", _mlx_vlm),
-    "search": Adapter("search", ("python", "index_dir"), ("db",), "/health", _search, ("index_dir", "db")),
+    "search": Adapter("search", ("python", "index_dir"), ("config_dir",), "/health", _search, ("index_dir", "config_dir")),
     "command": Adapter("custom", ("command",), ("health", "kind"), "/health", _command),
 }
 COMMON = {"adapter", "est_mem_gb", "ttl_s", "pinned", "env", "start_timeout_s", "concurrency", "aliases",

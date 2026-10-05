@@ -70,7 +70,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "look", "translate", "search", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "look", "translate", "search", "search_universes", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -184,12 +184,14 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_search(self):
         async with self.client() as s:
-            err, data, _ = await self.call(s, "search", query="eta expansion", k=2, source="bug", text_chars=50)
+            err, data, _ = await self.call(s, "search", query="eta expansion", k=2, sources=["scala2/issues"], text_chars=50)
             self.assertFalse(err)
-            self.assertEqual((data["backend"], len(data["results"]), data["results"][0]["source"]), ("find", 2, "bug"))
+            self.assertEqual((data["backend"], len(data["results"]), data["results"][0]["source"]), ("find", 2, "scalac"))
             self.assertEqual(len(data["results"][0]["text"]), 50)                       # cut to what the caller asked for
             self.assertNotIn("truncated", data["results"][0])
-            self.assertEqual(data["index"], [])                                          # the test backend has no index
+            self.assertNotIn("color", data["results"][0])                               # presentation detail for the page, not for a model
+            err, data, _ = await self.call(s, "search_universes")
+            self.assertEqual((err, data["universes"], data["default"]), (False, [], None))   # the test backend has no config
             err, _, text = await self.call(s, "search", query="")
             self.assertTrue(err)
             self.assertIn("query", text)

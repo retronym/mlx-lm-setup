@@ -1,0 +1,21 @@
+{
+  "id": "scala3",
+  "title": "Scala 3 (Dotty)",
+  "description": "The Scala 3 compiler and library, its reference documentation, release notes, and (at low priority) its issues and pull requests.",
+  "sources": [
+    {"id": "code", "type": "git", "label": "scala/scala3 code", "color": "#ea580c", "priority": 2,
+     "repo": "scala/scala3", "ref": "main", "paths": ["compiler/src", "library/src", "tasty-core/src", "sbt-bridge/src"],
+     "chunkers": {".scala": "scala"}},
+    {"id": "docs", "type": "git", "label": "Scala 3 docs", "color": "#0d9488", "priority": 2,
+     "repo": "scala/scala3", "ref": "main", "paths": ["docs/_docs/reference", "docs/_docs/internals"],
+     "chunkers": {".md": "markdown"}},
+    {"id": "releases", "type": "github_releases", "label": "scala/scala3 releases", "color": "#ca8a04", "priority": 3,
+     "repo": "scala/scala3", "tag_messages": false},
+    {"id": "issues", "type": "github", "label": "scala/scala3 issues", "color": "#db2777", "priority": 8,
+     "repo": "scala/scala3", "include": ["issues", "comments"], "since": "2022-01-01T00:00:00Z",
+     "max_items_per_run": 2000, "min_interval_hours": 24},
+    {"id": "prs", "type": "github", "label": "scala/scala3 PRs", "color": "#0284c7", "priority": 8,
+     "repo": "scala/scala3", "include": ["prs", "comments", "reviews"], "since": "2022-01-01T00:00:00Z",
+     "max_items_per_run": 2000, "min_interval_hours": 24}
+  ]
+}

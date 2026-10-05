@@ -4,7 +4,8 @@ Asserts the sync touches only what changed. usage: python test_lifecycle.py"""
 import os, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(__file__))
 from store import Store, Chunk
-from sources.gitsrc import GitSource, chunk_scala
+from sources.gitsrc import GitSource
+import config
 
 A = "package demo\nobject A {\n  def one = 1 // padding padding padding\n\n  def two = 2 + 2 // padding padding\n}\n"
 B = "package demo\nclass B {\n  def hello(x: Int): Int = x + 1 // padding padding\n}\n"
@@ -25,7 +26,9 @@ with tempfile.TemporaryDirectory() as d:
     run(repo, "init", "-q"); run(repo, "config", "user.email", "t@t"); run(repo, "config", "user.name", "t")
     w = lambda p, t: open(os.path.join(repo, p), "w").write(t)
     st = Store(os.path.join(d, "t.db"))
-    src = GitSource("t", repo, "http://x", "HEAD", ["."], (".scala",), chunk_scala)
+    cs = config.Source(project="t", id="t", type="git", label="t", color="#000000", priority=5, enabled=True, min_interval_hours=0, max_items_per_run=None,
+                       repo="o/r", ref="HEAD", paths=(".",), chunkers={".scala": "scala"})
+    src = GitSource(cs, repo)
     w("A.scala", A); w("B.scala", B); run(repo, "add", "."); run(repo, "commit", "-qm", "1")
     print("initial     ", r := sync(src, st)); assert r.startswith("+3 ~0 -0")
     print("no change   ", r := sync(src, st)); assert r.startswith("+0 ~0 -0 =0")        # nothing re-chunked at all

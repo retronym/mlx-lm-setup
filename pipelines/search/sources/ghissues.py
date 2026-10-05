@@ -1,18 +1,22 @@
-"""GitHub issues, pull requests and their comments (scala/bug, scala/scala), via `gh api`. Three incremental streams, each an
-`updated`-ascending list filtered by `since=<cursor>`: issues-and-PRs (title + body), issue/PR conversation comments (one repo-wide
-stream) and, for repos with PRs, inline review comments. Every item is its own chunk keyed by id, so a new comment embeds one new
-chunk and an edit re-embeds that comment only. State is metadata (a PR is `merged`, `closed` or `open`; comments take their
-issue's state at query time), so closing an issue re-embeds nothing.
+"""GitHub issues, pull requests and their comments, via `gh api`. One `GhRepo` per repository in a project serves all the project's sources
+on that repo: three streams (issues-and-PRs, conversation comments, inline review comments) are walked once and each item is routed to the
+source whose `include` asks for it. Every item is its own chunk keyed by id, so a new comment embeds one new chunk and an edit re-embeds that
+comment only. State is metadata (a PR is `merged`, `closed` or `open`; comments take their issue's state at query time).
 
-Paging is explicit so it can be polite and resumable: after every page the chunks are committed and the stream's cursor saved, the
-rate limit is checked every few pages (sleeping until the reset when little is left), and a 403/429 is waited out and retried. An
-interrupted run just continues from the last committed page. Deletions are invisible to `since`; `reconcile()` lists all live
-numbers and removes the rest."""
-import json, subprocess, time
+Each stream keeps two cursors in the project database (under the pseudo-source `gh:<repo>`):
+  fwd_<s>   the newest `updated_at` ingested: every run first walks ascending from here, so new and edited items arrive immediately;
+  back_<s>  the backfill frontier: history is filled newest-first in time windows [frontier - window, frontier) until the horizon
+            (`since`), under the per-run item cap, so a huge tracker drains over several runs with the recent past first;
+  top_<s>, horizon_<s>, bf_done_<s>, win_<s>  where the backfill started, how far it goes, whether it finished, the window size.
+Widening a source's `since` in the config re-opens the backfill. Paging is explicit so it is polite and resumable: every page is committed
+and the cursors saved, the rate limit is checked every few pages (sleeping to the reset when little is left), a 403/429 is waited out, and
+long lists are re-anchored before GitHub's 10,000-item `page=` cap. Deletions are invisible to `since`; `reconcile()` lists all live numbers."""
+import calendar, json, subprocess, time
 from store import Chunk
 from sources.gitsrc import _split_big, MAX
 
-LOW_WATER = 300               # sleep until the reset when fewer requests than this remain
+LOW_WATER = 300               # sleep until the reset when fewer requests than this remain (search.json github.min_remaining)
+PAGE_DELAY = 0.2
 
 
 def _gh(args):
@@ -33,7 +37,7 @@ def wait_for_quota(log=print):
         time.sleep(wait)
 
 
-PAGE_LIMIT = 90               # GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
+PAGE_LIMIT = 90               # (search.json github.page_limit) GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
 
 
 def pages(path, log=print, **params):
@@ -58,7 +62,7 @@ def pages(path, log=print, **params):
         yield items
         if len(items) < 100:
             return
-        time.sleep(0.2)
+        time.sleep(PAGE_DELAY)
         if page % 25 == 0:
             wait_for_quota(log)
         if page >= PAGE_LIMIT and "since" in params and items[-1].get("updated_at"):
@@ -68,20 +72,45 @@ def pages(path, log=print, **params):
             page += 1
 
 
-def gh_pages(path, **params):             # kept for callers that want a flat list
-    return [i for p in pages(path, **params) for i in p]
+def configure(github):
+    """Apply search.json's `github` settings (politeness knobs) to this module."""
+    global LOW_WATER, PAGE_DELAY, PAGE_LIMIT
+    LOW_WATER, PAGE_DELAY, PAGE_LIMIT = github["min_remaining"], github["page_delay_s"], github["page_limit"]
 
 
-class GhIssues:
-    def __init__(self, repo="scala/bug", name="bug", reviews=False, default_since="2000-01-01T00:00:00Z"):
-        self.repo, self.name, self.reviews, self.default_since = repo, name, reviews, default_since
+def _iso(ts):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
-    # ---- chunking ----
-    def _chunks(self, id_prefix, doc, title, text, url, meta):
-        for n, part in enumerate(_split_big((text or "").splitlines(), MAX)):
+
+def _ts(iso):
+    return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+class GhRepo:
+    """All the `github` sources of one project that read the same repository. `members` are config Sources; kinds of item are routed to
+    the member whose `include` asks for them (config validation guarantees at most one)."""
+
+    STREAMS = (("issues", "issues", {"issues", "prs"}), ("comments", "issues/comments", {"comments"}), ("reviews", "pulls/comments", {"reviews"}))
+
+    def __init__(self, members, max_chars=None):
+        self.members, self.repo, self.owner = list(members), members[0].repo, f"gh:{members[0].repo}"
+        self.max_chars = max_chars or MAX
+        self.horizon = min(m.since for m in members)
+        caps = [m.max_items_per_run for m in members]
+        self.cap = None if None in caps else max(caps)                 # a group with an uncapped member is uncapped
+
+    @property
+    def key(self):
+        return f"{self.members[0].project}/{'+'.join(m.id for m in self.members)}"
+
+    def member(self, *needs):
+        return next((m for m in self.members if set(needs) <= set(m.include)), None)
+
+    def _chunks(self, member, id_prefix, doc, title, text, url, meta):
+        for n, part in enumerate(_split_big((text or "").splitlines(), self.max_chars)):
             body = "\n".join(part).strip()
             if body or n == 0:
-                yield Chunk(f"{self.name}:{id_prefix}" + (f"~{n}" if n else ""), doc, title, body, url, meta)
+                yield Chunk(f"{member.id}:{id_prefix}" + (f"~{n}" if n else ""), doc, title, body, url, meta)
 
     @staticmethod
     def _noise(c):
@@ -89,71 +118,134 @@ class GhIssues:
         return (c.get("user") or {}).get("type") == "Bot" or not body or body.startswith("/")      # bots and "/rebuild"-style commands
 
     def _title(self, store, n):
-        r = store.db.execute("SELECT title FROM chunks WHERE id=?", (f"{self.name}:issue:{n}",)).fetchone()
-        return r[0].split(" ", 1)[1] if r else ""
+        for m in self.members:
+            r = store.db.execute("SELECT title FROM chunks WHERE id=?", (f"{m.id}:issue:{n}",)).fetchone()
+            if r:
+                return r[0].split(" ", 1)[1]
+        return ""
 
-    # ---- the three streams: each returns (items seen, [added, changed, deleted, unchanged]) ----
-    def _stream(self, store, key, path, explicit, limit, to_chunks, log, **params):
-        # each stream resumes from its own cursor; an explicit --since overrides all of them
-        since = explicit or store.get(self.name, key) or store.get(self.name, "since") or self.default_since
-        seen, tot = 0, [0, 0, 0, 0]
-        for page in pages(path, log, sort="updated", direction="asc", since=since, **params):
-            for it in page[:limit - seen if limit else None]:
-                for k, v in enumerate(store.apply(self.name, list(to_chunks(it)))):
+    def _router(self, store, stream, titles):
+        """item -> (member id, chunks), or None when no source wants it."""
+        if stream == "issues":
+            def route(i):
+                pr = i.get("pull_request")
+                m = self.member("prs" if pr else "issues")
+                if not m:
+                    return None
+                n = i["number"]
+                titles[n] = i["title"]
+                state = "merged" if pr and pr.get("merged_at") else i["state"]
+                return m.id, list(self._chunks(m, f"issue:{n}", f"issue:{n}", f"{self.repo}#{n} {i['title']}", i["body"], i["html_url"],
+                                               {"state": state, "labels": [l["name"] for l in i["labels"]], "number": n, "kind": "pr" if pr else "issue",
+                                                "updated": i["updated_at"]}))
+        elif stream == "comments":
+            def route(c):
+                m = self.member("comments", "prs" if "/pull/" in c["html_url"] else "issues")
+                if not m or self._noise(c):
+                    return None
+                n = int(c["issue_url"].rsplit("/", 1)[1])
+                t = titles.get(n) or self._title(store, n)
+                return m.id, list(self._chunks(m, f"comment:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (comment by {c['user']['login']})", c["body"],
+                                               c["html_url"], {"kind": "comment", "number": n, "updated": c["updated_at"]}))
+        else:
+            def route(c):
+                m = self.member("reviews")
+                if not m or self._noise(c):
+                    return None
+                n = int(c["pull_request_url"].rsplit("/", 1)[1])
+                t = titles.get(n) or self._title(store, n)
+                hunk = "\n".join((c.get("diff_hunk") or "").splitlines()[-6:])
+                return m.id, list(self._chunks(m, f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {c['user']['login']})",
+                                               f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"]}))
+        return route
+
+    def _ingest(self, store, route, items, tot):
+        n = 0
+        for it in items:
+            r = route(it)
+            if r:
+                for k, v in enumerate(store.apply(r[0], r[1])):
                     tot[k] += v
-                seen += 1
-            last = page[-1]["updated_at"]
-            store.put(self.name, key, max(last, store.get(self.name, key) or ""))
+            n += 1
+        return n
+
+    # ---- one stream: forward walk, then newest-first backfill ----
+    def _sync_stream(self, store, stream, path, route, explicit, cap, log, extra):
+        g = lambda k: store.get(self.owner, f"{k}_{stream}")
+        put = lambda k, v: store.put(self.owner, f"{k}_{stream}", v)
+        tot = [0, 0, 0, 0]
+        if g("fwd") is None:
+            legacy = next((store.get(m.id, f"since_{stream}") for m in self.members if store.get(m.id, f"since_{stream}")), None)
+            if legacy:                                              # an ascending single-cursor sync already covered [horizon, legacy]
+                for k, v in (("fwd", legacy), ("top", legacy), ("back", self.horizon), ("bf_done", "1")):
+                    put(k, v)
+            else:                                                   # first run: everything older than now is the backfill's job
+                now = _iso(time.time())
+                for k, v in (("fwd", now), ("top", now), ("back", now)):
+                    put(k, v)
+        if g("horizon") and self.horizon < g("horizon"):
+            put("bf_done", "")                                      # the config now reaches further back: keep filling
+        put("horizon", self.horizon)
+        store.commit()
+        seen = 0
+        # 1. forward: new and edited items since the newest one ingested (or since an explicit --since, a repair re-walk)
+        for page in pages(path, log, sort="updated", direction="asc", since=explicit or g("fwd"), **extra):
+            seen += self._ingest(store, route, page, tot)
+            put("fwd", max(page[-1]["updated_at"], g("fwd") or ""))
             store.commit()
-            log(f"  {self.name} {key}: {seen} items, up to {last}")
-            if limit and seen >= limit:
+            log(f"  {self.repo} {stream}: forward, {seen} items, up to {page[-1]['updated_at'][:10]}")
+        # 2. backfill, newest windows first, until the horizon or the cap
+        done_items = 0
+        while g("bf_done") != "1":
+            hi = g("back")
+            win = int(g("win") or 30)
+            lo = max(self.horizon, _iso(_ts(hi) - win * 86400))
+            n, stop = 0, False
+            for page in pages(path, log, sort="updated", direction="asc", since=lo, **extra):
+                fresh = [i for i in page if i["updated_at"] < hi]
+                n += self._ingest(store, route, fresh, tot)
+                store.commit()
+                if len(fresh) < len(page):                          # reached the part the frontier already covers
+                    stop = True
+                    break
+            put("back", lo)
+            if lo <= self.horizon:
+                put("bf_done", "1")
+            put("win", str(min(730, win * 2) if n < 300 else max(1, win // 2) if n > 1500 else win))
+            store.commit()
+            done_items += n
+            log(f"  {self.repo} {stream}: backfill window {lo[:10]} .. {hi[:10]}: {n} items" + (" (history complete)" if g("bf_done") == "1" else ""))
+            if cap and done_items >= cap and g("bf_done") != "1":
+                log(f"  {self.repo} {stream}: per-run cap of {cap} items reached, continuing next run from {lo[:10]}")
                 break
-        return seen, tot
+        return seen + done_items, tot
 
     def sync(self, store, since=None, limit=None, log=print):
-        titles = {}
-
-        def issue(i):
-            n = i["number"]
-            titles[n] = i["title"]
-            pr = i.get("pull_request")
-            state = "merged" if pr and pr.get("merged_at") else i["state"]
-            yield from self._chunks(f"issue:{n}", f"issue:{n}", f"{self.repo}#{n} {i['title']}", i["body"], i["html_url"],
-                                    {"state": state, "labels": [l["name"] for l in i["labels"]], "number": n, "kind": "pr" if pr else "issue",
-                                     "updated": i["updated_at"]})
-
-        def comment(c):
-            if self._noise(c):
-                return
-            n = int(c["issue_url"].rsplit("/", 1)[1])
-            t = titles.get(n) or self._title(store, n)
-            yield from self._chunks(f"comment:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (comment by {c['user']['login']})",
-                                    c["body"], c["html_url"], {"kind": "comment", "number": n, "updated": c["updated_at"]})
-
-        def review(c):
-            if self._noise(c):
-                return
-            n = int(c["pull_request_url"].rsplit("/", 1)[1])
-            t = titles.get(n) or self._title(store, n)
-            hunk = "\n".join((c.get("diff_hunk") or "").splitlines()[-6:])
-            yield from self._chunks(f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {c['user']['login']})",
-                                    f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"]})
-
-        out = [("issues", self._stream(store, "since_issues", f"repos/{self.repo}/issues", since, limit, issue, log, state="all")),
-               ("comments", self._stream(store, "since_comments", f"repos/{self.repo}/issues/comments", since, limit, comment, log))]
-        if self.reviews:
-            out.append(("review comments", self._stream(store, "since_reviews", f"repos/{self.repo}/pulls/comments", since, limit, review, log)))
+        cap = limit or self.cap
+        titles, out = {}, []
+        for stream, path, needs in self.STREAMS:
+            if not any(needs & set(m.include) for m in self.members):
+                continue
+            extra = {"state": "all"} if stream == "issues" else {}
+            out.append((stream, self._sync_stream(store, stream, f"repos/{self.repo}/{path}", self._router(store, stream, titles), since, cap, log, extra)))
         store.commit()
         for what, (n, t) in out:
-            log(f"{self.name} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
+            log(f"{self.key} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
 
     def reconcile(self, store, log=print):
         live = {i["number"] for p in pages(f"repos/{self.repo}/issues", log, state="all") for i in p}
-        gone = [r[0] for r in store.db.execute("SELECT DISTINCT doc FROM chunks WHERE source=?", (self.name,)) if int(r[0].split(":")[1]) not in live]
-        n = sum(store.delete_doc(self.name, d) for d in gone)
+        n = gone = 0
+        for m in self.members:
+            docs = [r[0] for r in store.db.execute("SELECT DISTINCT doc FROM chunks WHERE source=?", (m.id,)) if int(r[0].split(":")[1]) not in live]
+            gone += len(docs)
+            n += sum(store.delete_doc(m.id, d) for d in docs)
         store.commit()
-        log(f"{self.name} reconcile: {len(live)} live, {len(gone)} issues removed ({n} chunks)")
+        log(f"{self.key} reconcile: {len(live)} live, {gone} issues removed ({n} chunks)")
 
 
-SOURCES = {"bug": lambda: GhIssues("scala/bug", "bug"),
-           "scalapr": lambda: GhIssues("scala/scala", "scalapr", reviews=True, default_since="2020-01-01T00:00:00Z")}
+def groups(sources):
+    """Group `github` sources by (project, repo): one GhRepo (one set of streams) per group."""
+    by = {}
+    for s in sources:
+        by.setdefault((s.project, s.repo), []).append(s)
+    return list(by.values())
