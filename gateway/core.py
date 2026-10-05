@@ -323,6 +323,11 @@ def search_duplicates(catalog: Catalog, model: str | None = None, universe: str 
     return _neighbour_view("duplicates", catalog, model, universe, **filters)
 
 
+def search_outliers(catalog: Catalog, model: str | None = None, universe: str | None = None, **filters) -> dict:
+    """Issues and PRs far from everything else (lowest isolation or cluster-centre similarity first) from the neighbours database; reads a file, starts nothing."""
+    return _neighbour_view("outliers", catalog, model, universe, **filters)
+
+
 def search_clusters(catalog: Catalog, model: str | None = None, universe: str | None = None, **filters) -> dict:
     """Topic clusters of issues and PRs, or one cluster's items, from the neighbours database the refresh builds; reads a file, starts nothing."""
     return _neighbour_view("clusters", catalog, model, universe, **filters)

@@ -284,3 +284,30 @@ def clusters(cfg, universe_id: str | None = None, *, state: str = "any", kind: s
                 "generated": float(_meta(con).get("generated") or 0) or None}
     finally:
         con.close()
+
+
+def outliers(cfg, universe_id: str | None = None, *, by: str = "iso", state: str = "any", kind: str = "any", since: str | None = None, until: str | None = None,
+             projects: list[str] | None = None, templated: bool = False, limit: int = 50, offset: int = 0) -> dict:
+    """Issues and PRs that are far from everything else, most outlying first. `by` is the score: iso (cosine to the nearest other item) or ctr (cosine
+    to the centre of the item's own cluster); lower means more of an outlier. Filters apply per item as for clusters (state any | open | closed,
+    kind issue | pr | any, since / until, projects). Dependency bumps and release procedures are hidden unless `templated`: they are unlike
+    anything else, and uninteresting."""
+    if by not in ("iso", "ctr") or state not in ("any", "open", "closed") or kind not in ("issue", "pr", "any"):
+        raise ValueError("by must be iso or ctr; state any, open or closed; kind issue, pr or any")
+    since, until = _date(since, "since"), _date(until, "until")
+    uni, con = _neighbours_db(cfg, universe_id)
+    if con is None or "iso" not in {r[1] for r in con.execute("PRAGMA table_info(items)")}:
+        return {"available": False, "universe": uni.id, "total": 0, "items": []}
+    try:
+        con.create_function("templated", 1, lambda t: int(bool(TEMPLATED.search(t or ""))), deterministic=True)
+        where, args = _item_filter("i", state=state, kind=kind, since=since, until=until, projects=projects)
+        if not templated:
+            where += " AND NOT templated(i.title)"
+        total = con.execute(f"SELECT count(*) FROM items i WHERE {where}", args).fetchone()[0]
+        rows = con.execute(f"""SELECT {', '.join('i.' + c for c in _KEYS)}, i.iso, i.ctr, c.label FROM items i LEFT JOIN clusters c ON c.k = i.cluster
+                               WHERE {where} ORDER BY i.{by}, i.idx LIMIT ? OFFSET ?""", [*args, limit, offset]).fetchall()
+        n = len(_KEYS)
+        items = [{**_item(r[:n]), "iso": r[n], "ctr": r[n + 1], "label": r[n + 2]} for r in rows]
+        return {"available": True, "universe": uni.id, "by": by, "total": total, "offset": offset, "items": items, "generated": float(_meta(con).get("generated") or 0) or None}
+    finally:
+        con.close()

@@ -109,6 +109,26 @@ class NeighboursTests(unittest.TestCase):
         self.add([issue(13, "another asm one", ASM, state="closed")])
         self.assertIsNotNone(neighbours.compute(self.cfg, "u"))
 
+    def test_isolation_and_centre_scores_rank_an_off_topic_item_first(self):
+        self.add([issue(50, "banana smoothie", "quantum banana smoothie recipe with oat milk")])
+        neighbours.compute(self.cfg, "u")
+        con = self.db()
+        rows = con.execute("SELECT number, iso, ctr FROM items ORDER BY iso").fetchall()
+        self.assertEqual(rows[0][0], 50)
+        self.assertLess(rows[0][1], 0.5)
+        self.assertGreater(rows[1][1], 0.8)
+        self.assertTrue(all(0 <= iso <= 1 and 0 <= ctr <= 1 for _, iso, ctr in rows))
+        by_ctr = con.execute("SELECT number FROM items ORDER BY ctr").fetchall()
+        self.assertEqual(by_ctr[0][0], 50)
+
+    def test_a_database_from_before_the_scores_is_recomputed(self):
+        neighbours.compute(self.cfg, "u")
+        con = self.db()
+        con.execute("UPDATE meta SET v = '1' WHERE k = 'version'")
+        con.commit(); con.close()
+        self.assertIsNotNone(neighbours.compute(self.cfg, "u"))
+        self.assertEqual(self.db().execute("SELECT v FROM meta WHERE k = 'version'").fetchone()[0], neighbours.VERSION)
+
     def test_changed_parameters_recompute(self):
         neighbours.compute(self.cfg, "u")
         write(self.root, search={"data_dir": str(self.root / "data"), "embedder": {"model": "fake"}, "neighbours": {"clusters": 3, "min_similarity": 0.8}},
