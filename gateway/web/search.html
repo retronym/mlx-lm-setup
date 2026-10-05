@@ -44,7 +44,8 @@
   .url { color: var(--muted); font-size: 12px; word-break: break-all; }
   pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
   pre.open { max-height: none; }
-  #index { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  #indexbox summary { cursor: pointer; width: fit-content; } #indexbox summary:hover { color: var(--ink); }
+  #index { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 6px; }
   #index span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
   #empty { color: var(--muted); text-align: center; padding: 30px 0; }
   .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
@@ -148,15 +149,15 @@
   <div class="row">
     <label id="unilabel" hidden>universe <select id="universe"></select></label>
     <label>in <select id="source"><option value="">everything</option></select></label>
-    <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
+    <label title="hybrid combines keyword and vector search">method <select id="mode"><option value="hybrid">hybrid</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
-    <label><input type="checkbox" id="open"> open issues and PRs only</label>
+    <label title="Only issues and PRs that are still open"><input type="checkbox" id="open"> open only</label>
     <label title="Uses the links between issues, PRs, commits and releases: documents that something closes, or that nothing closes (try it with kind issue and open only)">links <select id="haslink"><option value="">any</option><option value="closed_by">has a fix</option><option value="no_closed_by">no fix yet</option><option value="shipped_in">shipped in a release</option><option value="no_shipped_in">not shipped</option></select></label>
     <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
   <div class="chips" id="samples"></div>
-  <div id="index" class="meta"></div>
+  <details id="indexbox" class="meta" hidden><summary id="indexsum"></summary><div id="index"></div></details>
   <div class="row" id="linkedrow" hidden><span class="meta">only documents linked to</span><span class="badge" id="linkedto"></span><button id="linkedx" class="lk" title="Back to all hits">✕</button></div>
   <div class="meta" id="meta"></div>
   <div id="results"><div id="empty">Results appear here: passages with links back to GitHub, not generated answers.</div></div>
@@ -232,7 +233,10 @@ async function loadUniverse(id) {
   }
   $("source").replaceChildren(...opts);
   if ([...$("source").options].some(o => o.value === prev)) $("source").value = prev;
-  if (!d.indexed) { $("index").textContent = "Nothing is indexed yet. Build it with pipelines/search/sync.py and embed.py."; return d; }
+  if (!d.indexed) { $("index").textContent = "Nothing is indexed yet. Build it with pipelines/search/sync.py and embed.py."; $("indexsum").textContent = "index"; $("indexbox").hidden = false; $("indexbox").open = true; return d; }
+  const live = d.projects.flatMap(p => p.sources.filter(s => s.chunks));
+  $("indexsum").textContent = `index: ${live.reduce((a, s) => a + s.chunks, 0).toLocaleString()} chunks in ${live.length} sources`;
+  $("indexbox").hidden = false;
   $("index").replaceChildren(...d.projects.flatMap(p => p.sources.filter(s => s.chunks).map(s => {
     const e = el("span", "", `${s.label}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
     e.style.setProperty("--c", s.color); e.title = `${p.title} · priority ${s.priority}${s.position ? ` · synced to ${s.position}` : ""}`; return e;
