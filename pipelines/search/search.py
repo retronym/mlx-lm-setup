@@ -4,15 +4,14 @@ by vector cosine, the per-store hits are merged by score into one keyword list a
 projects because a universe shares one embedding model), the two lists are fused by reciprocal rank, and the best candidates are
 optionally reranked by a cross-encoder.
 
-usage: search.py [--universe U] [--project P]... [--source S]... [-k 8] [--open] [--bm25|--vec] [--rerank] <query>
-       (a --source is an id like `issues`, or `project/source`)"""
+usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [-k 8] [--open] [--bm25|--vec] [--rerank] <query>
+       (a --source is an id like `issues`, or `project/source`; a --kind is one of store.KINDS, like `commit` or `file`)"""
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config
-from store import Store, _CAMEL, STATE_SQL
+from store import Store, _CAMEL, STATE_SQL, chunk_filter
 
 STOP = set("a an the of in on to is are was be for and or not with how what where why does do this that it as by from at".split())
-NOT_OPEN = f"COALESCE({STATE_SQL}, 'open') NOT IN ('closed', 'merged')"
 
 
 class Index:
@@ -40,21 +39,12 @@ def fts_query(q):
     return " OR ".join(f'"{t}"' for t in terms)
 
 
-def _where(sources, open_only):
-    cond, args = "", []
-    if sources:
-        cond += f" AND c.source IN ({','.join('?' * len(sources))})"; args += list(sources)
-    if open_only:
-        cond += f" AND {NOT_OPEN}"
-    return cond, args
-
-
-def bm25(st, q, k, sources=None, open_only=False):
+def bm25(st, q, k, sources=None, open_only=False, kinds=None):
     """[(rowid, bm25 score)] best first (FTS5 scores are negative: lower is better)."""
     fq = fts_query(q)
     if not fq:
         return []
-    cond, args = _where(sources, open_only)
+    cond, args = chunk_filter(sources, open_only, kinds)
     sql = f"SELECT c.rowid, bm25(fts, 3.0, 1.0) s FROM fts JOIN chunks c ON c.rowid = fts.rowid WHERE fts MATCH ? {cond} ORDER BY s LIMIT ?"
     return [(r[0], r[1]) for r in st.db.execute(sql, (fq, *args, k))]
 
@@ -74,7 +64,7 @@ def _source_filter(sources, pid):
     return sorted({s.split("/", 1)[1] if "/" in s else s for s in sources if "/" not in s or s.split("/", 1)[0] == pid})
 
 
-def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30):
+def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None):
     """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based)."""
     pool = max(50, k * 5)
     stores = {p: s for p, s in idx.stores.items() if not projects or p in projects}
@@ -85,7 +75,7 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             f = _source_filter(sources, pid)
             if f == []:
                 continue
-            hits += [(score, pid, rid) for rid, score in bm25(st, q, pool, f, open_only)]
+            hits += [(score, pid, rid) for rid, score in bm25(st, q, pool, f, open_only, kinds)]
         rankings.append([(pid, rid) for _, pid, rid in sorted(hits)[:pool]]), names.append("bm25")
     if mode in ("hybrid", "vec") and embedder is not None:
         from embed import vector_search
@@ -94,7 +84,7 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             f = _source_filter(sources, pid)
             if f == []:
                 continue
-            hits += [(-cos, pid, rid) for rid, cos in vector_search(st, qvec, embedder.name, pool, f, open_only)]
+            hits += [(-cos, pid, rid) for rid, cos in vector_search(st, qvec, embedder.name, pool, f, open_only, kinds)]
         rankings.append([(pid, rid) for _, pid, rid in sorted(hits)[:pool]]), names.append("vec")
     detail = {}
     for name, r in zip(names, rankings):
@@ -132,7 +122,7 @@ def _who_and_when(db, sid, title, m):
     """Author (GitHub login), git author name (commits), created and updated times, and for comments and review comments the thread they belong to.
     Chunks written before a field was captured fall back: a comment's author from its title, a commit's `author` was the git name, a release's
     time from its tag date."""
-    kind = m.get("kind")
+    kind = m.get("kind") or "file"
     author, name = m.get("author"), m.get("author_name")
     if kind == "commit" and name is None:
         author, name = None, author                                      # written before the GitHub handle was captured
@@ -181,7 +171,7 @@ if __name__ == "__main__":
             i = a.index(name); vals.append(a[i + 1]); del a[i:i + 2]
         return vals if many else (vals[-1] if vals else default)
     k, uni = int(opt("-k", 8)), opt("--universe")
-    projects, sources = opt("--project", many=True), opt("--source", many=True)
+    projects, sources, kinds = opt("--project", many=True), opt("--source", many=True), opt("--kind", many=True)
     mode = "bm25" if "--bm25" in a else "vec" if "--vec" in a else "hybrid"
     q = " ".join(x for x in a if not x.startswith("--"))
     cfg = config.load()
@@ -198,5 +188,5 @@ if __name__ == "__main__":
     if "--rerank" in a:
         from rerank import Reranker
         rr = Reranker(cfg.search["reranker"]["model"])
-    show(hits(idx, q, k=k, projects=projects, sources=sources, mode=mode, open_only="--open" in a, embedder=emb, reranker=rr,
+    show(hits(idx, q, k=k, projects=projects, sources=sources, mode=mode, open_only="--open" in a, kinds=kinds, embedder=emb, reranker=rr,
               pool_docs=cfg.search["reranker"]["candidates"]))

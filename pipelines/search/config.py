@@ -21,6 +21,9 @@ CHUNKERS = ("scala", "java", "markdown", "plain")
 SOURCE_TYPES = ("git", "git_log", "github", "github_releases")
 DEFAULT_SKIP_AUTHORS = ["scala-steward", "dependabot[bot]", "github-actions[bot]", "renovate[bot]"]
 GITHUB_INCLUDE = ("issues", "prs", "comments", "reviews")
+# What a search hit can be, finer than its source: a chunk of a file in a git tree (code, docs, spec), an issue or PR body, a comment, a review
+# comment on a diff, an LLM summary of a long thread, a commit message, release notes, an annotated tag's message.
+KINDS = ("file", "issue", "pr", "comment", "review", "summary", "commit", "release", "tag")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
@@ -158,6 +161,14 @@ class Source:
     @property
     def key(self):
         return f"{self.project}/{self.id}"
+
+    @property
+    def kinds(self):
+        """The KINDS this source writes."""
+        if self.type == "github":
+            inc = set(self.include)
+            return tuple(k for k, i in (("issue", "issues"), ("pr", "prs"), ("comment", "comments"), ("review", "reviews"), ("summary", "comments")) if i in inc)
+        return {"git": ("file",), "git_log": ("commit",), "github_releases": ("release", "tag") if self.tag_messages else ("release",)}[self.type]
 
 
 @dataclass(frozen=True)

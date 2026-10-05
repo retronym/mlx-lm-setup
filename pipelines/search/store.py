@@ -15,6 +15,21 @@ _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|_")
 STATE_SQL = ("COALESCE(json_extract(c.meta, '$.state'), (SELECT json_extract(i.meta, '$.state') FROM chunks i "
              "WHERE i.id = c.source || ':issue:' || json_extract(c.meta, '$.number')))")
 
+# What a chunk is (config.KINDS): the `kind` its source wrote, or "file" for a chunk of a file in a git tree, which carries none.
+KIND_SQL = "COALESCE(json_extract(c.meta, '$.kind'), 'file')"
+
+
+def chunk_filter(sources=None, open_only=False, kinds=None):
+    """An ` AND ...` condition on the chunks row `c` and its arguments: source ids, kinds, and not closed or merged."""
+    cond, args = "", []
+    if sources:
+        cond += f" AND c.source IN ({','.join('?' * len(sources))})"; args += list(sources)
+    if kinds:
+        cond += f" AND {KIND_SQL} IN ({','.join('?' * len(kinds))})"; args += list(kinds)
+    if open_only:
+        cond += f" AND COALESCE({STATE_SQL}, 'open') NOT IN ('closed', 'merged')"
+    return cond, args
+
 
 def fts_text(s):
     """Index text plus its camelCase / snake_case parts, so `typedApply` is found by `typed apply`."""

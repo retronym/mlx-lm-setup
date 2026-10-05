@@ -293,10 +293,10 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
 
     async def search(request: Request):
         """{"query", "k"? (1..50, default 8), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
-        "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs)} ->
+        "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs)} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
-        known = {"query", "k", "universe", "projects", "sources", "mode", "rerank", "open_only", "model"}
+        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "model"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):

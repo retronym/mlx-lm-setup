@@ -119,6 +119,13 @@ class ConfigTests(unittest.TestCase):
                 config.load(root)
             self.assertIn("search.json: file not found", "\n".join(cm.exception.errors))
 
+    def test_source_kinds(self):
+        c = self.load(projects=[proj("p", GIT, GH, REL, {**REL, "id": "tags", "tag_messages": True}, {"id": "log", "type": "git_log", "label": "log", "repo": "o/r", "ref": "main"})],
+                      universes=[uni()])
+        self.assertEqual({s.id: s.kinds for s in c.projects["p"].sources},
+                         {"code": ("file",), "issues": ("issue", "comment", "summary"), "rel": ("release",), "tags": ("release", "tag"), "log": ("commit",)})
+        self.assertTrue(all(set(s.kinds) <= set(config.KINDS) for s in c.projects["p"].sources))
+
     def test_universes_compose_projects_independently(self):
         cfg = self.load(projects=[proj("a"), proj("b", {**GIT, "id": "x"})], universes=[uni("both", "a", "b", default=True), uni("only-b", "b")])
         self.assertEqual([s.key for s in cfg.universe_sources("both")], ["a/code", "b/x"])
