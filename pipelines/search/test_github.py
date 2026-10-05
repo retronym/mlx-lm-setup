@@ -15,7 +15,7 @@ USER = {"login": "someone", "type": "User"}
 
 
 def issue(n, when, state="open", pr=False, merged=False, **kw):
-    d = {"number": n, "title": f"title {n}", "body": f"body {n}", "state": state, "labels": [], "updated_at": when,
+    d = {"number": n, "title": f"title {n}", "body": f"body {n}", "state": state, "labels": [], "updated_at": when, "created_at": "2025-12-01T00:00:00Z", "user": {"login": "alice"},
          "html_url": f"https://github.com/o/r/{'pull' if pr else 'issues'}/{n}"}
     if pr:
         d["pull_request"] = {"merged_at": when if merged else None}
@@ -23,13 +23,13 @@ def issue(n, when, state="open", pr=False, merged=False, **kw):
 
 
 def comment(cid, n, when, pr=False, body="a comment", user=USER):
-    return {"id": cid, "issue_url": f"https://api.github.com/repos/o/r/issues/{n}", "body": body, "user": user, "updated_at": when,
+    return {"id": cid, "issue_url": f"https://api.github.com/repos/o/r/issues/{n}", "body": body, "user": user, "updated_at": when, "created_at": "2025-12-02T00:00:00Z",
             "html_url": f"https://github.com/o/r/{'pull' if pr else 'issues'}/{n}#issuecomment-{cid}"}
 
 
 def review(rid, n, when):
     return {"id": rid, "pull_request_url": f"https://api.github.com/repos/o/r/pulls/{n}", "html_url": f"https://github.com/o/r/pull/{n}#r{rid}", "body": "nit",
-            "path": "a.scala", "diff_hunk": "@@ -1 +1 @@\n+x", "user": USER, "updated_at": when}
+            "path": "a.scala", "diff_hunk": "@@ -1 +1 @@\n+x", "user": USER, "updated_at": when, "created_at": "2025-12-03T00:00:00Z"}
 
 
 class FakeGitHub:
@@ -91,6 +91,48 @@ class IncludeAndRouting(Case):
         self.assertEqual({k: v[1] for k, v in ids.items()}, {"issues:issue:1": "issues", "issues:comment:10": "issues", "prs:issue:2": "prs", "prs:issue:3": "prs",
                                                               "prs:comment:11": "prs", "prs:review:20": "prs"})
         self.assertEqual(sum(1 for k, _ in gh.calls if k == "issues/comments"), sum(1 for k, _ in gh.calls if k == "issues"))   # once per window, not once per source
+
+
+class MetaTests(Case):
+    GH = IncludeAndRouting.GH
+
+    def metas(self):
+        return {r[0]: json.loads(r[1]) for r in self.st.db.execute("SELECT id, meta FROM chunks")}
+
+    def test_authors_and_creation_times_are_captured(self):
+        self.run_sync(self.GH, [src("s", ["issues", "prs", "comments", "reviews"])])
+        m = self.metas()
+        self.assertEqual((m["s:issue:1"]["author"], m["s:issue:1"]["created"]), ("alice", "2025-12-01T00:00:00Z"))
+        self.assertEqual((m["s:issue:2"]["author"], m["s:issue:2"]["kind"]), ("alice", "pr"))
+        self.assertEqual((m["s:comment:10"]["author"], m["s:comment:10"]["created"]), ("someone", "2025-12-02T00:00:00Z"))
+        self.assertEqual((m["s:review:20"]["author"], m["s:review:20"]["created"]), ("someone", "2025-12-03T00:00:00Z"))
+
+    def test_meta_only_fills_in_existing_chunks_and_ingests_nothing_new_nor_moves_a_cursor(self):
+        members = [src("s", ["issues", "prs", "comments", "reviews"])]
+        self.run_sync(self.GH, members)
+        for r in self.st.db.execute("SELECT rowid, meta FROM chunks").fetchall():              # data indexed before the fields existed
+            m = json.loads(r[1]); m.pop("author", None); m.pop("created", None)
+            self.st.db.execute("UPDATE chunks SET meta = ? WHERE rowid = ?", (json.dumps(m), r[0]))
+        self.st.db.execute("DELETE FROM chunks WHERE id = 's:issue:3'"); self.st.db.execute("DELETE FROM fts WHERE rowid NOT IN (SELECT rowid FROM chunks)"); self.st.commit()
+        state_before = dict(self.st.db.execute("SELECT k, v FROM state"))
+        hashes = dict(self.st.db.execute("SELECT id, hash FROM chunks"))
+        self.run_sync(self.GH, members, meta_only=True)
+        m = self.metas()
+        self.assertEqual(m["s:issue:1"]["author"], "alice"); self.assertEqual(m["s:comment:11"]["created"], "2025-12-02T00:00:00Z")
+        self.assertNotIn("s:issue:3", m)                                                       # a chunk that was not indexed is not ingested by a repair
+        self.assertEqual(dict(self.st.db.execute("SELECT k, v FROM state")), state_before)     # no cursor moved
+        self.assertEqual(dict(self.st.db.execute("SELECT id, hash FROM chunks")), hashes)      # text and hashes untouched: nothing to re-embed
+
+    def test_meta_only_walks_only_the_indexed_part_of_history(self):
+        gh = FakeGitHub([issue(1, "2026-02-01T00:00:00Z")])
+        members = [src("s", ["issues"], since="2024-01-01T00:00:00Z", cap=1)]
+        gh.data["issues"] += [issue(2, "2025-06-01T00:00:00Z")]
+        self.run_sync(gh, members)                                                             # capped: the backfill frontier is still above the horizon
+        frontier = self.st.get("gh:o/r", "back_issues")
+        self.assertGreater(frontier, "2024-01-01T00:00:00Z")
+        gh.calls.clear()
+        self.run_sync(gh, members, meta_only=True)
+        self.assertEqual([since for k, since in gh.calls if k == "issues"], [frontier])        # from the frontier, not from the horizon
 
 
 class Cursors(Case):

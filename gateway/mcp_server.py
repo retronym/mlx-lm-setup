@@ -293,7 +293,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `sources` to source ids ("issues") or "project/source" keys ("scala2/issues"); `search_universes` lists what exists. `mode` "hybrid"
         (default: BM25 + embeddings, fused), "bm25" or "vec"; `rerank` re-scores the top 30 with a cross-encoder (about 1 s more, usually better for
         "where is X" questions). `open_only` hides closed issues and unmerged-closed PRs. One hit per document (the best chunk of a file, page,
-        issue or PR). Returns `results` [{project, source, key, label, title, url, state?, text, ...}] with text cut to `text_chars`; `missing` lists
+        issue or PR). Returns `results` [{project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
         projects not indexed yet. Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,

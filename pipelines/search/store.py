@@ -64,9 +64,10 @@ class Store:
         self.db.commit()
 
     # --- the diff ---
-    def apply(self, source, chunks, doc=None, delete_missing_docs=None):
+    def apply(self, source, chunks, doc=None, delete_missing_docs=None, existing_only=False):
         """Upsert `chunks`. With `doc`, the chunks are the complete current content of that one document, so stored chunks of
-        it that are not in `chunks` are deleted. Returns (added, changed, deleted, unchanged)."""
+        it that are not in `chunks` are deleted. With `existing_only`, chunks that are not stored yet are skipped (a metadata repair never ingests
+        anything new). Returns (added, changed, deleted, unchanged)."""
         have = {}
         if doc is not None:
             have = {r[0]: (r[1], r[2]) for r in self.db.execute("SELECT id, hash, rowid FROM chunks WHERE source=? AND doc=?", (source, doc))}
@@ -74,6 +75,8 @@ class Store:
         for ch in chunks:
             row = self.db.execute("SELECT rowid, hash, meta, url FROM chunks WHERE id=?", (ch.id,)).fetchone()
             have.pop(ch.id, None)
+            if existing_only and not row:
+                continue
             if row and row[1] == ch.hash:
                 if (row[2], row[3]) != (json.dumps(ch.meta), ch.url):      # metadata only (issue closed, line moved): no re-embed
                     self.db.execute("UPDATE chunks SET meta=?, url=? WHERE rowid=?", (json.dumps(ch.meta), ch.url, row[0]))

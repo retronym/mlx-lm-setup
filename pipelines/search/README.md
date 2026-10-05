@@ -68,6 +68,12 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 
 The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.
 
+## Who and when
+
+Search results carry the author's GitHub handle (`author`, a login; commits also have `author_name`, and the handle is taken from a `users.noreply.github.com` email when there is one), `created` and `updated` times, and, for a comment or review, the `thread` it belongs to and who opened it. The page shows them as "opened by @x 2 y ago · updated 11 mo ago", "@y commented 2.9 y ago · on PR #12 opened by @x 3 y ago", "committed by @z 5 mo ago", "released 3 mo ago" (exact dates in the tooltips). Older chunks fall back sensibly (a comment's author from its title, a commit's git name).
+
+Chunks indexed before these fields existed get them with `sync.py <targets> --meta-only`: it re-reads the part of history that is indexed (the backfill frontier up to now), refreshes the metadata of chunks that already exist and ingests nothing new, moves no cursor and re-embeds nothing (a text edit made upstream since the last sync is also picked up and embedded next time). GitHub sources cost one API request per 100 items; commits are local.
+
 ## Watching progress
 
 The **Index status** tab on `/search` (`#status`) shows, per project and source, how much is synced (git sources: files indexed of files in the tree; GitHub sources: how far back the newest-first backfill has come) and how much is embedded, plus the indexer's current phase and source, rate and ETA, the last refresh phase by phase, and the latest digest (rendered as markdown: the digest is model-written text containing GitHub titles, so it goes through marked and DOMPurify, never straight into the page). The Home page's Search panel carries a one-line version (chunks, projects, % embedded, what the indexer is doing). Both read the index files and `data/run.json` read-only through `GET /api/search/status`, so they cost no model. From a worktree, `draft.sh` serves them on their own port.
