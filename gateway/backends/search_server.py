@@ -22,7 +22,7 @@ import config, embed, rerank, search                 # noqa: E402
 
 t0 = time.time()
 cfg = config.load(a.config_dir)
-emb, rr = embed.load(cfg), rerank.Reranker(cfg.search["reranker"]["model"])
+emb, rr = embed.load(cfg, "local"), rerank.Reranker(cfg.search["reranker"]["model"])
 idx = search.Index(cfg)
 n_vec = sum(s.db.execute("SELECT count(*) FROM vec").fetchone()[0] for s in idx.stores.values())
 if n_vec:

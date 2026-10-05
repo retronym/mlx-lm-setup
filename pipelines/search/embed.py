@@ -4,6 +4,7 @@
 usage: embed.py [universe | project | project/source ...] [--max-priority N] [--limit N]   (fills in priority order; resumable)"""
 import os, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))      # pipelines/: gateway_client
 import numpy as np, torch
 from transformers import AutoModel, AutoTokenizer
 import config, runstate
@@ -40,7 +41,38 @@ class Embedder:
         return self._enc([f"Instruct: {TASK}\nQuery: {q}"])[0]
 
 
-def load(cfg=None):
+class GatewayEmbedder:
+    """The same embedder, served by the gateway's search backend (POST /v1/embeddings): one managed copy of the model, which the supervisor starts,
+    keeps inside the memory budget and stops when idle. Vectors are identical to the local embedder's, so databases can mix freely."""
+    dev = "gateway"
+
+    def __init__(self, batch=64, url=None):
+        import gateway_client
+        if url:
+            gateway_client.BASE = url
+        self.gw, self.batch, self.name = gateway_client, min(batch, 64), None
+        self.name = self.gw.post("/v1/embeddings", {"input": "probe", "kind": "document"}, timeout=600)["model"]    # also starts the backend
+
+    def _embed(self, texts, kind):
+        out = []
+        for i in range(0, len(texts), self.batch):
+            d = self.gw.post("/v1/embeddings", {"input": texts[i:i + self.batch], "kind": kind}, timeout=900)
+            out += [x["embedding"] for x in sorted(d["data"], key=lambda x: x["index"])]
+        return np.asarray(out, dtype=np.float32)
+
+    def docs(self, texts):
+        return self._embed(texts, "document")
+
+    def query(self, q):
+        return self._embed([q], "query")[0]
+
+
+def load(cfg=None, via=None):
+    """The embedder: in this process ("local") or through the gateway ("gateway"); `via` overrides search.json's embedder.via. The search backend
+    itself must always use "local" (it is what the gateway serves)."""
+    via = via or (cfg.search["embedder"]["via"] if cfg else "local")
+    if via == "gateway":
+        return GatewayEmbedder(cfg.search["embedder"]["batch"] * 4 if cfg else 64)
     return Embedder((cfg.search["embedder"]["model"] if cfg else MODEL))
 
 
@@ -61,7 +93,7 @@ def fill(st, emb, source=None, limit=None, group=512, log=print):
                           [(r[0], emb.name, r[3], vecs[i].astype(np.float16).tobytes()) for i, r in enumerate(rows)])
         st.commit()
         done = s + len(rows)
-        log(f"  embedded {done}/{len(todo)}  ({done / (time.time() - t0):.1f} chunks/s)")
+        log(f"  embedded {done}/{len(todo)}  ({done / max(1e-6, time.time() - t0):.1f} chunks/s)")
     return len(todo)
 
 
@@ -115,6 +147,23 @@ def targets(cfg, args, max_priority=9):
     return sorted((s for s in out.values() if s.enabled and s.priority <= max_priority), key=lambda s: (s.priority, s.project, s.id))
 
 
+def run_embed(cfg, srcs, run, emb, *, limit=None, deadline=None):
+    """Fill missing vectors for `srcs` in priority order, newest chunks first. After `deadline` no new source is started."""
+    total = 0
+    for s in srcs:
+        if deadline and time.time() > deadline:
+            run.log("time budget reached: remaining sources are embedded next run")
+            break
+        if not cfg.project_db(s.project).exists():
+            continue
+        run.source(s.key, "embed")
+        n = fill(Store(cfg.project_db(s.project)), emb, source=s.id, limit=limit, log=lambda m, k=s.key: run.log(f"{k}: {m.strip()}"))
+        if n:
+            run.log(f"{s.key}: {n} chunks embedded")
+        total += n
+    return total
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     def opt(name, default=None):
@@ -122,18 +171,19 @@ if __name__ == "__main__":
             i = a.index(name); v = a[i + 1]; del a[i:i + 2]; return v
         return default
     limit, maxp = opt("--limit"), int(opt("--max-priority", 9))
+    local = "--local" in a
+    a = [x for x in a if not x.startswith("--")]
     cfg = config.load()
     srcs = targets(cfg, a, maxp)
-    run = runstate.Run(cfg, "embed", [s.key for s in srcs])
-    t = time.time()
-    run.s["phase"] = "loading the embedding model"; run._write(force=True)
-    emb = load(cfg)
-    run.log(f"loaded {emb.name} on {emb.dev} in {time.time() - t:.0f}s")
-    for s in srcs:
-        if not cfg.project_db(s.project).exists():
-            continue
-        run.source(s.key, "embed")
-        n = fill(Store(cfg.project_db(s.project)), emb, source=s.id, limit=int(limit) if limit else None, log=lambda m, k=s.key: run.log(f"{k}: {m.strip()}"))
-        if n:
-            run.log(f"{s.key}: {n} chunks embedded")
-    run.finish()
+    try:
+        with runstate.lock(cfg):
+            run = runstate.Run(cfg, "embed", [s.key for s in srcs])
+            t = time.time()
+            run.phase("loading the embedding model")
+            emb = load(cfg, "local" if local else None)
+            run.log(f"embedder {emb.name} via {emb.dev}, ready in {time.time() - t:.0f}s")
+            run_embed(cfg, srcs, run, emb, limit=int(limit) if limit else None)
+            run.finish()
+    except runstate.Busy as e:
+        print(e, file=sys.stderr)
+        sys.exit(3)

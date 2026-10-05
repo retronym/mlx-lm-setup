@@ -38,7 +38,7 @@ class FakeGitHub:
         self.page_size, self.calls = page_size, []
 
     def pages(self, path, log=print, **params):
-        key = path.split("repos/o/r/")[1]
+        key = path.split("/", 3)[3]                         # repos/<owner>/<name>/<stream>
         since = params.get("since", "")
         self.calls.append((key, since))
         items = sorted((i for i in self.data[key] if i["updated_at"] >= since), key=lambda i: i["updated_at"])

@@ -292,8 +292,8 @@ def _check_overlaps(v, srcs):
 
 
 def load(config_dir=None):
-    """Load and validate everything under `config_dir` (default pipelines/search/config). Raises ConfigError listing every problem."""
-    cdir = Path(config_dir) if config_dir else CONFIG_DIR
+    """Load and validate everything under `config_dir` ($SEARCH_CONFIG_DIR, else pipelines/search/config). Raises ConfigError listing every problem."""
+    cdir = Path(config_dir or os.environ.get("SEARCH_CONFIG_DIR") or CONFIG_DIR)
     errors = []
     raw = _load_json(cdir / "search.json", errors)
     search = _search(raw if raw is not None else {}, errors)

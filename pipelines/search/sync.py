@@ -21,6 +21,63 @@ def due(st, s, force):
     return force or not s.min_interval_hours or not last or time.time() - float(last) >= s.min_interval_hours * 3600
 
 
+def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=False, reconcile=False, deadline=None):
+    """Sync `srcs` (already filtered and in priority order). Returns the number of sources that failed. After `deadline` (epoch seconds) no new
+    source is started; the one running finishes."""
+    ghissues.configure(cfg.search["github"])
+    max_chars = cfg.search["chunking"]["max_chars"]
+    fetched, failed, gh_done, skipped = set(), 0, set(), 0
+    for s in srcs:
+        if deadline and time.time() > deadline:
+            skipped += 1
+            continue
+        st = Store(cfg.project_db(s.project))
+        if s.type == "github":                                   # one pass over a repo's streams serves all its sources in the project
+            if (s.project, s.repo) in gh_done:
+                continue
+            gh_done.add((s.project, s.repo))
+            members = [m for m in srcs if m.type == "github" and (m.project, m.repo) == (s.project, s.repo)]
+            if not reconcile and not any(due(st, m, force) for m in members):      # a reconcile ignores the minimum interval
+                run.log(f"{members[0].key}: synced recently, skipped")
+                continue
+            run.source("+".join(m.key for m in members), "sync")
+            g = ghissues.GhRepo(members, max_chars)
+            try:
+                (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=limit, log=run.log))
+                for m in members:
+                    st.put(m.id, "last_sync", str(time.time()))
+                st.commit()
+            except Exception as e:                               # noqa: BLE001  one source failing must not stop the rest
+                failed += 1
+                print(f"{g.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+                run.error(f"{g.key}: {type(e).__name__}: {e}")
+            continue
+        if not due(st, s, force):
+            run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
+            continue
+        run.source(s.key, "sync")
+        try:
+            if s.type == "git":
+                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
+                fetched.add(s.repo)
+                GitSource(s, d, max_chars).sync(st, limit=limit, log=run.log)
+            elif s.type == "github_releases":
+                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
+                fetched.add(s.repo) if d else None
+                GhReleases(s, d, max_chars).sync(st, log=run.log)
+            else:
+                run.log(f"{s.key}: source type {s.type!r} is not implemented yet, skipped")
+                continue
+            st.put(s.id, "last_sync", str(time.time())); st.commit()
+        except Exception as e:                                           # noqa: BLE001
+            failed += 1
+            print(f"{s.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+            run.error(f"{s.key}: {type(e).__name__}: {e}")
+    if skipped:
+        run.log(f"time budget reached: {skipped} source(s) not started, they come first next run")
+    return failed
+
+
 def main(argv):
     a = list(argv)
     def opt(name, default=None):
@@ -31,56 +88,15 @@ def main(argv):
     force, no_fetch, reconcile = [x in a for x in ("--force", "--no-fetch", "--reconcile")]
     a = [x for x in a if not x.startswith("--")]
     cfg = config.load()
-    ghissues.configure(cfg.search["github"])
-    max_chars = cfg.search["chunking"]["max_chars"]
-    fetched, failed = set(), 0
     srcs = targets(cfg, a, maxp)
-    run = runstate.Run(cfg, "sync", [s.key for s in srcs])
-    gh_done = set()
-    for s in srcs:
-        st = Store(cfg.project_db(s.project))
-        if s.type == "github":                                   # one pass over a repo's streams serves all its sources in the project
-            if (s.project, s.repo) in gh_done:
-                continue
-            gh_done.add((s.project, s.repo))
-            members = [m for m in srcs if m.type == "github" and (m.project, m.repo) == (s.project, s.repo)]
-            if not any(due(st, m, force) for m in members):
-                run.log(f"{members[0].key}: synced recently, skipped")
-                continue
-            run.source("+".join(m.key for m in members))
-            g = ghissues.GhRepo(members, max_chars)
-            try:
-                (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None, log=run.log))
-                for m in members:
-                    st.put(m.id, "last_sync", str(time.time()))
-                st.commit()
-            except Exception as e:                               # noqa: BLE001
-                failed += 1
-                print(f"{g.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
-                run.error(f"{g.key}: {type(e).__name__}: {e}")
-            continue
-        if not due(st, s, force):
-            run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
-            continue
-        run.source(s.key)
-        try:
-            if s.type == "git":
-                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
-                fetched.add(s.repo)
-                GitSource(s, d, max_chars).sync(st, limit=int(limit) if limit else None, log=run.log)
-            elif s.type == "github_releases":
-                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
-                fetched.add(s.repo) if d else None
-                GhReleases(s, d, max_chars).sync(st, log=run.log)
-            else:
-                run.log(f"{s.key}: source type {s.type!r} is not implemented yet, skipped")
-                continue
-            st.put(s.id, "last_sync", str(time.time())); st.commit()
-        except Exception as e:                                           # noqa: BLE001  one source failing must not stop the rest
-            failed += 1
-            print(f"{s.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
-            run.error(f"{s.key}: {type(e).__name__}: {e}")
-    run.finish(not failed)
+    try:
+        with runstate.lock(cfg):
+            run = runstate.Run(cfg, "sync", [s.key for s in srcs])
+            failed = run_sync(cfg, srcs, run, limit=int(limit) if limit else None, since=since, force=force, no_fetch=no_fetch, reconcile=reconcile)
+            run.finish(not failed)
+    except runstate.Busy as e:
+        print(e, file=sys.stderr)
+        return 3
     return 1 if failed else 0
 
 

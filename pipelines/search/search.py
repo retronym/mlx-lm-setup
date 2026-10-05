@@ -165,7 +165,7 @@ if __name__ == "__main__":
     if mode != "bm25":
         try:
             from embed import load
-            emb = load(cfg)
+            emb = load(cfg, "local" if "--local" in a else None)
         except Exception as e:
             print(f"(no embedder: {e}; keyword only)", file=sys.stderr)
     if "--rerank" in a:
