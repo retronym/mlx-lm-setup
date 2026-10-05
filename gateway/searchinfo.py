@@ -102,7 +102,7 @@ def stats(cfg, universe_id: str | None = None, run: dict | None = None) -> dict:
             elif s.type == "github":
                 sync = _github_progress(s, state, now)
             else:
-                sync = None
+                sync = {"kind": "snapshot", "frac": 1.0 if chunks else 0.0}
             out.append({"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "enabled": s.enabled,
                         "chunks": chunks, "embedded": embedded, "updated": updated, "sync": sync, "active": s.key == working,
                         "position": (state.get((s.id, "head")) or "")[:10] or state.get((s.id, "since_issues")) or state.get((s.id, "last_release"))})

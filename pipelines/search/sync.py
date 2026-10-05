@@ -12,6 +12,7 @@ import config, repos, runstate
 from embed import targets
 from store import Store
 from sources import ghissues
+from sources.ghreleases import GhReleases
 from sources.gitsrc import GitSource
 
 
@@ -49,6 +50,10 @@ def main(argv):
             elif s.type == "github":
                 g = ghissues.GhIssues(s, max_chars)
                 (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=int(limit) if limit else None, log=run.log))
+            elif s.type == "github_releases":
+                d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
+                fetched.add(s.repo) if d else None
+                GhReleases(s, d, max_chars).sync(st, log=run.log)
             else:
                 run.log(f"{s.key}: source type {s.type!r} is not implemented yet, skipped")
                 continue

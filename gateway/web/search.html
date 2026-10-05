@@ -247,7 +247,8 @@ function renderStatus(d) {
       else if (sy?.kind === "timeline") {
         box.append(bar("synced", sy.frac, `${pct(sy.frac)} · back to ${sy.horizon}`, live, false, s.color));
         for (const st of sy.streams) box.append(bar(st.name, st.frac, st.at ? `${st.mode === "done" ? "complete" : (st.mode === "back" ? "back to " : "up to ") + st.at.slice(0, 10)} · ${pct(st.frac)}` : "not started", live, true, s.color));
-      } else box.append(bar("synced", 0, "not implemented yet", false, false, s.color));
+      } else if (sy?.kind === "snapshot") box.append(bar("synced", sy.frac, s.chunks ? `${num(s.chunks)} chunks${s.position ? ` · latest ${s.position}` : ""}` : "not started", live, false, s.color));
+      else box.append(bar("synced", 0, "–", false, false, s.color));
       box.append(bar("embedded", s.chunks ? s.embedded / s.chunks : 0, `${num(s.embedded)} / ${num(s.chunks)}`, working && run.kind === "embed" && live, false, s.color));
       card.append(box);
     }
