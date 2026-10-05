@@ -4,7 +4,8 @@ nothing extra: the new path has the same blob but no stored state, so it is re-c
 import re, subprocess
 from store import Chunk
 
-CHUNKER_VERSION = "1"        # bump to re-chunk everything
+CHUNKER_VERSIONS = {"scala": "1", "java": "1", "markdown": "1", "scala_ts": "ts1", "java_ts": "ts1"}     # per chunker: bump one to re-chunk the files that use it
+CHUNKER_VERSION = "1"        # the heuristic chunkers
 MAX = 2400                   # chars per chunk, before the context header
 
 _DEF = re.compile(r"^(\s{0,4})(?:(?:private|protected|final|override|abstract|sealed|implicit|lazy|case|inline|transparent|open|opaque|given|@\w+(?:\([^)]*\))?)\s+)*"
@@ -260,22 +261,42 @@ def _glob_re(pat):
     return re.compile("^" + out + "$")
 
 
-CHUNKERS = {"scala": chunk_scala, "java": chunk_java, "markdown": chunk_markdown}
+def _tree_sitter(language, heuristic):
+    """The tree-sitter chunker for `language`; a file the parser reports errors for (or that crashes it) is chunked by `heuristic` and says so in its metadata."""
+    def run(path, text):
+        from sources import treesitter                       # imported on first use: the heuristic chunkers need no extra packages
+        try:
+            out = treesitter.chunk(language, path, text)
+        except Exception:                                    # noqa: BLE001  a grammar bug must not stop the sync
+            out = None
+        return out if out is not None else [(*c, {"fallback": "heuristic"}) for c in heuristic(path, text)]
+    return run
+
+
+CHUNKERS = {"scala": chunk_scala, "java": chunk_java, "markdown": chunk_markdown,
+            "scala_ts": _tree_sitter("scala", chunk_scala), "java_ts": _tree_sitter("java", chunk_java)}
 
 
 class GitSource:
     """A `git` source from config: files of `ref` under `paths` whose suffix has a chunker, minus `exclude` globs, read from the managed
     bare clone. Change detection is the blob sha per file, so a refresh re-chunks only files that changed."""
 
-    def __init__(self, src, repo_dir, max_chars=None):
+    def __init__(self, src, repo_dir, max_chars=None, pack_chars=None):
         self.src, self.name, self.repo, self.ref = src, src.id, repo_dir, src.ref
         self.web = f"https://github.com/{src.repo}"
         self.prefixes, self.exclude = list(src.paths), [_glob_re(g) for g in src.exclude]
         self.suffixes = tuple(src.chunkers)
-        self.max_chars = max_chars
+        self.max_chars, self.pack_chars = max_chars, pack_chars
+
+    def chunker_name(self, path):
+        return self.src.chunkers[next(s for s in self.suffixes if path.endswith(s))]
+
+    def version_of(self, path):
+        """What the file's stored state must say for it to count as chunked: the chunker's version, so switching a source to another chunker re-chunks it."""
+        return CHUNKER_VERSIONS.get(self.chunker_name(path), CHUNKER_VERSION)
 
     def chunker_for(self, path):
-        name = self.src.chunkers[next(s for s in self.suffixes if path.endswith(s))]
+        name = self.chunker_name(path)
         if name not in CHUNKERS:
             raise NotImplementedError(f"chunker {name!r} is not available yet")
         return CHUNKERS[name]
@@ -284,10 +305,13 @@ class GitSource:
         global MAX
         if self.max_chars:
             MAX = self.max_chars
+        if any(n.endswith("_ts") for n in self.src.chunkers.values()):
+            from sources import treesitter
+            treesitter.configure(self.max_chars, self.pack_chars)
         head = git(self.repo, "rev-parse", self.ref).decode().strip()
         files = {p: b for p, b in tree(self.repo, self.ref, self.prefixes, self.suffixes).items() if not any(r.match(p) for r in self.exclude)}
         known = {r[0][5:]: r[1] for r in store.db.execute("SELECT k, v FROM state WHERE source=? AND k LIKE 'file:%'", (self.name,))}
-        todo = [p for p, b in files.items() if known.get(p) != f"{CHUNKER_VERSION}:{b}"]
+        todo = [p for p, b in files.items() if known.get(p) != f"{self.version_of(p)}:{b}"]
         gone = [p for p in known if p not in files]
         store.put(self.name, "files_total", str(len(files))); store.commit()           # the page shows files indexed of files_total while this runs
         tot = [0, 0, 0, 0]
@@ -303,13 +327,13 @@ class GitSource:
                 continue
             text = git(self.repo, "show", f"{self.ref}:{p}").decode(errors="replace")
             seen, chunks = {}, []
-            for cid, title, body, line in chunker(p, text):
+            for cid, title, body, line, *extra in chunker(p, text):      # a tree-sitter chunker adds {"end", "sym"} (and "fallback") to the metadata
                 k = seen[cid] = seen.get(cid, 0) + 1          # ids stay unique within a file; stable while the file's outline is
                 chunks.append(Chunk(f"{self.name}:{p}:{cid}" + (f"~{k}" if k > 1 else ""), p, title, body,
-                                    f"{self.web}/blob/{head}/{p}#L{line}", {"line": line}))
+                                    f"{self.web}/blob/{head}/{p}#L{line}", {"line": line, **(extra[0] if extra else {})}))
             for i, v in enumerate(store.apply(self.name, chunks, doc=p)):
                 tot[i] += v
-            store.put(self.name, "file:" + p, f"{CHUNKER_VERSION}:{files[p]}")
+            store.put(self.name, "file:" + p, f"{self.version_of(p)}:{files[p]}")
             if n % 50 == 49:
                 store.commit()
                 log(f"  {self.name}: {n + 1}/{len(todo)} files")
