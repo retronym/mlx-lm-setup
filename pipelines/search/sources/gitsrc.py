@@ -100,27 +100,68 @@ def chunk_markdown(path, text):
     return chunks
 
 
+def _glob_re(pat):
+    """`**/src/test/**` style globs to a regex: ** crosses directories, * does not."""
+    out, i = "", 0
+    while i < len(pat):
+        if pat.startswith("**/", i):
+            out += "(?:.*/)?"; i += 3
+        elif pat.startswith("**", i):
+            out += ".*"; i += 2
+        elif pat[i] == "*":
+            out += "[^/]*"; i += 1
+        elif pat[i] == "?":
+            out += "[^/]"; i += 1
+        else:
+            out += re.escape(pat[i]); i += 1
+    return re.compile("^" + out + "$")
+
+
+CHUNKERS = {"scala": chunk_scala, "markdown": chunk_markdown}
+
+
 class GitSource:
-    def __init__(self, name, repo, web, ref, prefixes, suffixes, chunker):
-        self.name, self.repo, self.web, self.ref, self.prefixes, self.suffixes, self.chunker = name, repo, web, ref, prefixes, suffixes, chunker
+    """A `git` source from config: files of `ref` under `paths` whose suffix has a chunker, minus `exclude` globs, read from the managed
+    bare clone. Change detection is the blob sha per file, so a refresh re-chunks only files that changed."""
+
+    def __init__(self, src, repo_dir, max_chars=None):
+        self.src, self.name, self.repo, self.ref = src, src.id, repo_dir, src.ref
+        self.web = f"https://github.com/{src.repo}"
+        self.prefixes, self.exclude = list(src.paths), [_glob_re(g) for g in src.exclude]
+        self.suffixes = tuple(src.chunkers)
+        self.max_chars = max_chars
+
+    def chunker_for(self, path):
+        name = self.src.chunkers[next(s for s in self.suffixes if path.endswith(s))]
+        if name not in CHUNKERS:
+            raise NotImplementedError(f"chunker {name!r} is not available yet")
+        return CHUNKERS[name]
 
     def sync(self, store, limit=None, log=print):
+        global MAX
+        if self.max_chars:
+            MAX = self.max_chars
         head = git(self.repo, "rev-parse", self.ref).decode().strip()
-        files = tree(self.repo, self.ref, self.prefixes, self.suffixes)
-        known = {r[0]: r[1] for r in store.db.execute("SELECT k, v FROM state WHERE source=? AND k LIKE 'file:%'", (self.name,))}
-        known = {k[5:]: v for k, v in known.items()}
+        files = {p: b for p, b in tree(self.repo, self.ref, self.prefixes, self.suffixes).items() if not any(r.match(p) for r in self.exclude)}
+        known = {r[0][5:]: r[1] for r in store.db.execute("SELECT k, v FROM state WHERE source=? AND k LIKE 'file:%'", (self.name,))}
         todo = [p for p, b in files.items() if known.get(p) != f"{CHUNKER_VERSION}:{b}"]
         gone = [p for p in known if p not in files]
         tot = [0, 0, 0, 0]
         for p in gone:
             tot[2] += store.delete_doc(self.name, p)
             store.db.execute("DELETE FROM state WHERE source=? AND k=?", (self.name, "file:" + p))
+        skipped = 0
         for n, p in enumerate(todo[:limit]):
+            try:
+                chunker = self.chunker_for(p)
+            except NotImplementedError:
+                skipped += 1
+                continue
             text = git(self.repo, "show", f"{self.ref}:{p}").decode(errors="replace")
             seen, chunks = {}, []
-            for cid, title, body, line in self.chunker(p, text):
-                n = seen[cid] = seen.get(cid, 0) + 1          # ids stay unique within a file; stable while the file's outline is
-                chunks.append(Chunk(f"{self.name}:{p}:{cid}" + (f"~{n}" if n > 1 else ""), p, title, body,
+            for cid, title, body, line in chunker(p, text):
+                k = seen[cid] = seen.get(cid, 0) + 1          # ids stay unique within a file; stable while the file's outline is
+                chunks.append(Chunk(f"{self.name}:{p}:{cid}" + (f"~{k}" if k > 1 else ""), p, title, body,
                                     f"{self.web}/blob/{head}/{p}#L{line}", {"line": line}))
             for i, v in enumerate(store.apply(self.name, chunks, doc=p)):
                 tot[i] += v
@@ -130,17 +171,5 @@ class GitSource:
                 log(f"  {self.name}: {n + 1}/{len(todo)} files")
         store.put(self.name, "head", head)
         store.commit()
-        log(f"{self.name} @ {head[:10]}: {len(files)} files, {len(todo[:limit])} re-chunked, {len(gone)} removed -> +{tot[0]} ~{tot[1]} -{tot[2]} ={tot[3]} chunks")
-
-
-import os
-CODE = os.path.expanduser("~/code")
-SOURCES = {
-    "scalac": lambda: GitSource("scalac", f"{CODE}/scala/scala", "https://github.com/scala/scala", "HEAD",
-                                ["src/compiler", "src/reflect", "src/library", "spec"], (".scala", ".md"),
-                                lambda p, t: chunk_markdown(p, t) if p.endswith(".md") else chunk_scala(p, t)),
-    "scala3": lambda: GitSource("scala3", f"{CODE}/scala/scala3", "https://github.com/scala/scala3", "HEAD",
-                                ["compiler/src", "library/src", "tasty-core/src", "sbt-bridge/src"], (".scala",), chunk_scala),
-    "scala3docs": lambda: GitSource("scala3docs", f"{CODE}/scala/scala3", "https://github.com/scala/scala3", "HEAD",
-                                    ["docs/_docs/reference", "docs/_docs/internals"], (".md",), chunk_markdown),
-}
+        log(f"{self.name} @ {head[:10]}: {len(files)} files, {len(todo[:limit]) - skipped} re-chunked, {len(gone)} removed"
+            + (f", {skipped} skipped (chunker not available yet)" if skipped else "") + f" -> +{tot[0]} ~{tot[1]} -{tot[2]} ={tot[3]} chunks")

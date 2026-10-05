@@ -12,7 +12,8 @@ import json, subprocess, time
 from store import Chunk
 from sources.gitsrc import _split_big, MAX
 
-LOW_WATER = 300               # sleep until the reset when fewer requests than this remain
+LOW_WATER = 300               # sleep until the reset when fewer requests than this remain (search.json github.min_remaining)
+PAGE_DELAY = 0.2
 
 
 def _gh(args):
@@ -33,7 +34,7 @@ def wait_for_quota(log=print):
         time.sleep(wait)
 
 
-PAGE_LIMIT = 90               # GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
+PAGE_LIMIT = 90               # (search.json github.page_limit) GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
 
 
 def pages(path, log=print, **params):
@@ -58,7 +59,7 @@ def pages(path, log=print, **params):
         yield items
         if len(items) < 100:
             return
-        time.sleep(0.2)
+        time.sleep(PAGE_DELAY)
         if page % 25 == 0:
             wait_for_quota(log)
         if page >= PAGE_LIMIT and "since" in params and items[-1].get("updated_at"):
@@ -68,17 +69,26 @@ def pages(path, log=print, **params):
             page += 1
 
 
-def gh_pages(path, **params):             # kept for callers that want a flat list
-    return [i for p in pages(path, **params) for i in p]
+def configure(github):
+    """Apply search.json's `github` settings (politeness knobs) to this module."""
+    global LOW_WATER, PAGE_DELAY, PAGE_LIMIT
+    LOW_WATER, PAGE_DELAY, PAGE_LIMIT = github["min_remaining"], github["page_delay_s"], github["page_limit"]
 
 
 class GhIssues:
-    def __init__(self, repo="scala/bug", name="bug", reviews=False, default_since="2000-01-01T00:00:00Z"):
-        self.repo, self.name, self.reviews, self.default_since = repo, name, reviews, default_since
+    """A `github` source from config. `include` picks what becomes chunks: issues, prs, their conversation comments (kept by what the
+    comment belongs to) and inline review comments."""
+
+    def __init__(self, src, max_chars=None):
+        self.src, self.repo, self.name = src, src.repo, src.id
+        self.include, self.default_since = set(src.include), src.since
+        self.reviews = "reviews" in self.include
+        self.limit = src.max_items_per_run
+        self.max_chars = max_chars or MAX
 
     # ---- chunking ----
     def _chunks(self, id_prefix, doc, title, text, url, meta):
-        for n, part in enumerate(_split_big((text or "").splitlines(), MAX)):
+        for n, part in enumerate(_split_big((text or "").splitlines(), self.max_chars)):
             body = "\n".join(part).strip()
             if body or n == 0:
                 yield Chunk(f"{self.name}:{id_prefix}" + (f"~{n}" if n else ""), doc, title, body, url, meta)
@@ -95,7 +105,7 @@ class GhIssues:
     # ---- the three streams: each returns (items seen, [added, changed, deleted, unchanged]) ----
     def _stream(self, store, key, path, explicit, limit, to_chunks, log, **params):
         # each stream resumes from its own cursor; an explicit --since overrides all of them
-        since = explicit or store.get(self.name, key) or store.get(self.name, "since") or self.default_since
+        since = explicit or store.get(self.name, key) or self.default_since
         seen, tot = 0, [0, 0, 0, 0]
         for page in pages(path, log, sort="updated", direction="asc", since=since, **params):
             for it in page[:limit - seen if limit else None]:
@@ -111,19 +121,22 @@ class GhIssues:
         return seen, tot
 
     def sync(self, store, since=None, limit=None, log=print):
+        limit = limit or self.limit
         titles = {}
 
         def issue(i):
+            pr = i.get("pull_request")
+            if ("prs" if pr else "issues") not in self.include:
+                return
             n = i["number"]
             titles[n] = i["title"]
-            pr = i.get("pull_request")
             state = "merged" if pr and pr.get("merged_at") else i["state"]
             yield from self._chunks(f"issue:{n}", f"issue:{n}", f"{self.repo}#{n} {i['title']}", i["body"], i["html_url"],
                                     {"state": state, "labels": [l["name"] for l in i["labels"]], "number": n, "kind": "pr" if pr else "issue",
                                      "updated": i["updated_at"]})
 
         def comment(c):
-            if self._noise(c):
+            if self._noise(c) or ("prs" if "/pull/" in c["html_url"] else "issues") not in self.include:
                 return
             n = int(c["issue_url"].rsplit("/", 1)[1])
             t = titles.get(n) or self._title(store, n)
@@ -139,13 +152,16 @@ class GhIssues:
             yield from self._chunks(f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {c['user']['login']})",
                                     f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"]})
 
-        out = [("issues", self._stream(store, "since_issues", f"repos/{self.repo}/issues", since, limit, issue, log, state="all")),
-               ("comments", self._stream(store, "since_comments", f"repos/{self.repo}/issues/comments", since, limit, comment, log))]
+        out = []
+        if {"issues", "prs"} & self.include:
+            out.append(("issues", self._stream(store, "since_issues", f"repos/{self.repo}/issues", since, limit, issue, log, state="all")))
+        if "comments" in self.include:
+            out.append(("comments", self._stream(store, "since_comments", f"repos/{self.repo}/issues/comments", since, limit, comment, log)))
         if self.reviews:
             out.append(("review comments", self._stream(store, "since_reviews", f"repos/{self.repo}/pulls/comments", since, limit, review, log)))
         store.commit()
         for what, (n, t) in out:
-            log(f"{self.name} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
+            log(f"{self.src.key} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
 
     def reconcile(self, store, log=print):
         live = {i["number"] for p in pages(f"repos/{self.repo}/issues", log, state="all") for i in p}
@@ -153,7 +169,3 @@ class GhIssues:
         n = sum(store.delete_doc(self.name, d) for d in gone)
         store.commit()
         log(f"{self.name} reconcile: {len(live)} live, {len(gone)} issues removed ({n} chunks)")
-
-
-SOURCES = {"bug": lambda: GhIssues("scala/bug", "bug"),
-           "scalapr": lambda: GhIssues("scala/scala", "scalapr", reviews=True, default_since="2020-01-01T00:00:00Z")}

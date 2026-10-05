@@ -14,6 +14,7 @@ DOC_CHARS = 1800
 
 class Reranker:
     def __init__(self, model=MODEL):
+        self.name = model
         self.tok = AutoTokenizer.from_pretrained(model, padding_side="left")
         self.dev = "mps" if torch.backends.mps.is_available() else "cpu"
         self.m = AutoModelForCausalLM.from_pretrained(model, dtype=torch.float16 if self.dev == "mps" else torch.float32).to(self.dev).eval()

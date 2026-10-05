@@ -292,10 +292,11 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_translate(catalog, sup(), client(), **body))
 
     async def search(request: Request):
-        """{"query", "k"? (1..50, default 8), "source"? (scalac | scala3docs | bug), "mode"? (hybrid | bm25 | vec), "rerank"? (default true),
-        "open_only"? (hide closed issues)} -> {results: [{source, title, url, text, state?, bm25?, vec?, rerank?}], timing_ms, ...}."""
+        """{"query", "k"? (1..50, default 8), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
+        "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs)} ->
+        {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
-        known = {"query", "k", "source", "mode", "rerank", "open_only", "model"}
+        known = {"query", "k", "universe", "projects", "sources", "mode", "rerank", "open_only", "model"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):
@@ -303,7 +304,10 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_search(catalog, sup(), client(), **body))
 
     async def search_status(request: Request):
-        return JSONResponse(search_stats(catalog, request.query_params.get("model")))
+        """Universes with their projects and sources (labels, colours, priorities) and what each index holds; reads files, starts nothing.
+        ?universe=<id> picks the universe whose counts are returned (default: the default one)."""
+        q = request.query_params
+        return JSONResponse(search_stats(catalog, q.get("model"), q.get("universe")))
 
     async def embeddings(request: Request):
         """OpenAI-compatible embeddings: {"input": str | [str], "model"?} -> {data: [{embedding, index}], model, usage}. Documents are

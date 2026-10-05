@@ -5,11 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Local Models · Search</title>
 <style>
-  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706;
-          --scalac: #4f46e5; --scala3: #ea580c; --docs: #0d9488; --bug: #be185d; --scalapr: #0369a1; }
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #b45309; --bad: #dc2626; --warn: #d97706; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24;
-            --scalac: #818cf8; --scala3: #fb923c; --docs: #2dd4bf; --bug: #f472b6; --scalapr: #38bdf8; }
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #fbbf24; --bad: #f87171; --warn: #fbbf24; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, sans-serif; }
@@ -31,7 +29,6 @@
   .status { font-size: 13px; } .status.err { color: var(--bad); } .status.wait { color: var(--warn); }
   kbd { font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .hit { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--line)); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .hit.scalac { --c: var(--scalac); } .hit.scala3 { --c: var(--scala3); } .hit.scala3docs { --c: var(--docs); } .hit.bug { --c: var(--bug); } .hit.scalapr { --c: var(--scalapr); }
   .top { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: baseline; }
   .n { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; width: 1.6em; }
   .badge { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 40%, transparent); border-radius: 4px; padding: 0 5px; }
@@ -66,8 +63,8 @@
     <span class="status" id="status"></span>
   </form>
   <div class="row">
-    <label>in <select id="source"><option value="">everything</option><option value="scalac">scala/scala code and spec</option><option value="scala3">scala/scala3 code</option>
-      <option value="scala3docs">Scala 3 docs</option><option value="bug">scala/bug issues</option><option value="scalapr">scala/scala PRs</option></select></label>
+    <label id="unilabel" hidden>universe <select id="universe"></select></label>
+    <label>in <select id="source"><option value="">everything</option></select></label>
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label><input type="checkbox" id="open"> open issues and PRs only</label>
@@ -93,27 +90,44 @@ const SAMPLES = [
 $("samples").replaceChildren(...SAMPLES.map(s => Object.assign(document.createElement("button"), { type: "button", textContent: s, onclick: () => { $("q").value = s; go(); } })));
 
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-for (const id of ["source", "mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
+for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 function status(msg, cls = "") { $("status").textContent = msg; $("status").className = `status ${cls}`; }
-const COLOR = { scalac: "var(--scalac)", scala3: "var(--scala3)", scala3docs: "var(--docs)", bug: "var(--bug)", scalapr: "var(--scalapr)" };
-const LABEL = { scalac: "scala/scala", scala3: "scala/scala3 code", scala3docs: "Scala 3 docs", bug: "scala/bug", scalapr: "scala/scala PRs" };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-fetch("/api/search/status").then(r => r.json()).then(d => {
-  if (!d.indexed) { $("index").textContent = `No index yet at ${d.db}. Build it with pipelines/search/sync.py and embed.py.`; return; }
-  $("index").replaceChildren(...d.sources.map(s => {
-    const e = el("span", "", `${LABEL[s.source] || s.source}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
-    e.style.setProperty("--c", COLOR[s.source] || "var(--muted)"); e.title = `${s.description} · synced to ${s.position || "?"}`; return e;
-  }));
-}).catch(() => {});
+// ---- universes, projects and sources come from the config (GET /api/search/status), never from this page ----
+async function loadUniverse(id) {
+  const d = await (await fetch("/api/search/status" + (id ? `?universe=${encodeURIComponent(id)}` : ""))).json();
+  if (d.error) { $("index").textContent = d.error.message; return d; }
+  if (d.universes.length > 1) {
+    $("unilabel").hidden = false;
+    $("universe").replaceChildren(...d.universes.map(u => Object.assign(el("option", "", u.title), { value: u.id })));
+    $("universe").value = d.universe.id;
+  }
+  const prev = $("source").value;
+  const opts = [Object.assign(el("option", "", "everything"), { value: "" })];
+  for (const p of d.projects) {
+    opts.push(Object.assign(el("option", "", `${p.title}${p.indexed ? "" : " (not indexed yet)"}`), { value: `project:${p.id}` }));
+    for (const s of p.sources) opts.push(Object.assign(el("option", "", `   ${s.label}`), { value: `source:${s.key}` }));
+  }
+  $("source").replaceChildren(...opts);
+  if ([...$("source").options].some(o => o.value === prev)) $("source").value = prev;
+  if (!d.indexed) { $("index").textContent = "Nothing is indexed yet. Build it with pipelines/search/sync.py and embed.py."; return d; }
+  $("index").replaceChildren(...d.projects.flatMap(p => p.sources.filter(s => s.chunks).map(s => {
+    const e = el("span", "", `${s.label}: ${s.chunks.toLocaleString()} chunks${s.embedded < s.chunks ? ` (${s.embedded.toLocaleString()} embedded)` : ""}`);
+    e.style.setProperty("--c", s.color); e.title = `${p.title} · priority ${s.priority}${s.position ? ` · synced to ${s.position}` : ""}`; return e;
+  })));
+  return d;
+}
+loadUniverse().catch(() => {});
+$("universe").addEventListener("change", () => loadUniverse($("universe").value));
 
 function render(d) {
   $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
-    const box = el("div", `hit ${h.source}`);
+    const box = el("div", "hit"); box.style.setProperty("--c", h.color);
     const top = el("div", "top");
-    top.append(el("span", "n", i + 1), el("span", "badge", LABEL[h.source] || h.source));
+    top.append(el("span", "n", i + 1), el("span", "badge", h.label));
     if (h.state === "closed" || h.state === "merged") top.append(el("span", "badge closed", h.state));
     const a = el("a", "title", h.title); a.rel = "noopener noreferrer"; a.target = "_blank";
     if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
@@ -124,8 +138,8 @@ function render(d) {
     box.append(top, el("div", "url", h.url), pre);
     return box;
   }) : [el("div", "", "No results.")]));
-  $("meta").textContent = [`${d.results.length} results`, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
-                           d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null].filter(Boolean).join(" · ");
+  $("meta").textContent = [`${d.results.length} results`, d.universe, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
+                           d.cold_start_s ? `plus ${d.cold_start_s} s starting it` : null, d.missing?.length ? `not indexed yet: ${d.missing.join(", ")}` : null].filter(Boolean).join(" · ");
 }
 
 let aborter = null, timer = null;
@@ -135,7 +149,9 @@ async function go() {
   if (aborter) aborter.abort();
   aborter = new AbortController();
   const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked };
-  if ($("source").value) body.source = $("source").value;
+  const f = $("source").value;
+  if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
+  if (!$("unilabel").hidden) body.universe = $("universe").value;
   const t0 = performance.now();
   clearInterval(timer);
   const tick = () => { const s = (performance.now() - t0) / 1000; status(s > 3 ? `searching… ${s.toFixed(0)} s (the first query loads the models)` : "searching…", "wait"); };

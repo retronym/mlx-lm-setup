@@ -261,16 +261,14 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
 
 
 # ---- search over the indexed Scala sources (HTTP API and MCP tool) -------------------------------------------------------------
-SEARCH_SOURCES = {"scalac": "scala/scala (compiler, reflect, library, spec)", "scala3": "scala/scala3 (compiler, library, tasty-core, sbt-bridge)", "scala3docs": "Scala 3 reference and internals docs",
-                  "bug": "scala/bug issues and comments",
-                  "scalapr": "scala/scala pull requests, comments and review comments"}
 
-
-async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 8, source: str | None = None,
-                     mode: str = "hybrid", rerank: bool = True, open_only: bool = False, model: str | None = None) -> dict:
-    """Hybrid keyword + vector search, optionally reranked, over the local index. Returns the backend's reply plus backend and cold start."""
+async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 8, universe: str | None = None,
+                     projects: list[str] | None = None, sources: list[str] | None = None, mode: str = "hybrid", rerank: bool = True,
+                     open_only: bool = False, model: str | None = None) -> dict:
+    """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
-    body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only, **({"source": source} if source else {})}
+    body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
+            **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources)) if v}}
     r, meta = await post_json(sup, client, spec, "/search", body)
     if r.status_code != 200:
         try:
@@ -281,24 +279,35 @@ async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClien
     return {**r.json(), "backend": meta["backend"], "cold_start_s": meta["cold_start_s"]}
 
 
-def search_stats(catalog: Catalog, model: str | None = None) -> dict:
-    """What is in the index (chunks and vectors per source, last sync positions), read straight from the SQLite file: starts nothing."""
-    import sqlite3
+def _search_config(catalog: Catalog, model: str | None):
+    from . import searchinfo
     spec = resolve(catalog, model, "search")
     idx = spec.options.get("index_dir")
-    db = Path(spec.options.get("db") or Path(idx) / "data" / "search.db") if (spec.options.get("db") or idx) else None
-    if db is None or not db.exists():
-        return {"backend": spec.name, "indexed": False, "db": str(db) if db else None, "sources": []}
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    if not idx:                                                       # a test double without an index
+        return spec, None
     try:
-        rows = con.execute("""SELECT c.source, count(*), count(v.rowid), max(c.updated) FROM chunks c
-                              LEFT JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash GROUP BY c.source""").fetchall()
-        state = dict(con.execute("SELECT source || ':' || k, v FROM state WHERE k IN ('head', 'since')").fetchall())
-    finally:
-        con.close()
-    return {"backend": spec.name, "indexed": True, "db": str(db), "sources": [
-        {"source": s, "description": SEARCH_SOURCES.get(s, ""), "chunks": n, "embedded": e, "updated": u,
-         "position": state.get(f"{s}:head") or state.get(f"{s}:since")} for s, n, e, u in rows]}
+        return spec, searchinfo.load_config(idx, spec.options.get("config_dir"))[1]
+    except ValueError as e:                                           # a broken config: say so, do not crash the page
+        raise ApiError(500, "search_config_invalid", str(e)[:600]) from None
+
+
+def search_stats(catalog: Catalog, model: str | None = None, universe: str | None = None) -> dict:
+    """What is in the index per universe, project and source, read straight from the SQLite files and the JSON config: starts nothing."""
+    from . import searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        return {"backend": spec.name, "indexed": False, "universes": [], "projects": []}
+    try:
+        st = searchinfo.stats(cfg, universe)
+    except KeyError as e:
+        raise ApiError(404, "unknown_universe", e.args[0]) from None
+    return {"backend": spec.name, "indexed": any(p["indexed"] for p in st["projects"]), "universes": searchinfo.universes(cfg), **st}
+
+
+def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:
+    from . import searchinfo
+    spec, cfg = _search_config(catalog, model)
+    return searchinfo.universes(cfg) if cfg else []
 
 
 async def run_embed(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, body: dict, model: str | None = None) -> dict:

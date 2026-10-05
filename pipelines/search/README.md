@@ -1,30 +1,43 @@
-# Semantic search over Scala compiler and build sources (PoC)
+# Semantic search over Scala compiler and build sources
 
-One SQLite file (`data/search.db`, git-ignored) holding chunks, an FTS5 keyword index and embeddings; hybrid retrieval (BM25 + vector, reciprocal rank fusion). Everything runs locally; the only network use is `gh api` for issues and the one-time model download.
+Projects are indexed independently, one SQLite file each (chunks, an FTS5 keyword index, embeddings), and composed into **universes** that are searched together: BM25 and vector hits from every member database are merged by score, fused by reciprocal rank, and optionally reranked. Everything runs locally; the only network use is `git` and `gh api` for syncing and the one-time model download. See [PLAN.md](PLAN.md) for the design decisions and what is still to do.
 
-| Source | What | Change detection |
+## Configuration (JSON)
+
+```
+config/search.json          global: data dirs, models, chunking, GitHub politeness, refresh tiers, local-model steps
+config/projects/<id>.json   a project: title and sources
+config/universes/<id>.json  a universe: a named list of projects
+```
+
+| Source type | Fields | What it indexes |
 |---|---|---|
-| `scalac` | scala/scala `src/{compiler,reflect,library}` (one chunk per member-level definition, prefixed with path, package and enclosing definition) and `spec/` (per heading section) | git blob sha per file; only changed files are re-chunked, vanished files are deleted |
-| `scala3` | scala/scala3 `compiler/src`, `library/src`, `tasty-core/src`, `sbt-bridge/src` (same chunker; tests excluded) | same |
-| `scala3docs` | Scala 3 `docs/_docs/{reference,internals}` (per heading section) | same |
-| `bug` | scala/bug issues (title + body) and every comment as its own chunk | per stream (issues, comments) `since=<cursor>` on `updated`, ascending; paged, committed and cursor-saved after every page, so an interrupted run resumes; rate limit checked every 25 pages (sleeps to the reset below 300 left), 403/429 waited out; state and labels are metadata, so closing an issue re-embeds nothing |
-| `scalapr` | scala/scala pull requests (title + body; state open / merged / closed), conversation comments and inline review comments (with the diff hunk) | same three streams; bots and `/rebuild`-style commands skipped; default horizon 2020-01-01 (`--since` widens) |
+| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala` / `java` / `markdown` / `plain`) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
+| `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped |
+| `github_releases` | `repo`, `tag_messages` | release notes per heading, plus annotated tag messages for tags without a release (*not implemented yet*) |
+
+Every source also takes `id`, `label`, `color`, `priority` (1 highest .. 9), `enabled`, `min_interval_hours`, `max_items_per_run`. Labels and colours are what the web page shows, so adding a project needs no code change. `python config.py check` validates everything (all problems at once, with file and key path) and prints the tree; `python config.py show <universe>`.
+
+The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
 
 ```bash
-PY=/path/to/.venv-jev/bin/python           # numpy, torch, transformers
-$PY pipelines/search/sync.py               # scalac scala3 scala3docs bug scalapr; add `reconcile` to drop deleted issues; --since ISO8601 widens the issue backfill
-$PY pipelines/search/embed.py              # fill missing/stale vectors (Qwen3-Embedding-0.6B, MPS, ~50 chunks/s); resumable
+PY=/path/to/.venv-jev/bin/python                  # numpy, torch, transformers
+$PY pipelines/search/config.py check
+$PY pipelines/search/sync.py                      # the default universe, by priority; or: sync.py zinc | zinc/issues | scala-zinc --max-priority 3
+$PY pipelines/search/embed.py                     # fill missing/stale vectors in priority order (Qwen3-Embedding-0.6B, MPS, ~80 chunks/s)
 $PY pipelines/search/search.py "where is eta expansion of by-name parameters handled"
-$PY pipelines/search/search.py --rerank "where does the backend decide to emit invokedynamic for lambdas"   # + Qwen3-Reranker-0.6B over the top 30 (~3 s more)
-$PY pipelines/search/search.py --source bug --open "Await.result leaks callbacks"     # --bm25 / --vec to see each half
-$PY pipelines/search/test_lifecycle.py     # add / edit / rename / delete on a scratch repo: only the changed chunks are touched
+$PY pipelines/search/search.py --rerank --project zinc --source issues "incremental compilation loops"
+$PY pipelines/search/migrate.py --old data/search.db   # one-off: split the legacy single index into per-project databases, no re-embedding
+$PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pipelines/search/test_github.py; $PY pipelines/search/test_lifecycle.py
 ```
+
+`sync.py` skips disabled sources and sources synced less than `min_interval_hours` ago (`--force` overrides), runs a failing source's error to the end of the run, and takes `--since`, `--limit`, `--no-fetch`, `--reconcile` (drop issues and PRs deleted upstream).
 
 ## Lifecycle: why re-indexing is cheap
 
 - **Sync and embed are separate passes.** Sync diffs chunk content hashes (`store.apply`): new → insert, changed → update, missing → delete, same → skip. Embedding fills whatever has no vector for the current model or whose hash moved on. Keyword search works before any model exists; a model change is just a refill (vectors carry their model name).
 - **Chunk identity is stable under edits elsewhere**: `path:Enclosing.name#n`, `issue:N`, `comment:ID`. Editing one method changes one chunk; adding a method leaves the others' ids alone.
-- Measured on this machine: initial sync of scalac (37k chunks) 18 s, scala/bug since 2020 (2.8k issues, 8k comments) 75 s, an incremental issue sync 1.5 s; embedding is the only slow step (~17 min for everything, once).
+- Measured on this machine: initial sync of scala/scala (37k chunks) 18 s, scala/bug since 2020 (2.8k issues, 8k comments) 75 s, an incremental issue sync 1.5 s; embedding is the only slow step (~17 min for everything, once).
 
 ## Known gaps (PoC)
 

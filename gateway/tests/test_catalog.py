@@ -146,9 +146,9 @@ class SpeechAdapterTests(unittest.TestCase):
         cmd = s.command()
         self.assertTrue(cmd[1].endswith("search_server.py"))
         self.assertEqual(cmd[cmd.index("--index-dir") + 1], "/base/pipelines/search")
-        self.assertEqual(cmd[cmd.index("--db") + 1], "/base/pipelines/search/data/search.db")        # default location of the index
-        s = parse({"backends": {"q": {"adapter": "search", "python": "py", "index_dir": "i", "db": "elsewhere/x.db", "est_mem_gb": 4}}}, Path("/base")).backends["q"]
-        self.assertEqual(s.command()[s.command().index("--db") + 1], "/base/elsewhere/x.db")
+        self.assertNotIn("--config-dir", cmd)                                                         # defaults to <index_dir>/config
+        s = parse({"backends": {"q": {"adapter": "search", "python": "py", "index_dir": "i", "config_dir": "elsewhere/cfg", "est_mem_gb": 4}}}, Path("/base")).backends["q"]
+        self.assertEqual(s.command()[s.command().index("--config-dir") + 1], "/base/elsewhere/cfg")
 
     def test_stt_and_validation(self):
         s = parse({"backends": {"w": {"adapter": "mlx_audio_stt", "python": "py", "model": "org/stt", "est_mem_gb": 3}}}, Path("/base")).backends["w"]
