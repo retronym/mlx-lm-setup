@@ -99,7 +99,9 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
                          [("/v1/chat/completions", "ok", True), ("/x", "error", False), ("/slow", "cancelled", False)])
         self.assertIn("boom", snap["recent"][1]["error"])
         self.assertEqual([e["kind"] for e in snap["events"]], ["starting", "ready"])
-        self.assertEqual(sup.requests_snapshot(window_s=0.0001)["recent"], [])
+        self.assertEqual(len(sup.requests_snapshot(window_s=60)["recent"]), 3)   # still inside a generous window
+        await asyncio.sleep(0.05)                                               # now every request ended >= 50 ms ago...
+        self.assertEqual(sup.requests_snapshot(window_s=0.01)["recent"], [])    # ...so a 10 ms window excludes them all
 
     async def test_start_stop_and_events(self):
         sup = self.make({"a": {}})
