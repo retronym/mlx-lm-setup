@@ -77,6 +77,149 @@ def chunk_scala(path, text):
     return chunks
 
 
+_JAVA_TYPE = re.compile(r"\b(class|interface|enum|record|@interface)\s+([A-Za-z_$][\w$]*)")
+_STRIP_COMMENTS = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+
+
+def _skip_literal_or_comment(text, i):
+    """If a comment, string, char literal or text block starts at i, the index after it; else None."""
+    n = len(text)
+    if text.startswith("//", i):
+        j = text.find("\n", i)
+        return n if j < 0 else j
+    if text.startswith("/*", i):
+        j = text.find("*/", i + 2)
+        return n if j < 0 else j + 2
+    if text.startswith('"""', i):
+        j = text.find('"""', i + 3)
+        return n if j < 0 else j + 3
+    c = text[i]
+    if c in "\"'":
+        j = i + 1
+        while j < n and text[j] != c and text[j] != "\n":
+            j += 2 if text[j] == "\\" else 1
+        return j + 1
+    return None
+
+
+def _skip_block(text, i):
+    """i is at `{`: the index after its matching `}`."""
+    d, n = 0, len(text)
+    while i < n:
+        j = _skip_literal_or_comment(text, i)
+        if j is not None:
+            i = j
+            continue
+        d += text[i] == "{"
+        d -= text[i] == "}"
+        i += 1
+        if d == 0:
+            return i
+    return n
+
+
+def _java_scan(text):
+    """Events (kind, start, end, name) in file order: "type" (a type's header, up to its `{`), "member" (a method, constructor, initializer or
+    field with its body) and "close" (the end of a type's body). Braces in strings, comments, text blocks and parentheses (annotation
+    arguments, lambdas passed as arguments) do not count."""
+    n, i, parens, start, open_types, out = len(text), 0, 0, 0, 0, []
+    while i < n:
+        j = _skip_literal_or_comment(text, i)
+        if j is not None:
+            i = j
+            continue
+        c = text[i]
+        if c == "(":
+            parens += 1
+        elif c == ")":
+            parens = max(0, parens - 1)
+        elif c == "{" and parens == 0:
+            header = _STRIP_COMMENTS.sub(" ", text[start:i])
+            m = _JAVA_TYPE.search(header)
+            if m and "=" not in header[:m.start()]:
+                out.append(("type", start, i, m.group(2)))
+                open_types += 1
+                start = _past_eol_comment(text, i + 1)
+            else:
+                j = _skip_block(text, i)
+                k = j
+                while k < n and text[k] in " \t\r\n":
+                    k += 1
+                if k < n and text[k] in ",;":            # `int[] a = {1, 2};` and enum constants: the member runs on to its `;`
+                    i = j
+                    continue
+                out.append(("member", start, j, None))
+                start = i = _past_eol_comment(text, j)
+                continue
+        elif c == "}" and parens == 0:
+            if open_types:
+                open_types -= 1
+                out.append(("close", i, i + 1, None))
+            start = i + 1
+        elif c == ";" and parens == 0:
+            out.append(("member", start, i + 1, None))
+            start = _past_eol_comment(text, i + 1)
+        i += 1
+    return out
+
+
+_JAVA_EOL = re.compile(r"[ \t]*(?://[^\n]*)?\n")
+
+
+def _past_eol_comment(text, i):
+    """After a member ends, a comment on the rest of its line belongs to that member, not to the next one."""
+    m = _JAVA_EOL.match(text, i)
+    return m.end() if m else i
+
+
+_JAVA_CALL = re.compile(r"([A-Za-z_$][\w$]*)\s*\(")
+
+
+def _java_member_name(stripped):
+    head = stripped.split("{")[0].split("=")[0]
+    m = _JAVA_CALL.search(head)
+    if m:
+        return m.group(1)                                   # a method or constructor: the identifier before the first parenthesis
+    if stripped.startswith("static") and stripped[6:].lstrip().startswith("{"):
+        return "<static>"
+    if stripped.startswith("{"):
+        return "<init>"
+    words = re.findall(r"[A-Za-z_$][\w$]*", head.split(";")[0].split(",")[0])      # a field or the first enum constant: its first declarator
+    return words[-1] if words else "member"
+
+
+def chunk_java(path, text):
+    """One chunk per member (method, constructor, initializer, field) and one per type header, prefixed with the path, package and enclosing
+    types; the javadoc and annotations stay with what they document. Same output shape as chunk_scala."""
+    pkg = (re.search(r"^\s*package\s+([\w.]+)\s*;", text, re.M) or [None, ""])[1]
+    scope, chunks, seen = [], [], {}
+    for kind, a, b, name in _java_scan(text):
+        if kind == "close":
+            if scope:
+                scope.pop()
+            continue
+        raw = text[a:b]
+        stripped = _STRIP_COMMENTS.sub(" ", raw).strip()
+        enclosing = ".".join(scope)
+        if kind == "type":
+            ident = name
+            scope.append(name)
+        elif stripped in ("", ";") or stripped.startswith(("package ", "import ")):
+            continue
+        else:
+            ident = _java_member_name(stripped)
+        body = raw.strip("\n")
+        line = text.count("\n", 0, a + len(raw) - len(raw.lstrip())) + 1
+        for part in _split_big(body.splitlines(), MAX):
+            piece = "\n".join(part).strip("\n")
+            if len(piece.strip()) < 20:
+                continue
+            k = seen[(enclosing, ident)] = seen.get((enclosing, ident), 0) + 1
+            qual = f"{enclosing + '.' if enclosing else ''}{ident}"
+            chunks.append((f"{qual}#{k}", f"{path}  {pkg}  {qual}", piece, line))
+    return chunks
+
+
 def chunk_markdown(path, text):
     """One chunk per heading section, prefixed with the heading trail; long sections split at blank lines."""
     chunks, trail, cur, start = [], [], [], 1
@@ -117,7 +260,7 @@ def _glob_re(pat):
     return re.compile("^" + out + "$")
 
 
-CHUNKERS = {"scala": chunk_scala, "markdown": chunk_markdown}
+CHUNKERS = {"scala": chunk_scala, "java": chunk_java, "markdown": chunk_markdown}
 
 
 class GitSource:
