@@ -186,6 +186,17 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             r = await self.http.post("/api/search/get", json=bad)
             self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), bad)
 
+    async def test_search_links_route_and_the_link_filters(self):
+        r = await self.http.post("/api/search/links", json={"ref": "scala/bug#1"})
+        self.assertEqual((r.status_code, r.json()["found"]), (200, False))            # the test backend has no index
+        for bad in ({"ref": 5}, {"ref": "x", "bogus": 1}, {}):
+            r = await self.http.post("/api/search/links", json=bad)
+            self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), bad)
+        r = await self.http.post("/api/search", json={"query": "q", "linked_to": "#1", "link_type": ["closed_by"], "has_link": ["no_closed_by"], "refs_in_query": False})
+        self.assertEqual(r.status_code, 200)
+        echo = r.json()["echo"]
+        self.assertEqual((echo["linked_to"], echo["link_type"], echo["has_link"], echo["refs_in_query"]), ("#1", ["closed_by"], ["no_closed_by"], False))
+
     async def test_embeddings_are_openai_shaped_and_rerank_forwards(self):
         r = await self.http.post("/v1/embeddings", json={"input": ["ab", "abcd"], "model": "find", "kind": "query"})
         d = r.json()

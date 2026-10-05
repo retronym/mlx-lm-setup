@@ -1,6 +1,6 @@
 # Links between code, issues and PRs
 
-Design. Steps 1 (extraction from what is indexed) and 2 (GitHub-native edges, tag-based `shipped_in`) are built: see [Status](#status) below and `links.py` / `refs.py`.
+Design. Steps 1 (extraction from what is indexed), 2 (GitHub-native edges, tag-based `shipped_in`) and 3 (direct use in search) are built: see [Status](#status) below and `links.py` / `refs.py`.
 
 ## Problem
 
@@ -81,7 +81,7 @@ This ties into the still-open evaluation step 7 in [PLAN.md](PLAN.md). Cheap gro
 
 1. **DONE** Extraction on what's already indexed: reference parser module (project `tracker` / `legacy_prefixes` config, bare `#N` resolution, SHAs, URLs, `SI-N`), links DB schema, `links.py` phase (stamp, version, `--force`), `mentions` / `shipped_in` / `touches` edges from existing metadata, `defines` edges from code comments. Tests with fixture chunks; a stats command (edges per type, dangling %, top hubs). No gateway change. Stop for review of edge counts and a precision sample.
 2. **DONE** GitHub-native edges: closing references and merge commit sha in the adapter (additive, stored in meta; forward and backfill cursors unaffected), `closes` / `merged_as` extractors, `git describe --contains` for `shipped_in`.
-3. **TODO** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
+3. **DONE** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
 4. **TODO** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
 5. **TODO** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
 6. **Future** `blame` / `log -L` edges for a code hit, on demand; NLI-confirmed `mentions` -> `closes` upgrade for prose like "this supersedes #123"; Discourse and SIP links once those sources exist; a graph tab (cluster the link graph, find orphan issues with no PR and orphan PRs with no issue).
@@ -105,6 +105,16 @@ On the real index (21k issues and PRs, 61k commits, 3.7k files; builds in 7 s): 
 - `links.py` turns them into `closes` (conf 1.0 beats the 0.85 of a text keyword; `how` = "github closing ref") and `merged_as` (PR -> commit, dangling when the commit is not indexed).
 - `shipped_in` also comes from git now: per managed clone, tags in date order, one `git rev-list` of each against the tags before it (4 s for scala/scala), so every commit is attributed to the first tag that contains it, and a merged PR to the tag of its merge commit. Only tags that have a release node count. On the real index this took `shipped_in` from 12k edges (release notes) to 59k.
 - Not done: the PR's changed-file list (`touches` from PRs): it multiplies the GraphQL cost by the number of files and the commit edges already cover indexed files; worth revisiting only if the evaluation says PR-level file links matter.
+
+**Step 3 done.**
+
+- `linkdb.py` (standard library only, so the gateway loads it too) reads the links database: naming a document (`resolve`: a hit's `ref`, `scala/bug#123`, `#123`, `SI-123`, a commit url or sha), a document's relations seen from both ends (`closes` / `closed_by`, `merged_as` / `merge_of`, `mentions` / `mentioned_by`, `shipped_in` / `ships`, `touches` / `touched_by`, `defines` / `defined_by`), summaries, and `story`.
+- **Hits** carry `links` (`counts` per relation, `top`: up to six that matter most, two per relation, `line`) and their one-line `line` ends with it: `closed by scala/scala#456 · shipped in release v2.13.12 · mentioned by 5`.
+- **Restrictions**, applied before ranking in the keyword and the vector pass (the restriction is a temp table of (source, document) pairs on each store's connection, so a read-only database is fine): `linked_to` (documents linked to those named, through `link_type` relations), `has_link` (`["closed_by"]`: has a fix; `["no_closed_by"]`: has none, also `no_` for any relation; several are ANDed). With `kinds ["issue"]` and `open_only`, `no_closed_by` is "open issues nobody has fixed".
+- **A reference in the query**: `scala/bug#1234`, a URL, `SI-1234` or a bare `#123` makes that document first and what links to it follow, as a ranking of its own (`pin`) in the fusion, respecting the other filters; `refs_in_query: false` turns it off.
+- **Surfaces**: MCP `links` (neighbourhood or `story`) and the new `search` parameters, `POST /api/search/links`, the search page (a links row under a hit, "all n links ›" restricts to what is linked to that hit, a "links" selector for has a fix / no fix / shipped).
+- **Changed from the plan**: no ref tokens in the FTS text. `unicode61` already tokenizes `scala/bug#1234` into `scala bug 1234`, and a bare `#1234` cannot be told apart from another repo's without the document's repo, which only the links know; resolving the reference in the query through the links database does both and is rebuildable. `link_type` takes relation names only (an edge type such as `closes` would be ambiguous with the outgoing relation of that name; name both ends for either direction). Links are only ever *added* to what search returns by the pin: related results from the top hits (indirect use) are step 4.
+- Parser: `#N` near a JVM constant pool or bytecode listing (`invokestatic`, `Method arguments:`, `Lscala/...`) is no reference; it had given some old tickets hundreds of false links.
 
 ## Open questions
 

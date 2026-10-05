@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_get, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -293,10 +293,12 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
 
     async def search(request: Request):
         """{"query", "k"? (1..50, default 20), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
-        "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic)} ->
+        "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic),
+        "linked_to"? (only documents linked to this one: a hit `ref`, `scala/bug#123`, `#123`, a commit sha; a list means any of them) with "link_type"? [relation, e.g. "closed_by", "mentions"; name both ends, "closes" and "closed_by", for either direction],
+        "has_link"? [relation, or "no_<relation>"] (e.g. ["closed_by"]: has a fix; ["no_closed_by"] with kinds ["issue"]: no fix), "refs_in_query"? (default true: a reference spelled out in the query, like `scala/bug#123`, puts that document and what links to it first)} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
-        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "text_chars", "model"}
+        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "text_chars", "model", "linked_to", "link_type", "has_link", "refs_in_query"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):
@@ -313,6 +315,17 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         if not isinstance(body.get("refs"), list):
             raise ApiError(400, "invalid_arguments", "`refs` must be a list of strings")
         return JSONResponse(search_get(catalog, **body))
+
+    async def search_links_route(request: Request):
+        """{"ref" (a hit `ref`, `scala/bug#123`, `#123`, `SI-123`, a commit sha), "types"? [relation], "limit"? (1..200, default 30), "story"? (time-ordered documents around it), "universe"?}
+        -> {found, node, counts, links: [{rel, id, kind, title, state, created, url, get_ref, conf, how, snip}]} or {story: [...]}. Reads a file; starts nothing."""
+        body = await read_json(request)
+        known = {"ref", "types", "limit", "story", "universe", "model"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        if not isinstance(body.get("ref"), str):
+            raise ApiError(400, "invalid_arguments", "`ref` must be a string")
+        return JSONResponse(search_links(catalog, **body))
 
     async def search_status(request: Request):
         """Universes with their projects and sources (labels, colours, priorities) and what each index holds; reads files, starts nothing.
@@ -536,6 +549,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/search", handler(search), methods=["POST"]),
         Route("/api/search/status", handler(search_status), methods=["GET"]),
         Route("/api/search/get", handler(search_get_route), methods=["POST"]),
+        Route("/api/search/links", handler(search_links_route), methods=["POST"]),
         Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
         Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/search/outliers", handler(search_outliers_view), methods=["GET"]),

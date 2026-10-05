@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, repos, runstate
 from refs import make_parser, code_comments
 
-VERSION = "1"
+VERSION = "2"
 TYPES = ("closes", "merged_as", "mentions", "shipped_in", "touches", "defines")
 BASE = {"github": 1.0, "git": 0.95, "title": 0.8, "body": 0.7, "commit msg": 0.7, "comment": 0.5, "review": 0.5, "closing": 0.85, "code comment": 0.9, "release note": 0.9, "tag message": 0.9}
 _FILES = re.compile(r"\s+and \d+ more$")
@@ -74,8 +74,8 @@ class Builder:
         except StopIteration:
             return None
 
-    def node(self, id, kind, project, repo, ref, title="", state=None, created=None, url=None, indexed=1):
-        self.db.execute("INSERT OR IGNORE INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?)", (id, kind, project, repo, ref, title, state, created, url, indexed))
+    def node(self, id, kind, project, repo, ref, title="", state=None, created=None, url=None, indexed=1, chunk=None):
+        self.db.execute("INSERT OR IGNORE INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?)", (id, kind, project, repo, ref, title, state, created, url, indexed, chunk))
 
     def scan_nodes(self):
         commits = []
@@ -91,18 +91,18 @@ class Builder:
                     if kind in ("issue", "pr"):
                         nid = f"{src.repo}#{m['number']}"
                         self.items.add(nid)
-                        self.node(nid, kind, pid, src.repo, str(m["number"]), _PREFIX.sub("", title), m.get("state"), m.get("created"), url)
+                        self.node(nid, kind, pid, src.repo, str(m["number"]), _PREFIX.sub("", title), m.get("state"), m.get("created"), url, chunk=cid)
                     elif kind == "commit":
                         commits.append(m["sha"]); self.commit_repo[m["sha"]] = src.repo
-                        self.node(f"commit:{src.repo}@{m['sha']}", "commit", pid, src.repo, m["sha"], title, None, m.get("created"), url)
+                        self.node(f"commit:{src.repo}@{m['sha']}", "commit", pid, src.repo, m["sha"], title, None, m.get("created"), url, chunk=cid)
                     elif kind in ("release", "tag"):
                         if m.get("tag"):
-                            self.node(f"release:{src.repo}@{m['tag']}", "release", pid, src.repo, m["tag"], title, None, m.get("published"), url)
-                for sid, doc in con.execute("SELECT DISTINCT source, doc FROM chunks WHERE json_extract(meta, '$.kind') IS NULL"):
+                            self.node(f"release:{src.repo}@{m['tag']}", "release", pid, src.repo, m["tag"], title, None, m.get("published"), url, chunk=cid)
+                for sid, doc, cid in con.execute("SELECT source, doc, min(id) FROM chunks WHERE json_extract(meta, '$.kind') IS NULL GROUP BY source, doc"):
                     src = self.source(pid, sid)
                     if src is not None and src.type == "git":
                         self.files.add(f"file:{src.repo}:{doc}")
-                        self.node(f"file:{src.repo}:{doc}", "file", pid, src.repo, doc, doc)
+                        self.node(f"file:{src.repo}:{doc}", "file", pid, src.repo, doc, doc, chunk=cid)
             finally:
                 con.close()
         self.commits = sorted(set(commits))
@@ -261,7 +261,7 @@ def build(cfg, universe, path, log):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp.unlink(missing_ok=True)
     db = sqlite3.connect(tmp)
-    db.executescript("""CREATE TABLE nodes(id TEXT PRIMARY KEY, kind TEXT, project TEXT, repo TEXT, ref TEXT, title TEXT, state TEXT, created TEXT, url TEXT, indexed INTEGER);
+    db.executescript("""CREATE TABLE nodes(id TEXT PRIMARY KEY, kind TEXT, project TEXT, repo TEXT, ref TEXT, title TEXT, state TEXT, created TEXT, url TEXT, indexed INTEGER, chunk TEXT);
                         CREATE TABLE edges(src TEXT, dst TEXT, type TEXT, conf REAL, how TEXT, snip TEXT, PRIMARY KEY(src, dst, type));
                         CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);""")
     b = Builder(cfg, universe, db, log)

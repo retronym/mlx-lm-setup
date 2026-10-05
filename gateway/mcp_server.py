@@ -17,7 +17,7 @@ from . import auth
 from .catalog import Catalog
 from .gates import GateSpecError, parse_gates
 from .iterate import MAX_ATTEMPTS_CAP, run_iterate
-from .core import ApiError, compact_backend, default_narrator, map_errors, run_look, run_narrate, run_search, run_translate, search_get as search_get_docs, search_universes as search_universes_info, voices_listing, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
+from .core import ApiError, compact_backend, default_narrator, map_errors, run_look, run_narrate, run_search, run_translate, search_get as search_get_docs, search_links as search_links_info, search_universes as search_universes_info, voices_listing, op_policy, op_start, op_stop, post_json, resolve, resolve_target, status_payload
 from .profiles import apply_defaults
 from .supervisor import Supervisor
 
@@ -286,7 +286,8 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
 
     @mcp.tool()
     async def search(query: str, k: int = 20, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
-                     kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False) -> dict:
+                     kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False,
+                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None) -> dict:
         """Search the local index of a universe of projects (default: Scala / Zinc: Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, spec,
         issues with comments, pull requests with their comments and review comments, release notes. Natural-language and identifier queries
         both work ("where is eta expansion of by-name parameters handled", "Await.result leaks callbacks"). `projects` limits to project ids,
@@ -296,10 +297,13 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         (default: BM25 + embeddings, fused), "bm25" or "vec"; `rerank` re-scores the top 30 with a cross-encoder (about 1 s more, usually better for
         "where is X" questions; the final order blends the fused retrieval rank with the reranker, 75/25 for the top three, so a strong keyword or vector hit is not lost). `explain` adds each hit's `explain` {fused_rank, rrf, top_bonus, retrieval, weight, final}. `open_only` hides closed issues and unmerged-closed PRs. One hit per document (the best chunk of a file, page,
         issue or PR). Each hit has a `line`, a ready-made summary (state, kind, author, dates, source, link): show it to the user instead of just the title. Each hit has a `ref`: pass it to `get` for the whole thread or file. Returns `results` [{ref, project, source, key, label, title, url, state?, author?, created?, updated?, thread?, text, ...}] (author is a GitHub login; for a comment or review `thread` says which issue or PR it belongs to and who opened it; commits have `author_name` too) with text cut to `text_chars`; `missing` lists
-        projects not indexed yet. Starts the search backend if needed (the first call loads two small models, about 20 s)."""
+        projects not indexed yet. Hits carry `links` (counts per relation, the most important linked documents) and the `line` ends with them ("closed by scala/scala#456 · shipped in release v2.13.12"); a reference spelled out in the query (`scala/bug#1234`, `#123`)
+        puts that document and what links to it first. `linked_to` (a hit `ref`, `scala/bug#123`, `#123`, a sha) keeps only documents linked to it, through `link_type` (relations `closes`, `closed_by`, `merged_as`, `merge_of`, `mentions`, `mentioned_by`, `shipped_in`, `ships`, `touches`, `touched_by`, `defines`, `defined_by`).
+        `has_link` keeps documents with a relation (`["closed_by"]`: has a fix) or without (`["no_closed_by"]` with kinds ["issue"] and `open_only`: open issues nobody fixed yet). `links` shows a document's whole neighbourhood or its story.
+        Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
-                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain)
+                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link)
         except ApiError as e:
             raise fail(e) from None
         for h in res["results"]:
@@ -316,6 +320,18 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         Text is cut to `max_chars` from `offset`; when `truncated`, call again with `next_offset`. Reads the index and the local clones, starts no model."""
         try:
             return search_get_docs(catalog, refs, scope=scope, max_chars=max_chars, offset=offset, lines=lines)
+        except ApiError as e:
+            raise fail(e) from None
+
+    @mcp.tool()
+    async def links(ref: str, types: list[str] | None = None, limit: int = 30, story: bool = False, universe: str | None = None) -> dict:
+        """What a document is linked to. `ref` is a `search` hit's `ref`, `scala/bug#123`, `#123`, `SI-123` or a commit sha. Returns `links` [{rel, id, kind, title, state, created, url,
+        get_ref (pass to `get`), conf, how, snip}] most important first: `closes` / `closed_by` (a PR or commit closing an issue), `merged_as` / `merge_of`, `shipped_in` / `ships` (the release a
+        commit, PR or issue shipped in), `mentions` / `mentioned_by`, `touches` / `touched_by` (commit and file), `defines` / `defined_by` (a comment in the code names an issue); `conf` is how
+        sure the link is (1.0 GitHub's own, 0.5-0.9 a reference in text, lower where the target was guessed), `how` and `snip` say where the words were found. `types` limits to relations.
+        With `story` true, the documents around it in time order (report, discussion, fix, release) with how each was reached. Reads the links database; starts no model."""
+        try:
+            return search_links_info(catalog, ref, universe=universe, types=types, limit=limit, story=story)
         except ApiError as e:
             raise fail(e) from None
 

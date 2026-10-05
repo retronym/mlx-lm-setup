@@ -264,11 +264,14 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
 
 async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 20, universe: str | None = None,
                      projects: list[str] | None = None, sources: list[str] | None = None, kinds: list[str] | None = None, mode: str = "hybrid",
-                     rerank: bool = True, open_only: bool = False, explain: bool = False, text_chars: int | None = None, model: str | None = None) -> dict:
+                     rerank: bool = True, open_only: bool = False, explain: bool = False, text_chars: int | None = None, model: str | None = None,
+                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, refs_in_query: bool | None = None) -> dict:
     """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
     body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
-            **({"explain": True} if explain else {}), **({"text_chars": text_chars} if text_chars else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds)) if v}}
+            **({"explain": True} if explain else {}), **({"text_chars": text_chars} if text_chars else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds), ("linked_to", linked_to),
+                                                                                                                                                  ("link_type", link_type), ("has_link", has_link)) if v},
+            **({"refs_in_query": refs_in_query} if refs_in_query is not None else {})}
     r, meta = await post_json(sup, client, spec, "/search", body)
     if r.status_code != 200:
         try:
@@ -343,6 +346,42 @@ def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw
         return {"backend": spec.name, **searchget.get(cfg, refs, repos=searchinfo._module(spec.options["index_dir"], "repos"), **kw)}
     except ValueError as e:
         raise ApiError(400, "invalid_arguments", str(e)) from None
+
+
+def search_links(catalog: Catalog, ref: str, model: str | None = None, universe: str | None = None, types: list[str] | None = None, limit: int = 30, story: bool = False) -> dict:
+    """What a document is linked to (the links database the refresh builds): issues and PRs that close or mention it, its merge commit, the release that shipped
+    it, the files a commit touched... `ref` is a hit's `ref`, `scala/bug#123`, `#123`, `SI-123` or a commit sha. With `story`, the documents around it in time
+    order. Reads a file, starts nothing."""
+    from . import searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        return {"backend": spec.name, "found": False, "error": "no search index"}
+    ld_mod = searchinfo._module(spec.options["index_dir"], "linkdb")
+    try:
+        ld = ld_mod.LinkDB.open(cfg, universe)
+    except KeyError as e:
+        raise ApiError(404, "unknown_universe", e.args[0]) from None
+    if ld is None:
+        return {"backend": spec.name, "found": False, "available": False, "error": "no links database yet (the refresh's links phase builds it)"}
+    if not isinstance(ref, str) or not ref.strip() or not 1 <= limit <= 200:
+        raise ApiError(400, "invalid_arguments", "`ref` must be a non-empty string and `limit` 1..200")
+    flat = lambda n: {k: n[k] for k in ("id", "kind", "title", "state", "created", "url", "indexed", "get_ref")}
+    try:
+        nodes = ld.resolve(ref)
+        if not nodes:
+            return {"backend": spec.name, "ref": ref, "found": False, "error": "names no document the links know (try `scala/bug#123`, `#123`, a commit sha, or the `ref` of a search hit)"}
+        node = nodes[0]
+        out = {"backend": spec.name, "ref": ref, "found": True, "node": flat(node), **({"ambiguous": [flat(n) for n in nodes[1:6]]} if len(nodes) > 1 else {})}
+        if story:
+            out["story"] = [{"when": s["when"], **flat(s["node"]), "via": s["via"]} for s in ld.story(node["id"], limit)]
+        else:
+            out["counts"] = (ld.summaries([node["id"]]).get(node["id"]) or {}).get("counts", {})
+            out["links"] = [{"rel": r["rel"], **flat(r["node"]), "conf": r["conf"], "how": r["how"], "snip": r["snip"]} for r in ld.neighbours(node["id"], types, limit)]
+        return out
+    except ValueError as e:
+        raise ApiError(400, "invalid_arguments", str(e)) from None
+    finally:
+        ld.close()
 
 
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:

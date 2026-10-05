@@ -37,6 +37,7 @@ class ParserTests(unittest.TestCase):
 
     def test_not_references(self):
         self.assertEqual(keys("invokevirtual #38; //Method apply:()V\n#29 = Utf8 foo\nputstatic #24 // Field"), [])
+        self.assertEqual(keys("BootstrapMethods:\n  0: #28 invokestatic scala/runtime/X\n  Method arguments: #30 (Lscala/Function0;)Ljava/lang/Object;\n #99 7 #100 Lscala/Serializable;"), [])
         self.assertEqual(keys("&#123; C#1 a/b/c.scala#12abc scala/scala#2.13.x"), [])
         self.assertEqual(keys("```\nreal #5 in a stack\n```\nbut #6 outside"), [("issue", None, "6", "bare", False)])
         self.assertEqual(keys("[#918](https://github.com/o/r/issues/918) and #1234567"), [("issue", "o/r", "918", "url", False)])

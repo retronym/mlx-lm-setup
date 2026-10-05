@@ -112,14 +112,14 @@ def _matrix(st, model):
     return c["ids"], c["m"]
 
 
-def vector_search(st, qvec, model, k, sources=None, open_only=False, kinds=None):
+def vector_search(st, qvec, model, k, sources=None, open_only=False, kinds=None, linked=None):
     """[(rowid, cosine)] best first. `qvec` is the already-embedded query, so one query serves every store of a universe."""
     ids, m = _matrix(st, model)
     if not len(ids):
         return []
     s = m @ qvec.astype(np.float16)
-    if sources or open_only or kinds:
-        cond, args = chunk_filter(sources, open_only, kinds)
+    if sources or open_only or kinds or linked:
+        cond, args = chunk_filter(sources, open_only, kinds, linked)
         ok = {r[0] for r in st.db.execute(f"SELECT rowid FROM chunks c WHERE 1 {cond}", args)}
         s = np.where(np.isin(ids, list(ok)), s, -np.inf)
     top = np.argsort(-s)[:k]

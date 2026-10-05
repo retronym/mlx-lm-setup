@@ -38,6 +38,7 @@
   .scores { margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .whom { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
   .whom a { color: var(--ink); text-decoration: none; font-weight: 600; } .whom a:hover { color: var(--accent); text-decoration: underline; }
+  button.lk { font: inherit; font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; } button.lk:hover { color: var(--accent); border-color: var(--accent); }
   .whom time { border-bottom: 1px dotted var(--line); cursor: help; } .whom .sep::before { content: "·"; margin-right: 6px; }
   .url { color: var(--muted); font-size: 12px; word-break: break-all; }
   pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
@@ -149,11 +150,13 @@
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label><input type="checkbox" id="open"> open issues and PRs only</label>
+    <label title="Uses the links between issues, PRs, commits and releases: documents that something closes, or that nothing closes (try it with kind issue and open only)">links <select id="haslink"><option value="">any</option><option value="closed_by">has a fix</option><option value="no_closed_by">no fix yet</option><option value="shipped_in">shipped in a release</option><option value="no_shipped_in">not shipped</option></select></label>
     <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
   <div class="chips" id="samples"></div>
   <div id="index" class="meta"></div>
+  <div class="row" id="linkedrow" hidden><span class="meta">only documents linked to</span><span class="badge" id="linkedto"></span><button id="linkedx" class="lk" title="Back to all hits">✕</button></div>
   <div class="meta" id="meta"></div>
   <div id="results"><div id="empty">Results appear here: passages with links back to GitHub, not generated answers.</div></div>
   </div>
@@ -275,6 +278,27 @@ function whom(h) {
   });
   return line.childNodes.length ? line : null;
 }
+let linkedTo = null;                                                            // {ref, label}: restrict hits to documents linked to this one
+function setLinked(v) { linkedTo = v; $("linkedrow").hidden = !v; if (v) $("linkedto").textContent = v.label; go(); }
+$("linkedx").onclick = () => setLinked(null);
+$("haslink").onchange = () => go();
+function linksRow(h) {
+  const l = h.links;
+  if (!l || !l.top?.length) return null;
+  const row = el("div", "whom");
+  l.top.slice(0, 4).forEach((t, i) => {
+    const span = el("span", i ? "sep" : ""), say = { closes: "closes", closed_by: "closed by", merged_as: "merged as", merge_of: "merge of", shipped_in: "shipped in", mentions: "mentions",
+                                                     mentioned_by: "mentioned by", defines: "references", defined_by: "referenced by code" }[t.rel] || t.rel;
+    const name = t.kind === "commit" ? "commit " + t.id.split("@")[1].slice(0, 8) : t.kind === "release" ? t.id.split("@")[1] : t.kind === "file" ? t.id.split(":").slice(2).join(":") : t.id;
+    span.append(document.createTextNode(say + " "), t.url && /^https:\/\/github\.com\//.test(t.url) ? ghLink("", name, t.url) : document.createTextNode(name));
+    span.title = t.title || ""; row.append(span);
+  });
+  const n = Object.values(l.counts).reduce((a, b) => a + b, 0);
+  const more = el("button", "lk", `all ${n} links ›`); more.title = "Only documents linked to this one";
+  more.onclick = () => setLinked({ ref: h.ref, label: h.title.slice(0, 60) });
+  row.append(more);
+  return row;
+}
 function render(d) {
   $("results").replaceChildren(...(d.results.length ? d.results.map((h, i) => {
     const box = el("div", "hit"); box.style.setProperty("--c", h.color);
@@ -289,7 +313,7 @@ function render(d) {
     if (x) scEl.title = `fused #${x.fused_rank}: rrf ${x.rrf} (top-rank bonus ${x.top_bonus}), scaled ${x.retrieval}` + (x.weight != null ? `\nfinal ${x.final} = ${x.weight} x retrieval + ${(1 - x.weight).toFixed(2)} x rerank` : "");
     top.append(scEl);
     const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
-    box.append(top, ...[whom(h)].filter(Boolean), el("div", "url", h.url), pre);
+    box.append(top, ...[whom(h), linksRow(h)].filter(Boolean), el("div", "url", h.url), pre);
     return box;
   }) : [el("div", "", "No results.")]));
   $("meta").textContent = [`${d.results.length} results`, d.universe, d.mode, d.reranked ? "reranked" : "not reranked", `${d.timing_ms.total} ms in the search backend`,
@@ -306,6 +330,8 @@ async function go() {
   const f = $("source").value;
   if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
   if (pickedKinds.size) body.kinds = [...pickedKinds];
+  if (linkedTo) body.linked_to = linkedTo.ref;
+  if ($("haslink").value) body.has_link = [$("haslink").value];
   if (!$("unilabel").hidden) body.universe = $("universe").value;
   const t0 = performance.now();
   clearInterval(timer);

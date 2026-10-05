@@ -17,7 +17,8 @@ _URL_COMMIT = re.compile(rf"https?://github\.com/({REPO})/commit/([0-9a-f]{{7,40
 _QUAL = re.compile(rf"(?<![\w./-])({REPO})#(\d{{1,7}})(?!\w|\.\w)")        # not scala/scala#2.13.x
 _BARE = re.compile(r"(?<![\w/&#.-])#(\d{1,5})(?!\w|\.\w|\]\(|</a>)")   # a link's text (`[#1](url)`) takes its repo from the URL, which is found separately                  # not &#123; or C#1 or a/b#1 (qualified handles those)
 # javap output and constant pools are full of `invokevirtual #38` and `#29 = Utf8`: not references
-_BYTECODE = re.compile(r"\b(?:invoke\w+|get(?:static|field)|put(?:static|field)|ldc\w*|checkcast|instanceof|anewarray|new)\s+#\d|(?:#|SI-)\d+\s*(?:=\s*(?:Utf8|Class|Methodref|Fieldref|NameAndType|String|InterfaceMethodref|MethodHandle|MethodType|InvokeDynamic|Integer|Long|Double|Float)\b|;?\s*//)")
+_BYTECODE = re.compile(r"\b(?:invoke\w+|get(?:static|field)|put(?:static|field)|ldc\w*|checkcast|instanceof|anewarray|new)\s+#\d|(?:#|SI-)\d+\s*(?:=\s*(?:Utf8|Class|Methodref|Fieldref|NameAndType|String|InterfaceMethodref|MethodHandle|MethodType|InvokeDynamic|Integer|Long|Double|Float)\b|;?\s*//)"
+                       r"|\bMethod arguments:|\binvoke(?:static|virtual|special|dynamic|interface)\b|\bBootstrapMethods\b|\bREF_invoke|\(L[\w/$;]*\)|\bL(?:java|scala)/")
 _SHA40 = re.compile(r"(?<![0-9A-Za-z/])[0-9a-f]{40}(?![0-9A-Za-z])")
 _SHA_CUE = re.compile(r"(?:\b(?:commit|sha|revert(?:s|ed)?|cherry-picked from commit)\s+|@)([0-9a-f]{7,40})\b")
 _CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[:\s]*(?:\S+\s*(?:,|and|&)\s*)*$", re.I)
@@ -60,8 +61,7 @@ def make_parser(legacy_prefixes=None):
         for m in _BARE.finditer(text):
             if sum(f < m.start() for f in fences) % 2:                    # inside a fenced code block
                 continue
-            line = text[text.rfind("\n", 0, m.start()) + 1:(text.find("\n", m.end()) + 1 or len(text))]
-            if _BYTECODE.search(line):
+            if _BYTECODE.search(text[max(0, m.start() - 120):m.end() + 120]):          # constant pools run over many lines: look around, not at the line
                 continue
             add(m, "issue", None, m.group(1), "bare")
         if legacy_rx:

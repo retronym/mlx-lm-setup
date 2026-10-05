@@ -70,7 +70,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "look", "translate", "search", "get", "search_universes", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "transcribe", "narrate", "voices", "look", "translate", "search", "get", "links", "search_universes", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()
@@ -190,6 +190,10 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(data["results"][0]["text"]), 50)                       # cut to what the caller asked for
             self.assertNotIn("truncated", data["results"][0])
             self.assertNotIn("color", data["results"][0])                               # presentation detail for the page, not for a model
+            err, data, _ = await self.call(s, "search", query="x", linked_to="scala/bug#1", link_type=["closed_by"], has_link=["no_closed_by"])
+            self.assertEqual((err, data["echo"]["linked_to"], data["echo"]["link_type"], data["echo"]["has_link"]), (False, "scala/bug#1", ["closed_by"], ["no_closed_by"]))
+            err, data, _ = await self.call(s, "links", ref="scala/bug#1")
+            self.assertEqual((err, data["found"]), (False, False))                      # the test backend has no index
             err, data, _ = await self.call(s, "search_universes")
             self.assertEqual((err, data["universes"], data["default"]), (False, [], None))   # the test backend has no config
             err, _, text = await self.call(s, "search", query="")

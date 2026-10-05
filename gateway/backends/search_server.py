@@ -2,7 +2,8 @@
 reranker so they stay warm between queries; the indexes (one SQLite file per project, built by pipelines/search) are read-only here, and the
 JSON config is re-read on every request, so adding a project or editing labels needs no restart.
 
-  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?, "explain"?}
+  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?, "explain"?,
+                   "linked_to"? (a hit ref, `scala/bug#123`, `#123`, a sha: [..] too), "link_type"? [relation | edge type], "has_link"? [relation | no_relation], "refs_in_query"?}
                   -> {"universe", "results": [...], "timing_ms": {...}, "missing": [projects not indexed yet]}
   POST /embed     {"input": str | [str], "kind"? "document" | "query"}  ->  {"model", "dim", "embeddings": [[...]]}
   POST /rerank    {"query", "documents": [str]}                         ->  {"model", "scores": [P(relevant)]}
@@ -80,11 +81,16 @@ def _search_in(index, r, q, k, mode, c):
     text_chars = int(r.get("text_chars", 1200))
     if not 1 <= text_chars <= 50000:
         raise ValueError("text_chars must be 1..50000")
+    try:
+        lf, linfo = search.link_filter(index, r.get("linked_to"), _strs(r.get("link_type"), "link_type"), _strs(r.get("has_link"), "has_link"))
+    except ValueError as e:
+        raise ValueError(str(e))
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
-                      reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, **search.tuning(c))
+                      reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, link_filter=lf,
+                      refs_in_query=bool(r.get("refs_in_query", True)), **search.tuning(c))
     cached = {"rerank_hits": rr.hits, "rerank_misses": rr.misses} if use_rr and hasattr(rr, "hits") else None
-    return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing,
+    return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing, "links_available": index.links is not None, **({"link_filter": linfo} if lf else {}),
             "timing_ms": {"total": round((time.time() - t) * 1000)}, **({"cache": cached} if cached else {})}
 
 

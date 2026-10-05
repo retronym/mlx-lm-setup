@@ -107,7 +107,7 @@ For clusters, `trend` is the share of a cluster's items created in the last two 
 
 ## Links between documents
 
-`links.py` (the refresh's `links` phase, or `links.py [universe] [--force]`) derives typed edges between issues, PRs, commits, releases and files from the references in what is already indexed, into `data/links/<universe>.db` (no model, no network, about 10 s for everything). Edge types: `closes` (GitHub's closing references of a PR, fetched with GraphQL at the end of the PR source's sync and kept in the PR chunk's metadata; or a closing keyword in a PR or commit), `merged_as` (PR to its merge commit), `mentions`, `shipped_in` (release notes name it, or its release is the first tag that contains the commit), `touches` (commit to an indexed file), `defines` (a reference in a code comment). Every edge has a confidence and the words it was found in; targets not indexed yet are kept as dangling nodes. Nothing reads it in search yet. Design, decisions and the plan for using it in search: [LINKS.md](LINKS.md).
+`links.py` (the refresh's `links` phase, or `links.py [universe] [--force]`) derives typed edges between issues, PRs, commits, releases and files from the references in what is already indexed, into `data/links/<universe>.db` (no model, no network, about 10 s for everything). Edge types: `closes` (GitHub's closing references of a PR, fetched with GraphQL at the end of the PR source's sync and kept in the PR chunk's metadata; or a closing keyword in a PR or commit), `merged_as` (PR to its merge commit), `mentions`, `shipped_in` (release notes name it, or its release is the first tag that contains the commit), `touches` (commit to an indexed file), `defines` (a reference in a code comment). Every edge has a confidence and the words it was found in; targets not indexed yet are kept as dangling nodes. Search reads it: every hit has `links`, the `linked_to` / `link_type` / `has_link` restrictions, a reference in the query comes first with what links to it, and the `links` tool shows a neighbourhood or a story (below). Design, decisions and the rest of the plan: [LINKS.md](LINKS.md).
 
 ```bash
 $PY pipelines/search/links.py stats                  # edges per type, dangling share, biggest hubs
@@ -138,8 +138,9 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 | Surface | What |
 |---|---|
 | `/search` | page: sample questions, source / kind / method / rerank / open-issues-only controls, per-hit links, keyword and vector ranks, rerank scores |
+| MCP `links`, `POST /api/search/links` | a document's links: closed by, merged as, shipped in, mentions, touched files, referenced by code; `story` = the documents around it in time order. `ref` is a hit's `ref`, `scala/bug#123`, `#123` or a sha; reads the links database, starts no model |
 | MCP `get`, `POST /api/search/get` | the document behind a hit's `ref`: thread, file or lines of it (below) |
-| MCP `search` | `query`, `k` (default 20), `universe`, `projects`, `sources`, `kinds`, `mode`, `rerank`, `open_only`, `explain`, `text_chars`; also returns what is indexed and the commit or timestamp each source was last synced to |
+| MCP `search` | `query`, `k` (default 20), `universe`, `projects`, `sources`, `kinds`, `mode`, `rerank`, `open_only`, `explain`, `text_chars`, `linked_to`, `link_type`, `has_link`, `refs_in_query`; also returns what is indexed and the commit or timestamp each source was last synced to |
 | `POST /api/search` | the same as JSON |
 | MCP `search_universes` | universes, their projects and sources, and the kinds of hit each source holds |
 | `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |
