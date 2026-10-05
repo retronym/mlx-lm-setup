@@ -52,7 +52,7 @@ def _search(r):
     q = r["query"]
     if not isinstance(q, str) or not q.strip():
         raise ValueError("query must be a non-empty string")
-    mode, k = r.get("mode", "hybrid"), int(r.get("k", 8))
+    mode, k = r.get("mode", "hybrid"), int(r.get("k", 20))
     if mode not in MODES:
         raise ValueError(f"mode must be one of {sorted(MODES)}")
     if not 1 <= k <= MAX_K:

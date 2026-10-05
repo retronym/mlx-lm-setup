@@ -292,7 +292,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_translate(catalog, sup(), client(), **body))
 
     async def search(request: Request):
-        """{"query", "k"? (1..50, default 8), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
+        """{"query", "k"? (1..50, default 20), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
         "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic)} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)

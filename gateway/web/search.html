@@ -149,7 +149,7 @@
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label><input type="checkbox" id="open"> open issues and PRs only</label>
-    <label>top <select id="k"><option>5</option><option selected>8</option><option>15</option><option>30</option></select></label>
+    <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
   <div class="chips" id="samples"></div>
@@ -181,7 +181,7 @@ const SAMPLES = [
 $("samples").replaceChildren(...SAMPLES.map(s => Object.assign(document.createElement("button"), { type: "button", textContent: s, onclick: () => { $("q").value = s; go(); } })));
 
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
+for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 // ---- kinds of hit, finer than a source: offered when some source of the universe holds them; none picked = everything ----
