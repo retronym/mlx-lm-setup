@@ -9,6 +9,7 @@
   "chunking": {"max_chars": 2400, "min_chars": 20, "pack_chars": 1000},
   "github": {"min_remaining": 300, "page_delay_s": 0.2, "page_limit": 90, "default_since": "2000-01-01T00:00:00Z"},
   "neighbours": {"enabled": true, "neighbours": 5, "min_similarity": 0.8, "clusters": 80},
+  "links": {"enabled": true, "max_refs_per_chunk": 200, "legacy_prefixes": {"SI": "scala/bug"}, "repo_aliases": {"lampepfl/dotty": "scala/scala3"}, "bare_fallbacks": {"scala/scala": ["scala/bug"]}},
   "refresh": {
     "at": "03:00",
     "tiers": {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}},

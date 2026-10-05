@@ -241,7 +241,7 @@ class Config:
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}),
 }
 
 
@@ -269,6 +269,11 @@ def _search(d, errors):
                                                         "default_since": (t_re(DATE_RE, "an ISO timestamp like 2000-01-01T00:00:00Z"), "2000-01-01T00:00:00Z")}) if isinstance(d, dict) else {}
     s["neighbours"] = v.obj(d.get("neighbours", {}), "neighbours", {"enabled": (t_bool, True), "neighbours": (t_int(1, 50), 5), "min_similarity": (t_num(0), 0.8),
                                                                   "clusters": (t_int(1, 1000), 80)}) if isinstance(d, dict) else {}
+    s["links"] = v.obj(d.get("links", {}), "links", {"enabled": (t_bool, True), "max_refs_per_chunk": (t_int(1, 5000), 200),
+                                                    "repo_aliases": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items()) else "expected {old owner/repo: current owner/repo}", {"lampepfl/dotty": "scala/scala3"}),
+                                                    "bare_fallbacks": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, list) and all(isinstance(y, str) and REPO_RE.match(y) for y in r) for k, r in x.items()) else "expected {repo: [repos whose issues a bare #N may mean when it is none of the repo's own]}", {"scala/scala": ["scala/bug"]}),
+                                                    "legacy_prefixes": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and re.match(r"^[A-Z]{2,5}$", k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items())
+                                                                        else "expected {PREFIX: owner/repo}, e.g. {\"SI\": \"scala/bug\"}", {"SI": "scala/bug"})}) if isinstance(d, dict) else {}
     r = d.get("refresh", {}) if isinstance(d, dict) else {}
     s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
                                         "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})
