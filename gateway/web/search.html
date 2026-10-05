@@ -64,6 +64,12 @@
   .phases span.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); } .phases span.cur { color: var(--ink); border-color: var(--accent); font-weight: 600; }
   .phases span.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
   .digesttext { white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
+  .md { font-size: 14px; line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3 { margin: 16px 0 4px; font-size: 15px; line-height: 1.3; } .md h2 { padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; text-transform: none; }
+  .md p { margin: 6px 0; } .md ul, .md ol { margin: 4px 0; padding-left: 20px; } .md li { margin: 3px 0; }
+  .md a { color: var(--accent); text-decoration: none; } .md a:hover { text-decoration: underline; }
+  .md code { font: 12.5px ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .runmsg { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (max-width: 640px) { .bar { grid-template-columns: 64px 1fr; } .bar .val { grid-column: 1 / -1; text-align: left; } }
   [hidden] { display: none !important; }
@@ -109,6 +115,8 @@
     <div class="meta">Counts are read from the index files, refreshing every 2 s. "synced" is text in the index (git sources: files indexed of files in the tree; GitHub sources: how far each stream has walked back from now to its start date); "embedded" is chunks with a current vector, which is what hybrid and vector search can see. Lower priority numbers are processed first.</div>
   </div>
 </main>
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -219,6 +227,17 @@ function bar(name, f, text, live, sub, color) {
   return row;
 }
 const samples = [];                                    // (time, embedded total) for the rate and ETA
+// Markdown for text a model wrote (the digest), which contains GitHub titles: untrusted, so marked output is sanitised by DOMPurify, links open in a
+// new tab, and if the libraries did not load the text is shown plain rather than not at all.
+function mdNode(text) {
+  const box = el("div", "md");
+  if (!window.marked || !window.DOMPurify) { box.className = "digesttext"; box.textContent = text; return box; }
+  const t = document.createElement("template");
+  t.innerHTML = DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: false }), { ADD_ATTR: ["target"] });
+  t.content.querySelectorAll("a[href]").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer"; });
+  box.appendChild(t.content);
+  return box;
+}
 function renderStatus(d) {
   const run = d.run, working = run && run.running;
   const pill = el("span", `pill${working ? " on" : run && (run.stale || run.ok === false) ? " bad" : ""}`,
@@ -249,7 +268,7 @@ function renderStatus(d) {
   $("run").replaceChildren(...parts);
   const dg = d.digest;
   $("digest").hidden = !dg;
-  if (dg) $("digest").replaceChildren(Object.assign(el("h3", "", "What changed "), {}), el("div", "meta", `since ${dg.since.slice(0, 16).replace("T", " ")} UTC · written ${ago(dg.generated)} by ${dg.model}, ${dg.overview ? "overview checked against the facts" : "model overview left out (it did not pass the check against the facts)"}${dg.pruned ? `, ${dg.pruned} unsupported line${dg.pruned > 1 ? "s" : ""} removed` : ""} · ${dg.facts} facts`), el("div", "digesttext", dg.text));
+  if (dg) $("digest").replaceChildren(Object.assign(el("h3", "", "What changed "), {}), el("div", "meta", `since ${dg.since.slice(0, 16).replace("T", " ")} UTC · written ${ago(dg.generated)} by ${dg.model}, ${dg.overview ? "overview checked against the facts" : "model overview left out (it did not pass the check against the facts)"}${dg.pruned ? `, ${dg.pruned} unsupported line${dg.pruned > 1 ? "s" : ""} removed` : ""} · ${dg.facts} facts`), mdNode(dg.text));
   $("cards").replaceChildren(...d.projects.map(p => {
     const card = el("div", "card"); const h = el("h3", "", p.title); h.append(el("span", "meta", p.indexed ? p.id : `${p.id} · not indexed yet`));
     card.append(h);
