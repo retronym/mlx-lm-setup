@@ -256,8 +256,8 @@ function renderStatus(d) {
   }));
 }
 let pollTimer = null;
-async function pollStatus() {
-  if (document.hidden) return;
+async function pollStatus(force = false) {
+  if (document.hidden && !force) return;                   // no polling in a background tab, but the first fetch and a return to the tab always run
   try {
     const d = await (await fetch("/api/search/status" + ($("universe").value && !$("unilabel").hidden ? `?universe=${encodeURIComponent($("universe").value)}` : ""))).json();
     if (d.error) throw new Error(d.error.message);
@@ -267,8 +267,9 @@ async function pollStatus() {
 function tab(name) {
   for (const t of ["search", "status"]) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
   clearInterval(pollTimer);
-  if (name === "status") { samples.length = 0; pollStatus(); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
+  if (name === "status") { samples.length = 0; pollStatus(true); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
 }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("tab-status").hidden) { samples.length = 0; pollStatus(true); } });
 $("t-search").onclick = () => tab("search"); $("t-status").onclick = () => tab("status");
 if (location.hash === "#status") tab("status");
 else if (location.hash.length > 1) { $("q").value = decodeURIComponent(location.hash.slice(1)); go(); }

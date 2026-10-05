@@ -12,9 +12,9 @@ config/universes/<id>.json  a universe: a named list of projects
 
 | Source type | Fields | What it indexes |
 |---|---|---|
-| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala` / `java` / `markdown` / `plain`) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
-| `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped |
-| `github_releases` | `repo`, `tag_messages` | release notes per heading, plus annotated tag messages for tags without a release (*not implemented yet*) |
+| `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala` / `java` / `markdown`; `plain` not yet) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
+| `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped. All the sources of a project on one repo share one pass over its streams; two sources may not index the same kind of item (the config says so) |
+| `github_releases` | `repo`, `tag_messages` | GitHub release notes (a header chunk, then one chunk per heading for long notes; `#123` and `/pull/123` references go into the chunk metadata) plus annotated tag messages for tags without a release |
 
 Every source also takes `id`, `label`, `color`, `priority` (1 highest .. 9), `enabled`, `min_interval_hours`, `max_items_per_run`. Labels and colours are what the web page shows, so adding a project needs no code change. `python config.py check` validates everything (all problems at once, with file and key path) and prints the tree; `python config.py show <universe>`.
 
@@ -76,3 +76,18 @@ python3 pipelines/search/dashboard.py        # http://127.0.0.1:8767/  (stdlib o
 One card per source with a "synced" bar (git sources: files indexed of files in the tree; GitHub sources: where each stream's cursor is between its start date and now, per stream) and an "embedded" bar (chunks that have a current vector), plus an overall bar with the embedding rate and ETA, running sync / embed indicators, and the latest log lines.
 
 Backfilling older history is `sync.py bug --since 2000-01-01T00:00:00Z` (then `embed.py`); it is idempotent, so a re-run only costs the API requests.
+
+## GitHub sync: priorities, caps and the two cursors
+
+Each stream (issues and PRs, comments, review comments) of a repo has a **forward cursor** (newest item ingested: every run first walks from there, so new and edited items arrive at once) and a **backfill frontier** that fills history newest-first in time windows until the source's `since` horizon. `max_items_per_run` caps the backfill per run (the current window always finishes), so a huge low-priority tracker such as scala/scala3 (priority 8) drains over several runs with the recent past first and never starves the rest. Widening a source's `since` re-opens its backfill. The page's "synced" bar for a GitHub source is how far back the frontier has come. Pages are fetched politely: the rate limit is checked every 25 pages (sleeping to the reset below `github.min_remaining`), a 403/429 is waited out, and long lists are re-anchored before GitHub's 10,000-item `page=` cap.
+
+## Where data lives, and moving it between checkouts
+
+Everything generated is under `pipelines/search/data/` (git-ignored) **of the checkout you run in**: `projects/<id>/index.db`, `repos/` (managed bare clones) and `run.json` (what the indexer is doing). A worktree therefore has its own index and never touches the one a running service reads from the main checkout. `SEARCH_DATA_DIR=/some/dir` overrides the location (relative paths are relative to `pipelines/search`).
+
+```bash
+pipelines/search/draft.sh start          # a draft gateway for THIS checkout on :8091 (search backend only; venvs come from the main checkout): http://127.0.0.1:8091/search#status
+pipelines/search/promote_data.sh <worktree> <main-checkout>     # copy indexes and clones across with APFS clones (instant, no extra disk); --only zinc,scala-asm; --force replaces (old kept as .bak)
+```
+
+After merging to `main`: `promote_data.sh` from the worktree into the main checkout, then `service/service.sh restart`. The main checkout's legacy `data/search.db` is no longer read once the service runs the new code and can be deleted after you have checked the new indexes.
