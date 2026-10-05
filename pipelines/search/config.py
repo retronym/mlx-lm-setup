@@ -282,7 +282,7 @@ def _search(d, errors):
         s["links"]["github"] = v.obj(d.get("links", {}).get("github", {}) if isinstance(d.get("links"), dict) else {}, "links.github",
                                      {"enabled": (t_bool, True), "max_prs_per_run": (t_int(0), 3000), "batch": (t_int(1, 100), 50), "closing_first": (t_int(1, 100), 10)})
     s["related"] = v.obj(d.get("related", {}), "related", {"enabled": (t_bool, True), "seeds": (t_int(1, 50), 5), "limit": (t_int(1, 50), 8), "per_kind": (t_int(1, 50), 4),
-                                                           "depth2": (t_bool, True), "hub_degree": (t_int(1), 150), "boost": (t_num(0), 0.0),
+                                                           "depth2": (t_bool, True), "hub_degree": (t_int(1), 150), "boost": (t_num(0), 0.5),
                                                            "weights": (lambda x: None, {})}) if isinstance(d, dict) else {}
     if isinstance(d, dict):
         w = d.get("related", {}).get("weights", {}) if isinstance(d.get("related"), dict) else {}

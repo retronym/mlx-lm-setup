@@ -147,9 +147,9 @@ class Builder:
             repo, n = nid.split("#", 1)
             self.node(nid, "item", None, repo, n, indexed=0)
 
-    def refs_of(self, text, src_node, ctx_repo, how, type, closing_ok, flip=False):
+    def refs_of(self, text, src_node, ctx_repo, how, type, closing_ok, flip=False, lists=True):
         """Add the edges for every reference in `text`. `flip`: the document is the *target* of the edge (a release note ships what it names)."""
-        for ref in self.parse(text)[:self.max_refs]:
+        for ref in self.parse(text, lists)[:self.max_refs]:
             for dst, certainty in self.resolve(ref, ctx_repo):
                 t = type
                 if closing_ok and ref.closing and ref.kind == "issue":
@@ -179,8 +179,8 @@ class Builder:
                             if kind == "pr" and "~" not in cid:
                                 self.github_edges(thread, repo, m)
                             if "~" not in cid:
-                                self.refs_of(_PREFIX.sub("", title), thread, repo, "title", "mentions", kind == "pr")
-                            self.refs_of(text, thread, repo, "body", "mentions", kind == "pr")
+                                self.refs_of(_PREFIX.sub("", title), thread, repo, "title", "mentions", kind == "pr", lists=False)
+                            self.refs_of(text, thread, repo, "body", "mentions", kind == "pr", lists=False)       # a PR body is read as GitHub reads it
                         else:
                             self.refs_of(text, thread, repo, kind if kind == "review" else "comment", "mentions", False)
                     elif kind == "commit":

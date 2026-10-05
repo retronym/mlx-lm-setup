@@ -139,15 +139,16 @@ class RelatedTests(Base):
 
 
 class BoostTests(Base):
-    def test_boost_is_off_by_default_and_lifts_candidates_linked_to_the_top(self):
-        base = search.hits(self.idx, "crash fixes notes", k=10, mode="bm25", explain=True)
+    def test_boost_lifts_candidates_linked_to_the_top_and_zero_turns_it_off(self):
+        base = search.hits(self.idx, "crash fixes notes", k=10, mode="bm25", explain=True, link_boost=0.0)
         self.assertFalse(any("link_boost" in h for h in base))
         boosted = search.hits(self.idx, "crash fixes notes", k=10, mode="bm25", link_boost=2.0)
         got = [h for h in boosted if "link_boost" in h]
         self.assertTrue(got and all(h["link_boost"] > 0 for h in got))
         self.assertEqual({h["doc"] for h in base}, {h["doc"] for h in boosted})              # nothing new enters: only the order moves
-        self.cfg.search["related"]["boost"] = 0.5
-        self.assertTrue(any("link_boost" in h for h in search.hits(self.idx, "crash fixes notes", k=10, mode="bm25")))   # the configured default applies when not asked
+        self.assertTrue(any("link_boost" in h for h in search.hits(self.idx, "crash fixes notes", k=10, mode="bm25")))   # the configured default (0.5) applies when not asked
+        self.cfg.search["related"]["boost"] = 0.0
+        self.assertFalse(any("link_boost" in h for h in search.hits(self.idx, "crash fixes notes", k=10, mode="bm25")))
 
 
 class SearchWithLinks(Base):

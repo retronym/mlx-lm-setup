@@ -22,6 +22,7 @@ _BYTECODE = re.compile(r"\b(?:invoke\w+|get(?:static|field)|put(?:static|field)|
 _SHA40 = re.compile(r"(?<![0-9A-Za-z/])[0-9a-f]{40}(?![0-9A-Za-z])")
 _SHA_CUE = re.compile(r"(?:\b(?:commit|sha|revert(?:s|ed)?|cherry-picked from commit)\s+|@)([0-9a-f]{7,40})\b")
 _CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[:\s]*(?:\S+\s*(?:,|and|&)\s*)*$", re.I)
+_CLOSING_ONE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b[:\s]*$", re.I)       # GitHub's rule: the keyword goes with each reference
 _LINE_COMMENT = re.compile(r"(?<!:)//(.*)")
 
 
@@ -44,12 +45,14 @@ def make_parser(legacy_prefixes=None):
     legacy = {k.upper(): v for k, v in (legacy_prefixes or {}).items()}
     legacy_rx = re.compile(rf"(?<![\w-])({'|'.join(map(re.escape, legacy))})-(\d{{1,6}})\b") if legacy else None
 
-    def parse(text):
+    def parse(text, lists=True):
+        """`lists`: `Fixes #1, #2 and #3` closes all three (how commit messages of the Trac era meant it); False is GitHub's reading, where only #1 closes."""
         if not text:
             return []
         found = []                                                         # (pos, Ref)
+        closing_rx = _CLOSING if lists else _CLOSING_ONE
         def add(m, kind, repo, key, via):
-            closing = bool(_CLOSING.search(text[max(0, m.start() - 80):m.start()]))
+            closing = bool(closing_rx.search(text[max(0, m.start() - 80):m.start()]))
             found.append((m.start(), Ref(kind, repo, key, via, closing, _snip(text, m.start(), m.end()))))
         for m in _URL.finditer(text):
             add(m, "issue", m.group(1), m.group(2), "url")
