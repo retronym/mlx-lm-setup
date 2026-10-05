@@ -50,6 +50,25 @@ $PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pi
 - The query CLI loads the embedder (and reranker) per call, 4 s hybrid and 7 s with `--rerank`. That disappears when this becomes a gateway backend (`/v1/embeddings`, `/v1/rerank` and a `search` MCP tool).
 - sbt/zinc, the SIPs and Discourse are not indexed yet, so e.g. Zinc invalidation questions only find scala/bug issues.
 
+## Duplicates and clusters
+
+`neighbours.py` (the refresh's `neighbours` phase, or `neighbours.py [universe] [--force]` on its own) turns the issue and PR vectors that are already in the indexes into two things, written to `data/neighbours/<universe>.db` and read by the gateway: each item's closest matches (`neighbours`, default 5, kept at cosine >= `min_similarity`, default 0.8) and spherical k-means topic clusters (`clusters`, default 80, at most one per ten items) named by their most distinctive title words. Nothing here is a model: the vectors are the search index's own, so a duplicate view costs a file read. One run serves every filter, because filters are applied when reading.
+
+The **Duplicates** and **Clusters** tabs on `/search` (and `GET /api/search/duplicates`, `/api/search/clusters`) filter by state, kind, creation date and repo:
+
+| Filter | Duplicates (pairs) | Clusters (items) |
+|---|---|---|
+| `state` | `open`: at least one of the pair is open; `closed`: neither is | `open`; `closed` (closed or merged) |
+| `kind` | `issue` or `pr` (both are), `mixed` (an issue and a PR: the fix probably exists), `any` | `issue`, `pr`, `any` |
+| `since`, `until` (`YYYY[-MM[-DD]]`) | kept if EITHER item was created in range | per item |
+| `projects` | kept if EITHER item is in one | per item |
+| `min_sim` | 0.95: nearly always the same text; 0.90: real duplicates and follow-ups; below 0.90: related, not duplicate | |
+| `adjacent` (default 1), `templated` | below | |
+
+Two kinds of pair are hidden by default because they are artifacts, not duplicates. An old import created copies of tickets under adjacent numbers, so a same-repo pair whose numbers differ by at most `adjacent` is dropped when at least one of them is closed (open and open stays: it may be a real duplicate; `adjacent=0` shows them all). Release procedures, `Release 2.13.x`, dependency bumps, dummy tickets and `(Issue was deleted)` placeholders look alike by construction (`templated=1` keeps them).
+
+For clusters, `trend` is the share of a cluster's items created in the last two years divided by the same share over everything matching the filters, so above 1 the topic is heating up (shown from 20 items). Expanding a cluster lists its items newest first.
+
 ## Reranking (`--rerank`)
 
 `rerank.py` scores the top 30 documents (after fusion and one-hit-per-document) with Qwen3-Reranker-0.6B, a yes/no relevance judgement per (query, text) pair. Six hand-picked queries, judged by eye: it clearly helps on "where is X implemented" (for the invokedynamic query the top 5 changed from two issues and incidental hits to `Delambdafy.mkLambdaMetaFactoryCall`, `genInvokeDynamicLambda` and `addLambdaDeserialize`) and keeps code, docs and issues together in one list for concept queries (implicit shadowing: issue, issue, Scala 3 doc, `Implicits.LocalShadower`). On duplicate-issue queries it only reshuffles an already good top 3. It can also demote a good hit (`EtaExpansion.expand` fell out of the top 5 for the eta-expansion query), so a real evaluation set is the next step before making it the default.
@@ -66,6 +85,7 @@ The `scala-search` backend (adapter `search`, `gateway/backends/search_server.py
 | MCP `search_universes` | universes, their projects and sources, and the kinds of hit each source holds |
 | `POST /v1/embeddings` | OpenAI-compatible; `"kind": "query"` adds the retrieval instruction used for search queries |
 | `POST /api/rerank` | `{"query", "documents": [...]}` -> relevance scores |
+| `GET /api/search/duplicates`, `GET /api/search/clusters` | the Duplicates and Clusters tabs: filtered reads of the neighbours database (below) |
 | `GET /api/search/status` | chunks and embedded chunks per source, last sync position; reads the SQLite file, starts nothing |
 
 The index lives at `pipelines/search/data/search.db` unless the catalog sets `db`. Run `sync.py` and `embed.py` (they can run while the gateway is up; the backend reloads its vector matrix when the file changes), then no restart is needed.
@@ -118,6 +138,7 @@ service/search-refresh.sh install           # a nightly launchd job (search.json
 | `enrich` | for long threads (>= `min_comments` comments), a summary chunk written by `llm.thread_summaries.model`, **checked sentence by sentence against the thread by the NLI model** and retried with the problems; unfaithful summaries are not indexed. Newest threads first, `max_per_run` per run, re-done when a thread has grown by half. Off by default | Qwen3-Coder + OpenJev NLI |
 | `digest` | what changed since the last refresh: exact bullets rendered from the indexes, plus a short LLM overview checked against them (unsupported lines dropped, the overview left out if nothing faithful remains). Shown on the Index status tab | Qwen3-Coder + OpenJev NLI |
 | `embed` | vectors for everything new, through the gateway's `/v1/embeddings` (one managed copy of the model, started and stopped by the gateway's memory manager; `--local` runs it in-process) | Qwen3-Embedding |
+| `neighbours` | duplicate candidates and topic clusters over issues and PRs, from the vectors already in the indexes (numpy, no model, about 10 s for 20k items; skipped when nothing changed; `neighbours.enabled`). See [Duplicates and clusters](#duplicates-and-clusters) | none |
 | `verify` | database integrity, nothing left without a vector, and the canary queries (`config/canaries.json`: a query passes when an expected string is in the title or URL of the top `k` results) through the gateway, which also proves the search backend end to end | the search backend |
 
 The LLM phases run before `embed` so the large LLM and the embedder do not evict each other from the gateway's memory budget. `--budget-hours` (or `refresh.budget_hours`) stops starting new sources, LLM items and embedding work after that long; the rest comes first next time. One indexer run at a time (a lock shared with `sync.py` and `embed.py`; a second one exits with status 3). Progress is `data/run.json` (what the Index status tab shows live: phase chips, current source, rate), history is `data/refresh.json`, digests are `data/digest.json` and `data/digests/<universe>/`. Exit status: 0 ok, 1 something failed, 3 busy.

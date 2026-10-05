@@ -231,6 +231,19 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ApiError):
             search_stats(cat, universe="nope")
 
+    async def test_duplicates_and_clusters_routes_parse_their_query_and_report_missing_data(self):
+        for path in ("/api/search/duplicates", "/api/search/clusters"):
+            r = await self.http.get(path)
+            self.assertEqual((r.status_code, r.json()["available"]), (200, False))                       # the test backend has no index, so nothing is computed
+        r = await self.http.get("/api/search/duplicates?state=open&kind=mixed&since=2024&until=2025-06&projects=a&projects=b&min_sim=0.85&adjacent=0&templated=1&limit=10&offset=5")
+        self.assertEqual(r.status_code, 200)
+        r = await self.http.get("/api/search/clusters?state=closed&kind=pr&cluster=3&limit=9999")
+        self.assertEqual(r.status_code, 200)
+        for path in ("/api/search/duplicates?min_sim=high", "/api/search/duplicates?adjacent=x", "/api/search/duplicates?templated=maybe", "/api/search/duplicates?limit=many",
+                     "/api/search/clusters?cluster=first", "/api/search/clusters?offset=-x"):
+            r = await self.http.get(path)
+            self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), path)
+
     async def test_score_routes_to_the_score_backend(self):
         r = await self.http.post("/api/score", json={"prompt": "p", "candidates": [" a", " bb"]})
         self.assertEqual((r.status_code, r.json()["logprobs"], r.headers["x-gateway-backend"]), (200, [-2.0, -3.0], "lms"))
