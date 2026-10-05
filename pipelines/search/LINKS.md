@@ -1,6 +1,6 @@
 # Links between code, issues and PRs
 
-Design. Steps 1 (extraction from what is indexed), 2 (GitHub-native edges, tag-based `shipped_in`), 3 (direct use in search) and 4 (related results) are built: see [Status](#status) below and `links.py` / `refs.py`.
+Design. All five steps are built (5 is the evaluation, `eval_links.py`): see [Status](#status) below and `links.py` / `refs.py`.
 
 ## Problem
 
@@ -83,7 +83,7 @@ This ties into the still-open evaluation step 7 in [PLAN.md](PLAN.md). Cheap gro
 2. **DONE** GitHub-native edges: closing references and merge commit sha in the adapter (additive, stored in meta; forward and backfill cursors unaffected), `closes` / `merged_as` extractors, `git describe --contains` for `shipped_in`.
 3. **DONE** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
 4. **DONE** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
-5. **TODO** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
+5. **DONE** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
 6. **Future** `blame` / `log -L` edges for a code hit, on demand; NLI-confirmed `mentions` -> `closes` upgrade for prose like "this supersedes #123"; Discourse and SIP links once those sources exist; a graph tab (cluster the link graph, find orphan issues with no PR and orphan PRs with no issue).
 
 ## Status
@@ -121,8 +121,28 @@ On the real index (21k issues and PRs, 61k commits, 3.7k files; builds in 7 s): 
 - `search.related` / `LinkDB.expand`: the first `related.seeds` (5) hits seed an expansion over the links; a document's score is the sum over seeds of each seed's *best* path, seed score (1/rank) x relation weight x confidence, so a PR that both closes and is mentioned by a hit is not twice as related, and two hits pointing at one document add up. The second step (x 0.5) only goes through `closes` / `closed_by` / `merged_as` / `merge_of`: an issue's fixing PR's merge commit, not a mention's mentions.
 - **Hub guard**: a relation of a seed with more than `related.hub_degree` (150) edges is skipped (a file's `touched_by`, a release's `ships`), and so is a target with more than that many edges of any kind (an umbrella issue, a release). Weights per relation as seen from the hit (`related.weights` in `search.json`, defaults: closes / closed_by 1, merged_as / merge_of 0.9, defines / defined_by 0.6, mentions / mentioned_by 0.5, shipped_in 0.3, ships 0.2, touches / touched_by 0.15).
 - **A group of its own**: the response's `related` (MCP `search` too; `related: false` or a number; `limit` 8, at most `per_kind` 4 of one kind, hits already shown left out, `kinds` / `projects` / `open_only` respected, not computed under an explicit `linked_to` / `has_link`). Each item has `ref` (for `get`), `via` (which hit, which relation from that hit's side, confidence, `through` for the second step), a `line`, and with `explain` every path and its score. The page shows it under the hits as "Related".
-- **Boost is an experiment and off**: `related.boost` (or `link_boost` in a request) adds up to boost x the best fused score to a candidate that is linked to the top hits, before the rerank; only hits the query already retrieved move, nothing new enters. Whether to turn it on or expansion before the rerank is for the evaluation (step 5).
+- **Boost** (default 0.5 since step 5): `related.boost` (or `link_boost` in a request) adds up to boost x the best fused score to a candidate that is linked to the top hits, before the rerank; only hits the query already retrieved move, nothing new enters. 0 turns it off.
 - Seen on the real index: for "Future firstCompletedOf memory leak" the top related item is the PR that fixed the second hit (`scala/scala#10927`, closes `scala/bug#13058`), then the issue that mentions it, and PRs and commits around the third and fourth hits.
+
+**Step 5 done: `eval_links.py`, and what it found.**
+
+Ground truth is what GitHub itself recorded: 1,402 merged PRs with the issues they close (both indexed; 300 sampled, round robin over the repo pairs). Two questions per pair, asked with a title only: the issue's title, wanting the PR that closed it (`fix`), and the PR's title, wanting the issue (`issue`); the question's own document never counts. 600 questions, hybrid search with the reranker, `refs_in_query` off. `eval_links.py build | run | report | regress | edges`; `run` is resumable (`data/eval/runs/links-<label>.jsonl`), prints rate, ETA, memory and the running metrics, and `report <label>` prints the tables from whatever is done.
+
+**Caveat first**: the ground truth *is* the link graph, so "the related group finds the counterpart" is nearly guaranteed once the question's own document is among the hits (583 of 600 questions: it was). What the numbers show is how badly text search does without links and what the options cost, not how good the related group is on open-ended queries. That part was judged by reading (below), not measured.
+
+| | recall@10 (top 10 hits) | found in `related` (8 items) | either |
+|---|---|---|---|
+| issue title -> its fixing PR | 36.7% | 62.7% | 99.3% |
+| PR title -> its issue | 33.0% | 65.3% | 98.3% |
+| low title overlap (PR not titled like the issue) | 16.7% | 80.9% | 97.5% |
+| high title overlap | 60.6% | 39.4% | 100% |
+
+- **Expansion settings**: depth 2 changed nothing on this set (the pairs are one step apart; kept on, it costs 0.4 ms). Three seeds find 63.8% against 64.0% for five and 64.3% for ten, with 4.9, 6.6 and 7.8 items shown: five stays. When the question's own document is *not* in the top three (17 questions) more seeds help (10 seeds 53%, 5 seeds 41%, 3 seeds 35%), too few to move the default. Restricting the weights to closes / merged_as gives the same recall with 2.0 items instead of 6.6: the mention and file relations add context, not answers to this question; they stay at their weights (this set cannot judge them).
+- **Boost**: 0.25 is a wash (MRR 0.165 vs 0.168 base, 70 questions better, 85 worse); **0.5** lifts MRR to 0.309 (recall@1 10% -> 20%, @5 25% -> 45%; 176 better, 47 worse); 1.0 reaches 0.373 but 71 questions get worse and recall@5 is the same as 0.5. The same circularity applies to the gain; the harm check does not: with the boost at 0.5 and 1.0 the nine canaries still pass (9/9) and the zinc code-retrieval set (150 queries) is unchanged to the digit (recall@1 0.787, @10 0.900, MRR 0.836). **Default `related.boost` is now 0.5.**
+- **Edge precision**: text-derived `closes` of PRs against GitHub's closing references (4,800 PRs asked): precision 0.87, recall 0.98 (scala3 0.98, scala/scala 0.88, zinc 0.58). The misses are mostly the PR text meaning it where GitHub does not act: PRs to non-default branches and backports (`Fixes scala/bug#12570` on a 2.12.x PR), and `fixes` followed by a PR URL; a closing *list* (`Fixes #1, #2`) is no longer read as closing every item in PR titles and bodies (GitHub needs the keyword per item), but still is in commit messages, where the Trac era meant it. Sampled by eye, 30 `mentions` and 25 `defines` edges were all real references (some are noise as context: dependabot's link lists).
+- **A bug the run found**: a first run held 41 GB and stalled (the MPS allocator keeps every shape of a long loop of reranker batches); loops that rerank now clear the cache every ten queries.
+
+Left for later: a non-circular judgement of the related group on open questions (does a person find the item useful) needs labels; dropping `mentions` from bot-authored PR bodies; the expansion before the rerank was not tried (the boost is the before-the-rerank variant, and it did what the expansion does at no extra cost).
 
 ## Open questions
 
