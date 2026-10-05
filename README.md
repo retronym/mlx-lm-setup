@@ -84,7 +84,7 @@ flowchart TB
   GW --> SC["Scorers<br/>Jev-Style 2B (decide) · OpenJev 4B (entail) · Qwen3-Coder (score)"]
   GW --> SE["Search · Qwen3-Embedding + Qwen3-Reranker<br/>reads the SQLite index"]
   GW --> SP["Speech · mlx-audio<br/>Kokoro · Qwen3-TTS design and clone · Whisper"]
-  PL -- "results files, index" --> DASH["dashboards<br/>triage :8766 · search progress :8767"]
+  PL -- "results files" --> DASH["dashboards<br/>triage :8766"]
 ```
 
 ## Pipelines
@@ -95,7 +95,7 @@ Typed yes/no questions about each merged scala/scala PR, scored by the NLI model
 
 ### Search indexer
 
-Builds the SQLite index (chunks, FTS5, embeddings) over the Scala compiler, Scala 3, its docs, scala/bug and scala/scala PRs that the gateway's `search` backend serves; incremental and resumable, with a progress dashboard. See [pipelines/search](pipelines/search/README.md).
+Builds the SQLite index (chunks, FTS5, embeddings) over the Scala compiler, Scala 3, its docs, scala/bug and scala/scala PRs that the gateway's `search` backend serves; incremental and resumable; its progress is the Index status tab on `/search` and a strip on the Home page. See [pipelines/search](pipelines/search/README.md).
 
 ### Emoji book
 

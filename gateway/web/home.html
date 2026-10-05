@@ -55,6 +55,8 @@
   .dot.failed { background: var(--bad); opacity: 1; }
   .dot.busy { background: var(--c); opacity: 1; animation: pulse .7s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
+  .idxstrip { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .idxstrip .bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; } .idxstrip .bar i { display: block; height: 100%; background: var(--c); }
   .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12px; color: var(--muted); }
   .go { color: var(--c); font-weight: 650; font-size: 13px; }
   .feats { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 3px; font-size: 13px; }
@@ -128,7 +130,7 @@ const SECTIONS = [
     text: "Type, paste or drop text or a screenshot. Screenshots are read by macOS OCR, so no vision model has to load.",
     feats: ["translate over MCP; /api/translate", "a keyboard shortcut via pipelines/translate"] },
   { id: "search", title: "Search", kicker: "Scala compiler and build sources", href: "/search", kinds: ["search"],
-    text: "Ask where something is handled, whether a bug was reported, what the spec says: keyword and vector search with reranking over scala/scala, the Scala 3 docs and scala/bug.",
+    text: "Ask where something is handled, whether a bug was reported, what a release changed: keyword and vector search with reranking over the Scala 2 and 3 compilers, scala-dev, Zinc and scala-asm (code, docs, issues, PRs, release notes).",
     feats: ["search over MCP; /api/search", "/v1/embeddings, /api/rerank"] },
   { id: "speech", title: "Speech", kicker: "Voices and timing", href: "/speech", kinds: ["tts", "stt"],
     text: "Narration with preset, designed or cloned voices, and word timestamps for captions.",
@@ -164,6 +166,7 @@ function panel(s, d) {
       <div class="snip" onclick="event.preventDefault()"><span>OPENAI_BASE_URL=http://127.0.0.1:${g.port}/v1</span><button data-copy="http://127.0.0.1:${g.port}/v1">copy</button></div>`;
   } else {
     body = `<ul class="feats">${s.feats.map(f => `<li>${esc(f)}</li>`).join("")}</ul>
+      ${s.id === "search" ? `<div class="idxstrip" id="idxstrip">${idxStrip}</div>` : ""}
       <div class="models">${mine.length ? mine.map(chip).join("") : '<span class="empty">none in the catalog</span>'}</div>`;
   }
   const foot = s.id === "admin" ? `<span>live</span>` : `<span>${ready ? `${ready} running` : "starts on first use"}</span>`;
@@ -187,6 +190,24 @@ function memory(d) {
   const s = g.system || {};
   document.getElementById("systxt").textContent = s.free_pct != null ? `system ${s.free_pct}% free · swap ${s.swap_used_gb ?? "?"} GB` : "";
 }
+// ---- the search index strip: what is indexed and what the indexer is doing (GET /api/search/status reads files, starts no model) -------------
+let idxStrip = "";
+const ago = t => { const s = Date.now() / 1000 - t; return s < 90 ? "just now" : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+async function refreshIndex() {
+  try {
+    const d = await (await fetch("/api/search/status")).json();
+    if (d.error || !d.projects) { idxStrip = ""; return; }
+    const src = d.projects.flatMap(p => p.sources), chunks = src.reduce((a, s) => a + s.chunks, 0), emb = src.reduce((a, s) => a + s.embedded, 0);
+    const run = d.run, working = run && run.running;
+    const state = working ? `${run.kind} running${run.phase ? `: ${run.phase}` : ""}${run.source ? ` (${run.source})` : ""}`
+      : run && run.stale ? "last indexer run died" : d.refresh?.last_run ? `last refresh ${ago(d.refresh.last_run.started)}${d.refresh.last_run.ok ? "" : ", with errors"}` : "never refreshed";
+    const frac = chunks ? emb / chunks : 1;
+    idxStrip = chunks ? `<div>${chunks.toLocaleString()} chunks · ${d.projects.filter(p => p.indexed).length} projects · ${frac < 1 ? `${(frac * 100).toFixed(1)}% embedded` : "all embedded"}</div>
+      ${frac < 1 ? `<div class="bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></div>` : ""}<div>${esc(state)}</div>` : "<div>nothing indexed yet</div>";
+  } catch { idxStrip = ""; }
+  const el = document.getElementById("idxstrip");
+  if (el) el.innerHTML = idxStrip;                                  // update in place: no re-render of the panels, so no hover flicker
+}
 let lastSig = null;
 async function refresh() {
   try {
@@ -209,6 +230,8 @@ document.addEventListener("click", async e => {
 });
 refresh();
 setInterval(refresh, 2000);
+refreshIndex().then(() => { lastSig = null; refresh(); });          // the first strip, then once more so it is in the first render
+setInterval(refreshIndex, 10000);
 // ---- activity timeline -----------------------------------------------------------------------------------------------------
 let tl = null, tlAt = 0, kinds = {};
 const LABEL = p => ({ "/v1/chat/completions": "chat", "/api/decide": "decide", "/decide": "decide", "/score_many": "decide", "/entail": "entail",
