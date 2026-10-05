@@ -1,4 +1,4 @@
-"""Managed git clones: one bare clone per repository under <data>/repos, fetched by the refresh, so indexing reads exactly the ref the
+"""Managed git clones: one bare clone per repository under <data dir>/repos, fetched by the refresh, so indexing reads exactly the ref the
 config names and never depends on which branch is checked out in a working copy.
 
 The first clone borrows objects from a local checkout when one exists (~/code/<owner>/<name>, or the dirs in search.json
@@ -10,7 +10,7 @@ LOCAL_DIRS = ["~/code"]
 
 
 def path_for(cfg, repo):
-    return (Path(__file__).parent / cfg.search["repos_dir"]) / (repo.replace("/", "__") + ".git")
+    return cfg.data_path(cfg.search["repos_dir"], repo.replace("/", "__") + ".git")
 
 
 def _git(*args, cwd=None):

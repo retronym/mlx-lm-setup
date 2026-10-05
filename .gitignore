@@ -18,3 +18,6 @@ docs/*.tmp
 # Editor / OS
 .idea/
 .DS_Store
+
+# Draft gateway (pipelines/search/draft.sh)
+.draft/

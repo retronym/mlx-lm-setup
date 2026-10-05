@@ -11,7 +11,7 @@ Every file is validated, and all problems are reported together, each with its f
   python config.py check            validate everything, print the tree
   python config.py show <universe>  what a universe contains and what the refresh will do for it
 """
-import json, re, sys
+import json, os, re, sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -197,7 +197,9 @@ class Config:
         return [s for p in self.universe(uid).projects for s in self.projects[p].sources]
 
     def data_path(self, *parts):
-        return (HERE / self.search["data_dir"]).joinpath(*parts)
+        """Under the data directory: $SEARCH_DATA_DIR if set, else search.json's data_dir (relative to pipelines/search). Each checkout (main, a
+        worktree) has its own by default, so experiments never touch the index a running service reads; promote_data.sh moves data across."""
+        return (HERE / (os.environ.get("SEARCH_DATA_DIR") or self.search["data_dir"])).joinpath(*parts)
 
     def project_dir(self, pid):
         return self.data_path("projects", pid)
@@ -207,7 +209,7 @@ class Config:
 
 
 SEARCH_FIELDS = {
-    "data_dir": (t_str, "data"), "repos_dir": (t_str, "data/repos"),
+    "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
     "github": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}),
 }
