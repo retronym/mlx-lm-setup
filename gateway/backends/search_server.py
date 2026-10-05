@@ -23,6 +23,10 @@ import config, embed, rerank, search                 # noqa: E402
 t0 = time.time()
 cfg = config.load(a.config_dir)
 emb, rr = embed.load(cfg, "local"), rerank.Reranker(cfg.search["reranker"]["model"])
+if cfg.search["cache"]["enabled"]:                   # repeated queries (canaries, reloads, refinements) cost no model call
+    from cache import CachedEmbedder, CachedReranker
+    emb = CachedEmbedder(emb)
+    rr = CachedReranker(rr, cfg.data_path("cache.db"), cfg.search["cache"]["max_entries"], salt=rerank.TASK)
 idx = search.Index(cfg)
 n_vec = sum(s.db.execute("SELECT count(*) FROM vec").fetchone()[0] for s in idx.stores.values())
 if n_vec:
@@ -69,8 +73,9 @@ def _search(r):
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
                       reranker=rr if use_rr else None, explain=bool(r.get("explain")), **search.tuning(c))
+    cached = {"rerank_hits": rr.hits, "rerank_misses": rr.misses} if use_rr and hasattr(rr, "hits") else None
     return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing,
-            "timing_ms": {"total": round((time.time() - t) * 1000)}}
+            "timing_ms": {"total": round((time.time() - t) * 1000)}, **({"cache": cached} if cached else {})}
 
 
 def _embed(r):

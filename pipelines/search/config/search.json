@@ -4,6 +4,7 @@
   "repos_dir": "repos",
   "embedder": {"model": "Qwen/Qwen3-Embedding-0.6B", "via": "gateway", "batch": 16},
   "reranker": {"model": "Qwen/Qwen3-Reranker-0.6B", "candidates": 30, "blend": [[3, 0.75], [10, 0.6], [1000, 0.4]]},
+  "cache": {"enabled": true, "max_entries": 200000},
   "fusion": {"k": 60, "top_bonus": [0.05, 0.02, 0.02]},
   "chunking": {"max_chars": 2400, "min_chars": 20},
   "github": {"min_remaining": 300, "page_delay_s": 0.2, "page_limit": 90, "default_since": "2000-01-01T00:00:00Z"},

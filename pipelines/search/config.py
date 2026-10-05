@@ -241,7 +241,7 @@ class Config:
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
 }
 
 
@@ -262,6 +262,7 @@ def _search(d, errors):
                                                               "batch": (t_int(1, 256), 16)}) if isinstance(d, dict) else {}
     s["reranker"] = v.obj(d.get("reranker", {}), "reranker", {"model": (t_str, "Qwen/Qwen3-Reranker-0.6B"), "candidates": (t_int(1, 100), 30),
                                                                     "blend": (t_blend, [[3, 0.75], [10, 0.6], [1000, 0.4]])}) if isinstance(d, dict) else {}
+    s["cache"] = v.obj(d.get("cache", {}), "cache", {"enabled": (t_bool, True), "max_entries": (t_int(100), 200000)}) if isinstance(d, dict) else {}
     s["fusion"] = v.obj(d.get("fusion", {}), "fusion", {"k": (t_int(1, 1000), 60), "top_bonus": (t_bonus, [0.05, 0.02, 0.02])}) if isinstance(d, dict) else {}
     s["chunking"] = v.obj(d.get("chunking", {}), "chunking", {"max_chars": (t_int(200, 20000), 2400), "min_chars": (t_int(0, 2000), 20)}) if isinstance(d, dict) else {}
     s["github"] = v.obj(d.get("github", {}), "github", {"min_remaining": (t_int(0), 300), "page_delay_s": (t_num(0), 0.2), "page_limit": (t_int(1, 100), 90),
