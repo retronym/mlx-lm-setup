@@ -262,13 +262,13 @@ async def run_translate(catalog: Catalog, sup: Supervisor, client: httpx.AsyncCl
 
 # ---- search over the indexed Scala sources (HTTP API and MCP tool) -------------------------------------------------------------
 
-async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 8, universe: str | None = None,
+async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClient, *, query: str, k: int = 20, universe: str | None = None,
                      projects: list[str] | None = None, sources: list[str] | None = None, kinds: list[str] | None = None, mode: str = "hybrid",
-                     rerank: bool = True, open_only: bool = False, model: str | None = None) -> dict:
+                     rerank: bool = True, open_only: bool = False, explain: bool = False, model: str | None = None) -> dict:
     """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
     body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
-            **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds)) if v}}
+            **({"explain": True} if explain else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds)) if v}}
     r, meta = await post_json(sup, client, spec, "/search", body)
     if r.status_code != 200:
         try:
@@ -331,6 +331,18 @@ def search_outliers(catalog: Catalog, model: str | None = None, universe: str | 
 def search_clusters(catalog: Catalog, model: str | None = None, universe: str | None = None, **filters) -> dict:
     """Topic clusters of issues and PRs, or one cluster's items, from the neighbours database the refresh builds; reads a file, starts nothing."""
     return _neighbour_view("clusters", catalog, model, universe, **filters)
+
+
+def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw) -> dict:
+    """Whole documents behind search hits (`ref`s): an issue with its comments, a file, a commit. Reads the index files and the managed clones, starts nothing."""
+    from . import searchget, searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        return {"backend": spec.name, "results": [{"ref": r, "found": False, "error": "no search index"} for r in refs]}
+    try:
+        return {"backend": spec.name, **searchget.get(cfg, refs, repos=searchinfo._module(spec.options["index_dir"], "repos"), **kw)}
+    except ValueError as e:
+        raise ApiError(400, "invalid_arguments", str(e)) from None
 
 
 def search_universes(catalog: Catalog, model: str | None = None) -> list[dict]:

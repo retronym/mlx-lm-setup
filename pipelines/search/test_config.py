@@ -62,6 +62,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.search["embedder"]["model"], "Qwen/Qwen3-Embedding-0.6B")
         self.assertTrue(cfg.default_universe().id == "u")                       # a single universe is the default even if not marked
 
+    def test_ranking_settings(self):
+        cfg = self.load(projects=[proj("p", GIT)], universes=[uni()])
+        self.assertEqual((cfg.search["fusion"]["k"], cfg.search["fusion"]["top_bonus"][0], cfg.search["reranker"]["blend"][0]), (60, 0.05, [3, 0.75]))
+        cfg = self.load(search={"reranker": {"blend": None}, "fusion": {"top_bonus": []}}, projects=[proj("p", GIT)], universes=[uni()])
+        self.assertEqual((cfg.search["reranker"]["blend"], cfg.search["fusion"]["top_bonus"]), (None, []))     # reranker alone, no bonus
+        errs = "\n".join(self.errors(search={"reranker": {"blend": [[5, 0.5], [3, 2]]}, "fusion": {"top_bonus": ["x"], "k": 0}}, projects=[proj("p", GIT)], universes=[uni()]))
+        for needle in ("reranker.blend", "fusion.top_bonus", "fusion.k"):
+            self.assertIn(needle, errs)
+
     def test_every_problem_is_reported_with_file_and_path(self):
         bad = proj("p", {**GIT, "priority": 12, "paths": [], "chunkers": {"scala": "scala"}}, {**GH, "include": ["wat"], "extra": 1}, {**REL, "repo": "nope"})
         errs = self.errors(projects=[bad], universes=[uni("u", "p", "ghost")])

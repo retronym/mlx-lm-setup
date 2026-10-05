@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_get, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -292,16 +292,27 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(await run_translate(catalog, sup(), client(), **body))
 
     async def search(request: Request):
-        """{"query", "k"? (1..50, default 8), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
-        "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs)} ->
+        """{"query", "k"? (1..50, default 20), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
+        "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic)} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
-        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "model"}
+        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "model"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):
             raise ApiError(400, "invalid_arguments", "`query` must be a string")
         return JSONResponse(await run_search(catalog, sup(), client(), **body))
+
+    async def search_get_route(request: Request):
+        """{"refs": [str] (the `ref` of search hits, 1..20), "scope"? (chunk | doc (default) | file), "max_chars"? (100..50000, default 6000), "offset"?, "lines"? ("120-180", scope file)}
+        -> {results: [{ref, found, title, url, kind, state?, author?, text, total_chars, truncated, next_offset?, ...}]}. Reads files; starts nothing."""
+        body = await read_json(request)
+        known = {"refs", "scope", "max_chars", "offset", "lines", "model"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        if not isinstance(body.get("refs"), list):
+            raise ApiError(400, "invalid_arguments", "`refs` must be a list of strings")
+        return JSONResponse(search_get(catalog, **body))
 
     async def search_status(request: Request):
         """Universes with their projects and sources (labels, colours, priorities) and what each index holds; reads files, starts nothing.
@@ -524,6 +535,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/translate", handler(translate), methods=["POST"]),
         Route("/api/search", handler(search), methods=["POST"]),
         Route("/api/search/status", handler(search_status), methods=["GET"]),
+        Route("/api/search/get", handler(search_get_route), methods=["POST"]),
         Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
         Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/search/outliers", handler(search_outliers_view), methods=["GET"]),

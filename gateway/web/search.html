@@ -149,7 +149,7 @@
     <label>method <select id="mode"><option value="hybrid">hybrid (keyword + vector)</option><option value="bm25">keyword only</option><option value="vec">vector only</option></select></label>
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label><input type="checkbox" id="open"> open issues and PRs only</label>
-    <label>top <select id="k"><option>5</option><option selected>8</option><option>15</option><option>30</option></select></label>
+    <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
   <div class="chips" id="samples"></div>
@@ -181,7 +181,7 @@ const SAMPLES = [
 $("samples").replaceChildren(...SAMPLES.map(s => Object.assign(document.createElement("button"), { type: "button", textContent: s, onclick: () => { $("q").value = s; go(); } })));
 
 const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
-for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
+for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v && [...$(id).options].some(o => o.value === v)) $(id).value = v; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).value)); }
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 // ---- kinds of hit, finer than a source: offered when some source of the universe holds them; none picked = everything ----
@@ -285,7 +285,9 @@ function render(d) {
     if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
     top.append(a);
     const sc = [h.rerank != null ? `rerank ${h.rerank.toFixed(2)}` : null, h.bm25 ? `keyword #${h.bm25}` : null, h.vec ? `vector #${h.vec}` : null].filter(Boolean).join(" · ");
-    top.append(el("span", "scores", sc));
+    const scEl = el("span", "scores", sc), x = h.explain;
+    if (x) scEl.title = `fused #${x.fused_rank}: rrf ${x.rrf} (top-rank bonus ${x.top_bonus}), scaled ${x.retrieval}` + (x.weight != null ? `\nfinal ${x.final} = ${x.weight} x retrieval + ${(1 - x.weight).toFixed(2)} x rerank` : "");
+    top.append(scEl);
     const pre = el("pre", "", h.text); pre.title = "click to expand"; pre.onclick = () => pre.classList.toggle("open");
     box.append(top, ...[whom(h)].filter(Boolean), el("div", "url", h.url), pre);
     return box;
@@ -300,7 +302,7 @@ async function go() {
   if (!q) return;
   if (aborter) aborter.abort();
   aborter = new AbortController();
-  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked };
+  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked, explain: true };
   const f = $("source").value;
   if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
   if (pickedKinds.size) body.kinds = [...pickedKinds];

@@ -15,7 +15,7 @@
 | Speech | `/speech` | `speak`, `narrate`, `transcribe`, `voices` | Local text-to-speech and word-timed transcripts ([docs/SPEECH.md](docs/SPEECH.md)) |
 | Vision | `/vision` | `look` | Layout checks of stills and screenshots, tables and charts in PDF pages |
 | Translate | `/translate` | `translate` | Text or a screenshot into English in 1–3 s ([pipelines/translate](pipelines/translate/README.md)) |
-| Search | `/search` | `search` | Hybrid search over Scala sources, docs and issues, returning passages with links ([pipelines/search](pipelines/search/README.md)) |
+| Search | `/search` | `search`, `get` | Hybrid search over Scala sources, docs and issues, returning passages with links ([pipelines/search](pipelines/search/README.md)) |
 | Operate | `/admin`, `/` | `backends_status`, `start_backend`, `stop_backend`, `set_backend_policy` | Live state, memory, idle timers, pinning, request timeline |
 
 Built on top: [pipelines](#pipelines) for PR triage, search indexing and an emoji-annotated book, and narrated explainer films.

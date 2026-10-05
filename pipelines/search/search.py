@@ -4,7 +4,7 @@ by vector cosine, the per-store hits are merged by score into one keyword list a
 projects because a universe shares one embedding model), the two lists are fused by reciprocal rank, and the best candidates are
 optionally reranked by a cross-encoder.
 
-usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [-k 8] [--open] [--bm25|--vec] [--rerank] <query>
+usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [-k 8] [--open] [--bm25|--vec] [--rerank] [--explain] <query>
        (a --source is an id like `issues`, or `project/source`; a --kind is one of store.KINDS, like `commit` or `file`)"""
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
@@ -49,12 +49,34 @@ def bm25(st, q, k, sources=None, open_only=False, kinds=None):
     return [(r[0], r[1]) for r in st.db.execute(sql, (fq, *args, k))]
 
 
-def fuse(rankings, k=60):
-    score = {}
+FUSION = {"k": 60, "top_bonus": [0.05, 0.02, 0.02]}                     # reciprocal rank fusion; the bonus goes to ranks 1, 2, 3 of ANY list
+BLEND = [[3, 0.75], [10, 0.6], [1000, 0.4]]                              # [up to this fused rank, weight of the retrieval score]; the rest is the reranker's
+
+
+def fuse_scores(rankings, k=60, top_bonus=()):
+    """{key: (rrf score, bonus part)}: sum of 1/(k+rank) over the lists, plus `top_bonus[i]` for being at rank i+1 in any list. With k=60 a
+    first place is worth 0.016, so a 0.05 bonus makes an exact keyword or vector top hit hard to dislodge: it keeps `trait extraHash`
+    on top however many fuzzy neighbours the other list brings."""
+    score, bonus = {}, {}
     for r in rankings:
         for i, key in enumerate(r):
             score[key] = score.get(key, 0) + 1 / (k + i + 1)
-    return sorted(score, key=score.get, reverse=True)
+            if i < len(top_bonus):
+                bonus[key] = max(bonus.get(key, 0), top_bonus[i])
+    return {key: (v + bonus.get(key, 0), bonus.get(key, 0)) for key, v in score.items()}
+
+
+def fuse(rankings, k=60, top_bonus=()):
+    sc = fuse_scores(rankings, k, top_bonus)
+    return sorted(sc, key=lambda key: sc[key][0], reverse=True)
+
+
+def blend_weight(rank, blend):
+    """Weight of the retrieval score for a hit at fused rank `rank` (1-based): the first [limit, weight] row whose limit covers it."""
+    for limit, w in blend:
+        if rank <= limit:
+            return w
+    return blend[-1][1]
 
 
 def _source_filter(sources, pid):
@@ -64,8 +86,14 @@ def _source_filter(sources, pid):
     return sorted({s.split("/", 1)[1] if "/" in s else s for s in sources if "/" not in s or s.split("/", 1)[0] == pid})
 
 
-def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None):
-    """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based)."""
+def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None,
+           fusion=None, blend=BLEND, explain=False):
+    """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based).
+    `fusion` ({k, top_bonus}) tunes the reciprocal rank fusion. Reranked hits are ordered by a position-aware blend of the fused score
+    (scaled so the best is 1) and the reranker's P(relevant): the weight of the fused score is `blend_weight(fused rank)`, 75% for the top three,
+    so a good retrieval order is not thrown away by a cross-encoder that is wrong about one hit; `blend=None` orders by the reranker alone.
+    `explain` adds the arithmetic to each hit's detail as "explain"."""
+    fusion = {**FUSION, **(fusion or {})}
     pool = max(50, k * 5)
     stores = {p: s for p, s in idx.stores.items() if not projects or p in projects}
     rankings, names = [], []
@@ -96,11 +124,18 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             pid, rid = key
             doc_of[key] = (pid, *stores[pid].db.execute("SELECT source, doc FROM chunks WHERE rowid=?", (rid,)).fetchone())
         return doc_of[key]
+    fused = fuse_scores(rankings, fusion["k"], fusion["top_bonus"])
     seen, out = set(), []                      # one hit per document: the best chunk of an issue, file or page
-    for key in fuse(rankings):
+    for key in sorted(fused, key=lambda key: fused[key][0], reverse=True):
         if doc(key) not in seen:
             seen.add(doc(key))
             out.append(key)
+    top = fused[out[0]][0] if out else 1.0
+    pos = {key: i + 1 for i, key in enumerate(out)}
+    if explain:
+        for key in out:
+            detail.setdefault(key, {})["explain"] = {"fused_rank": pos[key], "rrf": round(fused[key][0], 4), "top_bonus": fusion["top_bonus"] and round(fused[key][1], 4),
+                                                     "retrieval": round(fused[key][0] / top, 4)}
     if reranker is not None and out:
         cand = out[:pool_docs]
         for pid in stores:                     # a small project's best hit must reach the reranker even when big projects crowd the top
@@ -109,9 +144,14 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
                 cand.append(best)
         docs = [" ".join(stores[pid].db.execute("SELECT title, text FROM chunks WHERE rowid=?", (rid,)).fetchone()) for pid, rid in cand]
         sc = reranker.scores(q, docs)
+        final = []
         for key, x in zip(cand, sc):
             detail[key]["rerank"] = round(x, 4)
-        out = [key for key, _ in sorted(zip(cand, sc), key=lambda x: -x[1])]
+            w = blend_weight(pos[key], blend) if blend else 0.0
+            final.append(w * fused[key][0] / top + (1 - w) * x)
+            if explain:
+                detail[key]["explain"].update({"weight": w, "final": round(final[-1], 4)})
+        out = [key for key, _ in sorted(zip(cand, final), key=lambda x: -x[1])]
     return out[:k], detail
 
 
@@ -139,28 +179,51 @@ def _who_and_when(db, sid, title, m):
     return {"kind": kind, "author": author, "author_name": name, "created": created, "updated": updated, "thread": thread}
 
 
+def _day(t):
+    return (t or "")[:10]
+
+
+def summary_line(h):
+    """One line a client can show as is: [state] kind title, who and when, source, link."""
+    kind = h["kind"] + (f" on {h['thread']['kind']} #{h['thread']['number']}" if h.get("thread") else "")
+    who = h["author"] and f"@{h['author']}" or h.get("author_name")
+    when = _day(h["created"]) + (f" (updated {_day(h['updated'])})" if h["updated"] and _day(h["updated"]) != _day(h["created"]) else "") if h["created"] else _day(h["updated"])
+    flag = f"[{h['state']}] " if h["state"] in ("open", "closed", "merged") else ""
+    return f"{flag}{h['title']} · {kind}" + "".join(f" · {x}" for x in (who, when, h["key"]) if x) + f" · {h['url']}"
+
+
 def hits(idx, q, text_chars=1200, **kw):
-    """`search` as plain dicts: project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
+    """`search` as plain dicts: ref (`project/chunk id`, what the `get` tool takes), project, source, label and colour (from config), title, url, state, text (the chunk, cut), who and when (author handle,
     created and updated times, the thread of a comment), and the ranks and scores."""
     keys, detail = search(idx, q, **kw)
     out = []
     for pid, rid in keys:
         db = idx.stores[pid].db
-        t, text, url, meta, sid, doc, state = db.execute(
-            f"SELECT title, text, url, meta, source, doc, {STATE_SQL} FROM chunks c WHERE rowid=?", (rid,)).fetchone()
+        t, text, url, meta, sid, doc, state, cid = db.execute(
+            f"SELECT title, text, url, meta, source, doc, {STATE_SQL}, id FROM chunks c WHERE rowid=?", (rid,)).fetchone()
         m = json.loads(meta)
         src = idx.source(pid, sid)
-        out.append({"project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
+        out.append({"ref": f"{pid}/{cid}", "project": pid, "source": sid, "key": src.key, "label": src.label, "color": src.color, "title": " ".join(t.split()), "url": url,
                     "doc": doc, "state": state, "labels": m.get("labels"), "text": text[:text_chars], "truncated": len(text) > text_chars,
                     **_who_and_when(db, sid, t, m), **detail.get((pid, rid), {})})
+        out[-1]["line"] = summary_line(out[-1])
     return out
+
+
+def tuning(cfg):
+    """The search settings of search.json as keyword arguments of `search` / `hits`."""
+    r = cfg.search["reranker"]
+    return {"pool_docs": r["candidates"], "blend": r.get("blend", BLEND), "fusion": cfg.search.get("fusion")}
 
 
 def show(rows, width=240):
     for n, h in enumerate(rows, 1):
         flag = f" [{h['state']}]" if h["state"] in ("closed", "merged") else ""
         snippet = " ".join(h["text"].split())[:width]
-        print(f"{n}. [{h['key']}]{flag} {h['title']}\n   {h['url']}\n   {snippet}\n")
+        x = h.get("explain")
+        why = (f"   fused #{x['fused_rank']} rrf {x['rrf']} (top bonus {x['top_bonus']}) keyword #{h.get('bm25', '-')} vector #{h.get('vec', '-')}"
+               + (f" | rerank {h['rerank']} x {1 - x['weight']:.2f} + retrieval {x['retrieval']} x {x['weight']:.2f} = {x['final']}" if "weight" in x else "") + "\n") if x else ""
+        print(f"{n}. [{h['key']}]{flag} {h['title']}\n   {h['url']}\n{why}   {snippet}\n")
 
 
 if __name__ == "__main__":
@@ -189,4 +252,4 @@ if __name__ == "__main__":
         from rerank import Reranker
         rr = Reranker(cfg.search["reranker"]["model"])
     show(hits(idx, q, k=k, projects=projects, sources=sources, mode=mode, open_only="--open" in a, kinds=kinds, embedder=emb, reranker=rr,
-              pool_docs=cfg.search["reranker"]["candidates"]))
+              explain="--explain" in a, **tuning(cfg)))

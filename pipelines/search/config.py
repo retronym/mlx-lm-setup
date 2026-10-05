@@ -99,6 +99,21 @@ def t_num(lo=None, nullable=False):
     return check
 
 
+def t_blend(v):
+    """[[up to fused rank, weight of the retrieval score 0..1], ...], ranks ascending, or null for the reranker alone."""
+    if v is None:
+        return None
+    if not isinstance(v, list) or not v or not all(isinstance(r, list) and len(r) == 2 and isinstance(r[0], int) and isinstance(r[1], (int, float))
+                                                   and not isinstance(r[1], bool) and 0 <= r[1] <= 1 for r in v):
+        return "expected [[rank limit, weight 0..1], ...] or null"
+    if [r[0] for r in v] != sorted({r[0] for r in v}):
+        return "rank limits must be strictly ascending"
+
+
+def t_bonus(v):
+    return None if isinstance(v, list) and all(isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 for x in v) else "expected a list of numbers >= 0 (the bonus for rank 1, 2, ...)"
+
+
 def t_re(rx, what):
     return lambda v: None if isinstance(v, str) and rx.match(v) else f"expected {what}"
 
@@ -226,7 +241,7 @@ class Config:
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}),
 }
 
 
@@ -245,7 +260,10 @@ def _search(d, errors):
     s = v.obj(d, "", SEARCH_FIELDS)
     s["embedder"] = v.obj(d.get("embedder", {}), "embedder", {"model": (t_str, "Qwen/Qwen3-Embedding-0.6B"), "via": (t_in("local", "gateway"), "local"),
                                                               "batch": (t_int(1, 256), 16)}) if isinstance(d, dict) else {}
-    s["reranker"] = v.obj(d.get("reranker", {}), "reranker", {"model": (t_str, "Qwen/Qwen3-Reranker-0.6B"), "candidates": (t_int(1, 100), 30)}) if isinstance(d, dict) else {}
+    s["reranker"] = v.obj(d.get("reranker", {}), "reranker", {"model": (t_str, "Qwen/Qwen3-Reranker-0.6B"), "candidates": (t_int(1, 100), 30),
+                                                                    "blend": (t_blend, [[3, 0.75], [10, 0.6], [1000, 0.4]])}) if isinstance(d, dict) else {}
+    s["cache"] = v.obj(d.get("cache", {}), "cache", {"enabled": (t_bool, True), "max_entries": (t_int(100), 200000)}) if isinstance(d, dict) else {}
+    s["fusion"] = v.obj(d.get("fusion", {}), "fusion", {"k": (t_int(1, 1000), 60), "top_bonus": (t_bonus, [0.05, 0.02, 0.02])}) if isinstance(d, dict) else {}
     s["chunking"] = v.obj(d.get("chunking", {}), "chunking", {"max_chars": (t_int(200, 20000), 2400), "min_chars": (t_int(0, 2000), 20)}) if isinstance(d, dict) else {}
     s["github"] = v.obj(d.get("github", {}), "github", {"min_remaining": (t_int(0), 300), "page_delay_s": (t_num(0), 0.2), "page_limit": (t_int(1, 100), 90),
                                                         "default_since": (t_re(DATE_RE, "an ISO timestamp like 2000-01-01T00:00:00Z"), "2000-01-01T00:00:00Z")}) if isinstance(d, dict) else {}
