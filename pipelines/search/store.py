@@ -21,11 +21,50 @@ KIND_SQL = "COALESCE(json_extract(c.meta, '$.kind'), 'file')"
 
 LINKED_SQL = "EXISTS (SELECT 1 FROM temp.linkfilter f WHERE f.source = c.source AND f.doc = c.doc)"
 
+# When a chunk was written or last changed: issues, PRs, comments, reviews and commits carry `created` / `updated`; a tag only its `published` date.
+# A file in a git tree has neither, so a date filter leaves files out.
+DATE_SQL = {"created": "COALESCE(json_extract(c.meta, '$.created'), json_extract(c.meta, '$.published'))",
+            "updated": "COALESCE(json_extract(c.meta, '$.updated'), json_extract(c.meta, '$.published'), json_extract(c.meta, '$.created'))"}
+_DAY = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
 
-def chunk_filter(sources=None, open_only=False, kinds=None, linked=None):
-    """An ` AND ...` condition on the chunks row `c` and its arguments: source ids, kinds, not closed or merged, and `linked`: "in" (the document is in the
-    connection's temp `linkfilter` table, see `Store.set_link_filter`) or "out" (it is not)."""
+
+def check_where(where):
+    """`where` normalised, or ValueError: {"since", "until"} (`YYYY[-MM[-DD]]`, both ends inclusive at their own precision: until 2024 is the end of 2024),
+    "date" (`created`, the default, or `updated`), "authors" ([GitHub login or git author name], any of them, case-insensitive). None when nothing is set."""
+    if not where:
+        return None
+    unknown = set(where) - {"since", "until", "date", "authors"}
+    if unknown:
+        raise ValueError(f"unknown filter keys {sorted(unknown)}")
+    out = {k: v for k, v in where.items() if v not in (None, "", [])}
+    for k in ("since", "until"):
+        if k in out and not (isinstance(out[k], str) and _DAY.match(out[k])):
+            raise ValueError(f"{k} must be YYYY, YYYY-MM or YYYY-MM-DD, not {out[k]!r}")
+    if out.get("date", "created") not in DATE_SQL:
+        raise ValueError(f"date must be one of {sorted(DATE_SQL)}")
+    a = out.get("authors")
+    if a is not None:
+        a = [a] if isinstance(a, str) else a
+        if not isinstance(a, list) or not all(isinstance(x, str) and x.strip() for x in a):
+            raise ValueError("authors must be a list of names")
+        out["authors"] = [x.strip().lstrip("@").lower() for x in a]
+    return out if set(out) - {"date"} else None
+
+
+def chunk_filter(sources=None, open_only=False, kinds=None, linked=None, where=None):
+    """An ` AND ...` condition on the chunks row `c` and its arguments: source ids, kinds, not closed or merged, `linked`: "in" (the document is in the
+    connection's temp `linkfilter` table, see `Store.set_link_filter`) or "out" (it is not), and `where` (`check_where`): a date range and authors.
+    An author is matched against the GitHub login and, for commits (which mostly carry only a git name), the git author name."""
     cond, args = "", []
+    if where:
+        d = DATE_SQL[where.get("date", "created")]
+        for k, op in (("since", ">="), ("until", "<=")):
+            if where.get(k):
+                cond += f" AND substr({d}, 1, {len(where[k])}) {op} ?"; args.append(where[k])
+        if where.get("authors"):
+            ph = ",".join("?" * len(where["authors"]))
+            cond += (f" AND (lower(json_extract(c.meta, '$.author')) IN ({ph}) OR lower(json_extract(c.meta, '$.author_name')) IN ({ph}))")
+            args += where["authors"] * 2
     if linked:
         cond += f" AND {'NOT ' if linked == 'out' else ''}{LINKED_SQL}"
     if sources:

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import config, embed, search
-from store import Store, Chunk
+from store import Store, Chunk, check_where
 from test_config import write, proj, uni, GIT, GH
 
 
@@ -97,6 +97,32 @@ class SearchTests(unittest.TestCase):
             self.assertEqual({(h["key"], h["kind"]) for h in hs}, {("big/code", "file"), ("small/code", "file")}, mode)   # chunks of files carry no kind
         self.assertEqual(self.keys(k=10, kinds=["commit"]), [])
         self.assertEqual({k for k in self.keys(k=10, kinds=["file", "comment"], sources=["issues"])}, {"big/issues"})  # combines with sources
+
+    def test_dates_and_authors(self):
+        st = self.idx.stores["big"]
+        st.apply("issues", [Chunk("issues:issue:1", "issue:1", "o/r#1 shadowing bug", "implicit shadowing is broken", "https://x/i1",
+                                  {"kind": "issue", "state": "closed", "number": 1, "created": "2019-05-01T10:00:00Z", "updated": "2024-02-01T00:00:00Z", "author": "Alice"}),
+                            Chunk("issues:comment:5", "issue:1", "o/r#1 shadowing bug  (comment by a)", "me too, implicit shadowing", "https://x/c5",
+                                  {"kind": "comment", "number": 1, "created": "2024-01-31T00:00:00Z", "author": "bob"}),
+                            Chunk("issues:issue:2", "issue:2", "o/r#2 other", "implicit shadowing, still open", "https://x/i2",
+                                  {"kind": "commit", "state": "open", "number": 2, "created": "2024-12-31T23:00:00Z", "author_name": "Carol Smith"})])
+        st.commit()
+        def docs(mode="bm25", **where):
+            return sorted({(h["doc"], h["kind"]) for h in search.hits(self.idx, "implicit shadowing", k=20, sources=["issues"], mode=mode, embedder=FakeEmbedder(),
+                                                                      where=check_where(where))})
+        for mode in ("bm25", "vec"):
+            self.assertEqual(docs(mode, since="2020"), [("issue:1", "comment"), ("issue:2", "commit")], mode)    # the 2019 issue is out, its 2024 comment in
+            self.assertEqual(docs(mode, until="2024-01"), [("issue:1", "issue")], mode)                        # the issue outranks its comment in one document
+        self.assertEqual(docs(until="2024-12-31", since="2024-12-31"), [("issue:2", "commit")])                   # a day is inclusive at both ends
+        self.assertEqual(docs(until="2024"), docs())                                                            # until a year = to its end
+        self.assertEqual(docs(since="2024-02", until="2024-06", date="updated"), [("issue:1", "issue")])          # last changed; a comment without `updated` falls back to created (Jan: out)
+        self.assertEqual(docs(authors=["@alice"]), [("issue:1", "issue")])                                       # a login, case-insensitive, @ optional
+        self.assertEqual(docs(authors=["carol smith", "bob"]), [("issue:1", "comment"), ("issue:2", "commit")])  # a commit's git name, or any of several
+        self.assertEqual(docs(since="2000"), docs())                                                            # files drop out under a date (no date), these all have one
+        self.assertEqual({h["kind"] for h in search.hits(self.idx, "needle", k=20, embedder=FakeEmbedder(), where=check_where({"since": "2000"}))} & {"file"}, set())
+        for bad in ({"since": "2024/01"}, {"date": "closed"}, {"authors": "x", "until": "24"}, {"author": ["x"]}, {"authors": [""]}):
+            self.assertRaises(ValueError, check_where, bad)
+        self.assertIsNone(check_where({"since": None, "date": "updated", "authors": []}))                       # nothing to filter on
 
     def test_vector_scores_merge_across_projects(self):
         keys, detail = search.search(self.idx, "needle small project asm", k=5, mode="vec", embedder=FakeEmbedder())

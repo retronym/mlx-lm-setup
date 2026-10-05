@@ -316,10 +316,12 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         """{"query", "k"? (1..50, default 20), "universe"? (default: the default universe), "projects"? [id], "sources"? [id | "project/source"],
         "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic),
         "linked_to"? (only documents linked to this one: a hit `ref`, `scala/bug#123`, `#123`, a commit sha; a list means any of them) with "link_type"? [relation, e.g. "closed_by", "mentions"; name both ends, "closes" and "closed_by", for either direction],
-        "has_link"? [relation, or "no_<relation>"] (e.g. ["closed_by"]: has a fix; ["no_closed_by"] with kinds ["issue"]: no fix), "refs_in_query"? (default true: a reference spelled out in the query, like `scala/bug#123`, puts that document and what links to it first), "related"? (false, or how many: documents linked to the top hits, shown apart as `related`; default from search.json), "link_boost"? (experiment: lift hits linked to the top ones, 0 = off)} ->
+        "has_link"? [relation, or "no_<relation>"] (e.g. ["closed_by"]: has a fix; ["no_closed_by"] with kinds ["issue"]: no fix), "refs_in_query"? (default true: a reference spelled out in the query, like `scala/bug#123`, puts that document and what links to it first), "related"? (false, or how many: documents linked to the top hits, shown apart as `related`; default from search.json), "link_boost"? (experiment: lift hits linked to the top ones, 0 = off),
+        "since"?, "until"? (YYYY[-MM[-DD]], inclusive; files have no date and drop out), "date"? (created (default) | updated), "authors"? [GitHub login or git author name; any]} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
-        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "text_chars", "model", "linked_to", "link_type", "has_link", "refs_in_query", "related", "link_boost"}
+        known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "text_chars", "model", "linked_to", "link_type", "has_link", "refs_in_query", "related", "link_boost",
+                 "since", "until", "date", "authors"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):

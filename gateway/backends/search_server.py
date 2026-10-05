@@ -3,7 +3,8 @@ reranker so they stay warm between queries; the indexes (one SQLite file per pro
 JSON config is re-read on every request, so adding a project or editing labels needs no restart.
 
   POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?, "explain"?,
-                   "linked_to"? (a hit ref, `scala/bug#123`, `#123`, a sha: [..] too), "link_type"? [relation | edge type], "has_link"? [relation | no_relation], "refs_in_query"?, "related"? (false, or how many; default from search.json `related`), "link_boost"?}
+                   "linked_to"? (a hit ref, `scala/bug#123`, `#123`, a sha: [..] too), "link_type"? [relation | edge type], "has_link"? [relation | no_relation], "refs_in_query"?, "related"? (false, or how many; default from search.json `related`), "link_boost"?,
+                   "since"?, "until"? (YYYY[-MM[-DD]]), "date"? created|updated, "authors"? [GitHub login or git author name]}
                   -> {"universe", "results": [...], "timing_ms": {...}, "missing": [projects not indexed yet]}
   POST /embed     {"input": str | [str], "kind"? "document" | "query"}  ->  {"model", "dim", "embeddings": [[...]]}
   POST /rerank    {"query", "documents": [str]}                         ->  {"model", "scores": [P(relevant)]}
@@ -20,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, a.index_dir)
 from _http import serve                              # noqa: E402
 import config, embed, rerank, search                 # noqa: E402
+from store import check_where                        # noqa: E402
 
 t0 = time.time()
 cfg = config.load(a.config_dir)
@@ -85,14 +87,15 @@ def _search_in(index, r, q, k, mode, c):
         lf, linfo = search.link_filter(index, r.get("linked_to"), _strs(r.get("link_type"), "link_type"), _strs(r.get("has_link"), "has_link"))
     except ValueError as e:
         raise ValueError(str(e))
+    where = check_where({key: r.get(key) for key in ("since", "until", "date", "authors")})
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
                       reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, link_filter=lf,
-                      refs_in_query=bool(r.get("refs_in_query", True)), link_boost=r.get("link_boost"), **search.tuning(c))
+                      refs_in_query=bool(r.get("refs_in_query", True)), link_boost=r.get("link_boost"), where=where, **search.tuning(c))
     rel_k = r.get("related")
-    related = [] if lf or rel_k is False else search.related(index, out, None if rel_k in (None, True) else int(rel_k), kinds, projects, bool(r.get("open_only")), explain=bool(r.get("explain")))
+    related = [] if lf or rel_k is False else search.related(index, out, None if rel_k in (None, True) else int(rel_k), kinds, projects, bool(r.get("open_only")), explain=bool(r.get("explain")), where=where)
     cached = {"rerank_hits": rr.hits, "rerank_misses": rr.misses} if use_rr and hasattr(rr, "hits") else None
-    return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing, "links_available": index.links is not None, "related": related, **({"link_filter": linfo} if lf else {}),
+    return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing, "links_available": index.links is not None, "related": related, **({"link_filter": linfo} if lf else {}), **({"where": where} if where else {}),
             "timing_ms": {"total": round((time.time() - t) * 1000)}, **({"cache": cached} if cached else {})}
 
 

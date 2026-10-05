@@ -4,13 +4,14 @@ by vector cosine, the per-store hits are merged by score into one keyword list a
 projects because a universe shares one embedding model), the two lists are fused by reciprocal rank, and the best candidates are
 optionally reranked by a cross-encoder.
 
-usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [-k 8] [--open] [--bm25|--vec] [--rerank] [--explain] <query>
+usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [--since YYYY[-MM[-DD]]] [--until ..] [--date created|updated] [--author A]...
+                 [-k 8] [--open] [--bm25|--vec] [--rerank] [--explain] <query>
        (a --source is an id like `issues`, or `project/source`; a --kind is one of store.KINDS, like `commit` or `file`)"""
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config
 from linkdb import LinkDB, NAMES, INV, SAY, TYPES, node_id, doc_names
-from store import Store, _CAMEL, STATE_SQL, chunk_filter
+from store import Store, _CAMEL, STATE_SQL, chunk_filter, check_where
 
 STOP = set("a an the of in on to is are was be for and or not with how what where why does do this that it as by from at".split())
 
@@ -48,12 +49,12 @@ def fts_query(q):
     return " OR ".join(f'"{t}"' for t in terms)
 
 
-def bm25(st, q, k, sources=None, open_only=False, kinds=None, linked=None):
+def bm25(st, q, k, sources=None, open_only=False, kinds=None, linked=None, where=None):
     """[(rowid, bm25 score)] best first (FTS5 scores are negative: lower is better)."""
     fq = fts_query(q)
     if not fq:
         return []
-    cond, args = chunk_filter(sources, open_only, kinds, linked)
+    cond, args = chunk_filter(sources, open_only, kinds, linked, where)
     sql = f"SELECT c.rowid, bm25(fts, 3.0, 1.0) s FROM fts JOIN chunks c ON c.rowid = fts.rowid WHERE fts MATCH ? {cond} ORDER BY s LIMIT ?"
     return [(r[0], r[1]) for r in st.db.execute(sql, (fq, *args, k))]
 
@@ -168,12 +169,12 @@ def _pinned(idx, stores, named, cond, args, limit=30):
 
 
 def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None,
-           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True, link_boost=None):
+           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True, link_boost=None, where=None):
     """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based).
     `fusion` ({k, top_bonus}) tunes the reciprocal rank fusion. Reranked hits are ordered by a position-aware blend of the fused score
     (scaled so the best is 1) and the reranker's P(relevant): the weight of the fused score is `blend_weight(fused rank)`, 75% for the top three,
     so a good retrieval order is not thrown away by a cross-encoder that is wrong about one hit; `blend=None` orders by the reranker alone.
-    `explain` adds the arithmetic to each hit's detail as "explain"."""
+    `explain` adds the arithmetic to each hit's detail as "explain". `where` (store.check_where) restricts by date and author."""
     fusion = {**FUSION, **(fusion or {})}
     pool = max(50, k * 5)
     stores = {p: s for p, s in idx.stores.items() if not projects or p in projects}
@@ -188,7 +189,7 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             f = _source_filter(sources, pid)
             if f == []:
                 continue
-            hits += [(score, pid, rid) for rid, score in bm25(st, q, pool, f, open_only, kinds, linked)]
+            hits += [(score, pid, rid) for rid, score in bm25(st, q, pool, f, open_only, kinds, linked, where)]
         rankings.append([(pid, rid) for _, pid, rid in sorted(hits)[:pool]]), names.append("bm25")
     if mode in ("hybrid", "vec") and embedder is not None:
         from embed import vector_search
@@ -197,11 +198,11 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             f = _source_filter(sources, pid)
             if f == []:
                 continue
-            hits += [(-cos, pid, rid) for rid, cos in vector_search(st, qvec, embedder.name, pool, f, open_only, kinds, linked)]
+            hits += [(-cos, pid, rid) for rid, cos in vector_search(st, qvec, embedder.name, pool, f, open_only, kinds, linked, where)]
         rankings.append([(pid, rid) for _, pid, rid in sorted(hits)[:pool]]), names.append("vec")
     named = idx.links.names_in_text(q) if refs_in_query and idx.links else []
     if named:                                  # the query spells out a reference (`scala/bug#1234`, `#123`): those documents and what links to them come first
-        cond, args = chunk_filter(None, open_only, kinds, linked)
+        cond, args = chunk_filter(None, open_only, kinds, linked, where)
         pins = _pinned(idx, stores, [n for n in named if n["indexed"]], cond, args)
         if sources:
             pins = [key for key in pins if _source_ok(idx, stores, key, sources)]
@@ -327,10 +328,10 @@ def hits(idx, q, text_chars=1200, **kw):
     return out
 
 
-def related(idx, results, k=None, kinds=None, projects=None, open_only=False, weights=None, explain=False):
+def related(idx, results, k=None, kinds=None, projects=None, open_only=False, weights=None, explain=False, where=None):
     """Documents linked to the top hits, for a group of their own under the results (LINKS.md): the first `related.seeds` hits seed an expansion over the links
     (`LinkDB.expand`), what the hits already show is left out, `kinds` / `projects` / `open_only` apply, and `related.per_kind` keeps one kind of thing (the
-    commits of a big PR) from filling the group. [{ref, node, kind, project, source, label, color, key, title, url, state, created, text, score, via, line}]."""
+    commits of a big PR) from filling the group; `where` (dates, authors) applies to each related document as to hits. [{ref, node, kind, project, source, label, color, key, title, url, state, created, text, score, via, line}]."""
     cfg = idx.cfg.search["related"]
     k = cfg["limit"] if k is None else k
     if not (idx.links and cfg["enabled"] and k):
@@ -340,11 +341,12 @@ def related(idx, results, k=None, kinds=None, projects=None, open_only=False, we
         return []
     found = idx.links.expand(seeds, {**cfg["weights"], **(weights or {})}, cfg["hub_degree"], cfg["depth2"], exclude={h["node"] for h in results if h.get("node")})
     out, per = [], {}
+    wcond, wargs = chunk_filter(where=where)
     for e in found:
         n = e["node"]
         if (projects and n["project"] not in projects) or (open_only and n["state"] in ("closed", "merged")) or n["project"] not in idx.stores or not n["chunk"]:
             continue
-        row = idx.stores[n["project"]].db.execute("SELECT source, title, text, meta FROM chunks WHERE id = ?", (n["chunk"],)).fetchone()
+        row = idx.stores[n["project"]].db.execute(f"SELECT source, title, text, meta FROM chunks c WHERE id = ? {wcond}", (n["chunk"], *wargs)).fetchone()
         if row is None:
             continue
         sid, title, text, meta = row
@@ -390,6 +392,7 @@ if __name__ == "__main__":
             i = a.index(name); vals.append(a[i + 1]); del a[i:i + 2]
         return vals if many else (vals[-1] if vals else default)
     k, uni = int(opt("-k", 8)), opt("--universe")
+    where = check_where({"since": opt("--since"), "until": opt("--until"), "date": opt("--date"), "authors": opt("--author", many=True)})
     projects, sources, kinds = opt("--project", many=True), opt("--source", many=True), opt("--kind", many=True)
     mode = "bm25" if "--bm25" in a else "vec" if "--vec" in a else "hybrid"
     q = " ".join(x for x in a if not x.startswith("--"))
@@ -408,4 +411,4 @@ if __name__ == "__main__":
         from rerank import Reranker
         rr = Reranker(cfg.search["reranker"]["model"])
     show(hits(idx, q, k=k, projects=projects, sources=sources, mode=mode, open_only="--open" in a, kinds=kinds, embedder=emb, reranker=rr,
-              explain="--explain" in a, **tuning(cfg)))
+              explain="--explain" in a, where=where, **tuning(cfg)))

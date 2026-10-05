@@ -266,12 +266,13 @@ async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClien
                      projects: list[str] | None = None, sources: list[str] | None = None, kinds: list[str] | None = None, mode: str = "hybrid",
                      rerank: bool = True, open_only: bool = False, explain: bool = False, text_chars: int | None = None, model: str | None = None,
                      linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, refs_in_query: bool | None = None,
-                     related: bool | int | None = None, link_boost: float | None = None) -> dict:
+                     related: bool | int | None = None, link_boost: float | None = None, since: str | None = None, until: str | None = None,
+                     date: str | None = None, authors: list[str] | None = None) -> dict:
     """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
     body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
             **({"explain": True} if explain else {}), **({"text_chars": text_chars} if text_chars else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds), ("linked_to", linked_to),
-                                                                                                                                                  ("link_type", link_type), ("has_link", has_link)) if v},
+                                                                                                                                                  ("link_type", link_type), ("has_link", has_link), ("since", since), ("until", until), ("date", date), ("authors", authors)) if v},
             **({"refs_in_query": refs_in_query} if refs_in_query is not None else {}), **({"related": related} if related is not None else {}),
             **({"link_boost": link_boost} if link_boost is not None else {})}
     r, meta = await post_json(sup, client, spec, "/search", body)

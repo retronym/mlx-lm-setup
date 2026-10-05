@@ -305,7 +305,8 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
     @mcp.tool()
     async def search(query: str, k: int = 20, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
                      kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False,
-                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, related: bool | int = True) -> dict:
+                     linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, related: bool | int = True,
+                     since: str | None = None, until: str | None = None, date: str | None = None, authors: list[str] | None = None) -> dict:
         """Search the local index of a universe of projects (default: Scala / Zinc: Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, spec,
         issues with comments, pull requests with their comments and review comments, release notes. Natural-language and identifier queries
         both work ("where is eta expansion of by-name parameters handled", "Await.result leaks callbacks"). `projects` limits to project ids,
@@ -319,10 +320,14 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         puts that document and what links to it first. `linked_to` (a hit `ref`, `scala/bug#123`, `#123`, a sha) keeps only documents linked to it, through `link_type` (relations `closes`, `closed_by`, `merged_as`, `merge_of`, `mentions`, `mentioned_by`, `shipped_in`, `ships`, `touches`, `touched_by`, `defines`, `defined_by`).
         `has_link` keeps documents with a relation (`["closed_by"]`: has a fix) or without (`["no_closed_by"]` with kinds ["issue"] and `open_only`: open issues nobody fixed yet). `links` shows a document's whole neighbourhood or its story. `related` (default on; false or a number) adds a separate `related` list: documents linked to the top hits (the PR that fixed one, the issue a commit closed, what a hit mentions or is mentioned by),
         not matched by the query, each with `via` (which hit, which relation, how sure) and a `line`; use it to see the story around a hit without a second search.
+        `since` / `until` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`, inclusive at their precision) restrict to documents created in that range (`date` "updated" for last
+        changed instead); files of a git tree have no date and drop out, so pair a date with `kinds` like ["issue", "pr", "commit"]. `authors` keeps documents by any of
+        these people: a GitHub login, or for commits (which mostly carry only the git name) the author name, e.g. ["retronym", "Jason Zaugg"].
         Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
-                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link, related=related)
+                                   kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link, related=related,
+                                   since=since, until=until, date=date, authors=authors)
         except ApiError as e:
             raise fail(e) from None
         for h in res["results"] + res.get("related", []):

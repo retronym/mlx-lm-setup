@@ -193,6 +193,8 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
             err, data, _ = await self.call(s, "search", query="x", linked_to="scala/bug#1", link_type=["closed_by"], has_link=["no_closed_by"], related=False)
             self.assertEqual(data["echo"]["related"], False)
             self.assertEqual((err, data["echo"]["linked_to"], data["echo"]["link_type"], data["echo"]["has_link"]), (False, "scala/bug#1", ["closed_by"], ["no_closed_by"]))
+            err, data, _ = await self.call(s, "search", query="x", since="2024-01", authors=["retronym", "Jason Zaugg"])
+            self.assertEqual((err, data["echo"]["since"], data["echo"]["authors"]), (False, "2024-01", ["retronym", "Jason Zaugg"]))
             err, data, _ = await self.call(s, "links", ref="scala/bug#1")
             self.assertEqual((err, data["found"]), (False, False))                      # the test backend has no index
             err, data, _ = await self.call(s, "search_universes")

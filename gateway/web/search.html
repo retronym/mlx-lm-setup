@@ -155,6 +155,8 @@
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label title="Only issues and PRs that are still open"><input type="checkbox" id="open"> open only</label>
     <label title="Uses the links between issues, PRs, commits and releases: documents that something closes, or that nothing closes (try it with kind issue and open only)">links <select id="haslink"><option value="">any</option><option value="closed_by">has a fix</option><option value="no_closed_by">no fix yet</option><option value="shipped_in">shipped in a release</option><option value="no_shipped_in">not shipped</option></select></label>
+    <label title="Only documents created in this period. Files of a git tree have no date and drop out">when <select id="when"><option value="">any time</option><option value="1">past month</option><option value="6">past 6 months</option><option value="12">past year</option><option value="24">past 2 years</option><option value="60">past 5 years</option></select></label>
+    <label title="GitHub login, or for commits the git author name; several separated by commas">by <input id="authors" size="10" placeholder="anyone"></label>
     <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
@@ -289,6 +291,8 @@ let linkedTo = null;                                                            
 function setLinked(v) { linkedTo = v; $("linkedrow").hidden = !v; if (v) $("linkedto").textContent = v.label; go(); }
 $("linkedx").onclick = () => setLinked(null);
 $("haslink").onchange = () => go();
+$("when").onchange = () => go();
+$("authors").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
 function linksRow(h) {
   const l = h.links;
   if (!l || !l.top?.length) return null;
@@ -363,6 +367,9 @@ async function go() {
   if (pickedKinds.size) body.kinds = [...pickedKinds];
   if (linkedTo) body.linked_to = linkedTo.ref;
   if ($("haslink").value) body.has_link = [$("haslink").value];
+  if ($("when").value) { const d = new Date(); d.setMonth(d.getMonth() - +$("when").value); body.since = d.toISOString().slice(0, 10); }
+  const authors = $("authors").value.split(",").map(x => x.trim()).filter(Boolean);
+  if (authors.length) body.authors = authors;
   if (!$("unilabel").hidden) body.universe = $("universe").value;
   const t0 = performance.now();
   clearInterval(timer);
