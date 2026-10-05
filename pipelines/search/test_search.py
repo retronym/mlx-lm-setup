@@ -101,10 +101,35 @@ class SearchTests(unittest.TestCase):
 
     def test_rerank_sees_each_projects_best_hit(self):
         rr = FakeReranker()
-        hs = search.hits(self.idx, "typer implicit scope", k=3, embedder=FakeEmbedder(), reranker=rr, pool_docs=3)
+        hs = search.hits(self.idx, "typer implicit scope", k=3, embedder=FakeEmbedder(), reranker=rr, pool_docs=3, blend=None)
         self.assertTrue(any("small project" in d for d in rr.seen))                                   # the small project's hit was added to the 3
         self.assertIn("rerank", hs[0])
         self.assertIn("needle", hs[0]["text"])                                                        # the reranker's pick comes first
+
+    def test_blend_protects_the_retrieval_order_and_explain_shows_the_arithmetic(self):
+        rr = FakeReranker()
+        plain = search.hits(self.idx, "typer implicit scope", k=3, embedder=FakeEmbedder())
+        blended = search.hits(self.idx, "typer implicit scope", k=3, embedder=FakeEmbedder(), reranker=rr, pool_docs=30, explain=True)
+        self.assertEqual(blended[0]["doc"], plain[0]["doc"])                                          # rank 1 stays: 0.75 retrieval beats one reranker vote
+        x = blended[0]["explain"]
+        self.assertEqual((x["fused_rank"], x["weight"], x["retrieval"]), (1, 0.75, 1.0))
+        self.assertAlmostEqual(x["final"], 0.75 * 1.0 + 0.25 * blended[0]["rerank"], places=3)
+        alone = search.hits(self.idx, "typer implicit scope", k=30, embedder=FakeEmbedder(), reranker=rr, pool_docs=30, blend=None)
+        self.assertIn("needle", alone[0]["text"])                                                     # the reranker alone puts its favourite first
+        self.assertNotIn("explain", search.hits(self.idx, "needle", k=3, embedder=FakeEmbedder())[0])
+
+    def test_fusion_top_bonus_and_blend_weights(self):
+        a, b, c = ("p", 1), ("p", 2), ("p", 3)
+        self.assertEqual(search.fuse([[a, b], [c, b]], top_bonus=()), [b, a, c])                      # plain RRF: b is second in one list and second in the other
+        sc = search.fuse_scores([[a, b], [c, b]], top_bonus=(0.05, 0.02))
+        self.assertEqual((sc[a][1], sc[c][1], sc[b][1]), (0.05, 0.05, 0.02))                          # a top hit of ANY list gets the bonus
+        self.assertEqual(search.fuse([[a, b], [c, b]], top_bonus=(0.05, 0.02))[:2], [a, c] if sc[a][0] >= sc[c][0] else [c, a])
+        rows = [[3, 0.75], [10, 0.6], [1000, 0.4]]
+        self.assertEqual([search.blend_weight(r, rows) for r in (1, 3, 4, 10, 11, 5000)], [0.75, 0.75, 0.6, 0.6, 0.4, 0.4])
+
+    def test_exact_top_hit_survives_fuzzy_neighbours(self):
+        keys, _ = search.search(self.idx, "needle", k=3, mode="bm25", embedder=FakeEmbedder())
+        self.assertEqual(self.idx.stores[keys[0][0]].db.execute("SELECT id FROM chunks WHERE rowid=?", (keys[0][1],)).fetchone()[0] in ("code:n", "code:s"), True)
 
     def test_hits_say_who_and_when_with_fallbacks_for_older_chunks(self):
         st = Store(self.cfg.project_db("big"))

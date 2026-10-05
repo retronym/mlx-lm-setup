@@ -2,7 +2,7 @@
 reranker so they stay warm between queries; the indexes (one SQLite file per project, built by pipelines/search) are read-only here, and the
 JSON config is re-read on every request, so adding a project or editing labels needs no restart.
 
-  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?}
+  POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?, "explain"?}
                   -> {"universe", "results": [...], "timing_ms": {...}, "missing": [projects not indexed yet]}
   POST /embed     {"input": str | [str], "kind"? "document" | "query"}  ->  {"model", "dim", "embeddings": [[...]]}
   POST /rerank    {"query", "documents": [str]}                         ->  {"model", "scores": [P(relevant)]}
@@ -68,7 +68,7 @@ def _search(r):
     use_rr = bool(r.get("rerank", True))
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
-                      reranker=rr if use_rr else None, pool_docs=c.search["reranker"]["candidates"])
+                      reranker=rr if use_rr else None, explain=bool(r.get("explain")), **search.tuning(c))
     return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing,
             "timing_ms": {"total": round((time.time() - t) * 1000)}}
 
