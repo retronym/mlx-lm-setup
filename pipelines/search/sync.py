@@ -11,7 +11,7 @@ sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config, repos, runstate
 from embed import targets
 from store import Store
-from sources import ghissues
+from sources import ghissues, ghlinks
 from sources.ghreleases import GhReleases
 from sources.gitlog import GitLog
 from sources.gitsrc import GitSource
@@ -46,6 +46,10 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
             g = ghissues.GhRepo(members, max_chars)
             try:
                 (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=limit, log=run.log, meta_only=meta_only))
+                lk = cfg.search["links"]["github"]
+                prs = next((m for m in members if "prs" in m.include), None)
+                if prs and lk["enabled"] and not (reconcile or meta_only):
+                    ghlinks.enrich(st, prs.id, prs.repo, lk["max_prs_per_run"], lk["batch"], lk["closing_first"], log=run.log)
                 for m in members:
                     st.put(m.id, "last_sync", str(time.time()))
                 st.commit()

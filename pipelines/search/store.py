@@ -19,9 +19,15 @@ STATE_SQL = ("COALESCE(json_extract(c.meta, '$.state'), (SELECT json_extract(i.m
 KIND_SQL = "COALESCE(json_extract(c.meta, '$.kind'), 'file')"
 
 
-def chunk_filter(sources=None, open_only=False, kinds=None):
-    """An ` AND ...` condition on the chunks row `c` and its arguments: source ids, kinds, and not closed or merged."""
+LINKED_SQL = "EXISTS (SELECT 1 FROM temp.linkfilter f WHERE f.source = c.source AND f.doc = c.doc)"
+
+
+def chunk_filter(sources=None, open_only=False, kinds=None, linked=None):
+    """An ` AND ...` condition on the chunks row `c` and its arguments: source ids, kinds, not closed or merged, and `linked`: "in" (the document is in the
+    connection's temp `linkfilter` table, see `Store.set_link_filter`) or "out" (it is not)."""
     cond, args = "", []
+    if linked:
+        cond += f" AND {'NOT ' if linked == 'out' else ''}{LINKED_SQL}"
     if sources:
         cond += f" AND c.source IN ({','.join('?' * len(sources))})"; args += list(sources)
     if kinds:
@@ -77,6 +83,13 @@ class Store:
 
     def commit(self):
         self.db.commit()
+
+    def set_link_filter(self, pairs):
+        """The documents `chunk_filter(linked=...)` tests against, as (source id, doc) pairs, in a temp table of this connection (so a read-only
+        database is fine and two requests never see each other's)."""
+        self.db.execute("CREATE TEMP TABLE IF NOT EXISTS linkfilter(source TEXT, doc TEXT, PRIMARY KEY(source, doc)) WITHOUT ROWID")
+        self.db.execute("DELETE FROM temp.linkfilter")
+        self.db.executemany("INSERT OR IGNORE INTO temp.linkfilter VALUES(?,?)", pairs)
 
     # --- the diff ---
     def apply(self, source, chunks, doc=None, delete_missing_docs=None, existing_only=False):
