@@ -1,0 +1,17 @@
+{
+  "id": "zinc",
+  "title": "Zinc",
+  "description": "sbt's incremental Scala compiler: code, issues, pull requests and release notes.",
+  "sources": [
+    {"id": "code", "type": "git", "label": "zinc code", "color": "#059669", "priority": 2,
+     "repo": "sbt/zinc", "ref": "develop", "paths": ["internal", "zinc", "contributing-docs"],
+     "exclude": ["**/src/test/**", "**/test-data/**"],
+     "chunkers": {".scala": "scala", ".java": "java", ".md": "markdown"}},
+    {"id": "issues", "type": "github", "label": "zinc issues", "color": "#10b981", "priority": 3,
+     "repo": "sbt/zinc", "include": ["issues", "comments"]},
+    {"id": "prs", "type": "github", "label": "zinc PRs", "color": "#34d399", "priority": 4,
+     "repo": "sbt/zinc", "include": ["prs", "comments", "reviews"]},
+    {"id": "releases", "type": "github_releases", "label": "zinc releases", "color": "#ca8a04", "priority": 2,
+     "repo": "sbt/zinc", "tag_messages": true}
+  ]
+}

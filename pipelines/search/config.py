@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""Search configuration: global settings, projects and universes, all JSON under pipelines/search/config/.
+
+  config/search.json            global: data dirs, models, chunking, GitHub politeness, refresh tiers, local-model steps
+  config/projects/<id>.json     a project: a title and its sources (git paths, GitHub issues/PRs/reviews, release notes)
+  config/universes/<id>.json    a universe: a named list of projects searched together
+
+A project is indexed on its own (its own database) and knows nothing about universes, so a project can sit in several of them.
+Every file is validated, and all problems are reported together, each with its file and key path.
+
+  python config.py check            validate everything, print the tree
+  python config.py show <universe>  what a universe contains and what the refresh will do for it
+"""
+import json, re, sys
+from dataclasses import dataclass, field
+from pathlib import Path
+
+HERE = Path(__file__).parent
+CONFIG_DIR = HERE / "config"
+CHUNKERS = ("scala", "java", "markdown", "plain")
+SOURCE_TYPES = ("git", "github", "github_releases")
+GITHUB_INCLUDE = ("issues", "prs", "comments", "reviews")
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+class ConfigError(ValueError):
+    def __init__(self, errors):
+        self.errors = errors
+        super().__init__("\n".join(errors))
+
+
+# ---- a small declarative validator: field -> (kind, default); a default of REQUIRED means the key must be present ----------------
+REQUIRED = object()
+
+
+class V:
+    def __init__(self, where, errors):
+        self.where, self.errors = where, errors
+
+    def err(self, path, msg):
+        self.errors.append(f"{self.where}: {path}: {msg}")
+
+    def obj(self, d, path, fields, allow_extra=("description",)):
+        """Validate dict `d` against {key: (check, default)}; returns the dict with defaults filled in."""
+        if not isinstance(d, dict):
+            self.err(path, f"expected an object, got {type(d).__name__}")
+            return {k: (None if dflt is REQUIRED else dflt) for k, (_, dflt) in fields.items()}
+        for k in d:
+            if k not in fields and k not in allow_extra:
+                self.err(f"{path}.{k}" if path else k, f"unknown key (allowed: {', '.join(sorted(fields))})")
+        out = {}
+        for k, (check, dflt) in fields.items():
+            if k not in d:
+                if dflt is REQUIRED:
+                    self.err(f"{path}.{k}" if path else k, "required")
+                out[k] = None if dflt is REQUIRED else dflt
+                continue
+            msg = check(d[k])
+            if msg:
+                self.err(f"{path}.{k}" if path else k, msg)
+            out[k] = d[k]
+        return out
+
+
+def t_str(v):
+    return None if isinstance(v, str) and v else "expected a non-empty string"
+
+
+def t_bool(v):
+    return None if isinstance(v, bool) else "expected true or false"
+
+
+def t_int(lo=None, hi=None, nullable=False):
+    def check(v):
+        if v is None and nullable:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int):
+            return "expected an integer"
+        if lo is not None and v < lo or hi is not None and v > hi:
+            return f"expected an integer in {lo}..{hi}"
+    return check
+
+
+def t_num(lo=None, nullable=False):
+    def check(v):
+        if v is None and nullable:
+            return None
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return "expected a number"
+        if lo is not None and v < lo:
+            return f"expected a number >= {lo}"
+    return check
+
+
+def t_re(rx, what):
+    return lambda v: None if isinstance(v, str) and rx.match(v) else f"expected {what}"
+
+
+def t_in(*choices):
+    return lambda v: None if v in choices else f"expected one of {', '.join(map(str, choices))}"
+
+
+def t_list(item_check, min_len=0, choices=None):
+    def check(v):
+        if not isinstance(v, list):
+            return "expected a list"
+        if len(v) < min_len:
+            return f"expected at least {min_len} item(s)"
+        for i, x in enumerate(v):
+            msg = item_check(x) or (None if choices is None or x in choices else f"expected one of {', '.join(choices)}")
+            if msg:
+                return f"item {i}: {msg}"
+    return check
+
+
+def t_map(key_check, val_check):
+    def check(v):
+        if not isinstance(v, dict) or not v:
+            return "expected a non-empty object"
+        for k, x in v.items():
+            msg = key_check(k) or val_check(x)
+            if msg:
+                return f"{k!r}: {msg}"
+    return check
+
+
+# ---- data model ------------------------------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Source:
+    project: str
+    id: str
+    type: str
+    label: str
+    color: str
+    priority: int
+    enabled: bool
+    min_interval_hours: float
+    max_items_per_run: int | None
+    repo: str
+    # git
+    ref: str | None = None
+    paths: tuple = ()
+    exclude: tuple = ()
+    chunkers: dict = field(default_factory=dict)
+    # github
+    include: tuple = ()
+    since: str | None = None
+    # github_releases
+    tag_messages: bool = False
+
+    @property
+    def key(self):
+        return f"{self.project}/{self.id}"
+
+
+@dataclass(frozen=True)
+class Project:
+    id: str
+    title: str
+    description: str
+    sources: tuple
+
+    def source(self, sid):
+        return next(s for s in self.sources if s.id == sid)
+
+
+@dataclass(frozen=True)
+class Universe:
+    id: str
+    title: str
+    description: str
+    default: bool
+    projects: tuple
+
+
+@dataclass(frozen=True)
+class Config:
+    search: dict
+    projects: dict
+    universes: dict
+    dir: Path
+
+    def default_universe(self):
+        return next((u for u in self.universes.values() if u.default), next(iter(self.universes.values()), None))
+
+    def universe(self, uid=None):
+        if uid is None:
+            return self.default_universe()
+        if uid not in self.universes:
+            raise KeyError(f"unknown universe {uid!r} (have: {', '.join(self.universes)})")
+        return self.universes[uid]
+
+    def universe_sources(self, uid=None):
+        return [s for p in self.universe(uid).projects for s in self.projects[p].sources]
+
+    def data_path(self, *parts):
+        return (HERE / self.search["data_dir"]).joinpath(*parts)
+
+    def project_dir(self, pid):
+        return self.data_path("projects", pid)
+
+    def project_db(self, pid):
+        return self.project_dir(pid) / "index.db"
+
+
+SEARCH_FIELDS = {
+    "data_dir": (t_str, "data"), "repos_dir": (t_str, "data/repos"),
+    "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}),
+}
+
+
+def _load_json(path, errors):
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        errors.append(f"{path.name}: file not found")
+    except json.JSONDecodeError as e:
+        errors.append(f"{path.name}: invalid JSON: {e}")
+    return None
+
+
+def _search(d, errors):
+    v = V("search.json", errors)
+    s = v.obj(d, "", SEARCH_FIELDS)
+    s["embedder"] = v.obj(d.get("embedder", {}), "embedder", {"model": (t_str, "Qwen/Qwen3-Embedding-0.6B"), "via": (t_in("local", "gateway"), "local"),
+                                                              "batch": (t_int(1, 256), 16)}) if isinstance(d, dict) else {}
+    s["reranker"] = v.obj(d.get("reranker", {}), "reranker", {"model": (t_str, "Qwen/Qwen3-Reranker-0.6B"), "candidates": (t_int(1, 100), 30)}) if isinstance(d, dict) else {}
+    s["chunking"] = v.obj(d.get("chunking", {}), "chunking", {"max_chars": (t_int(200, 20000), 2400), "min_chars": (t_int(0, 2000), 20)}) if isinstance(d, dict) else {}
+    s["github"] = v.obj(d.get("github", {}), "github", {"min_remaining": (t_int(0), 300), "page_delay_s": (t_num(0), 0.2), "page_limit": (t_int(1, 100), 90),
+                                                        "default_since": (t_re(DATE_RE, "an ISO timestamp like 2000-01-01T00:00:00Z"), "2000-01-01T00:00:00Z")}) if isinstance(d, dict) else {}
+    r = d.get("refresh", {}) if isinstance(d, dict) else {}
+    s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
+                                        "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})
+    tiers = r.get("tiers", {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}}) if isinstance(r, dict) else {}
+    for name, t in (tiers.items() if isinstance(tiers, dict) else []):
+        v.obj(t, f"refresh.tiers.{name}", {"max_priority": (t_int(1, 9), REQUIRED)})
+    s["refresh"]["tiers"] = tiers
+    llm = d.get("llm", {}) if isinstance(d, dict) else {}
+    task = lambda name, model, extra: v.obj(llm.get(name, {}) if isinstance(llm, dict) else {}, f"llm.{name}", {"enabled": (t_bool, False), "model": (t_str, model), **extra})
+    s["llm"] = {"noise_filter": task("noise_filter", "jevstyle-2b", {}),
+                "thread_summaries": task("thread_summaries", "qwen3-coder", {"min_comments": (t_int(2), 8), "max_per_run": (t_int(0), 200)}),
+                "digest": {**task("digest", "qwen3-coder", {}), **({} if isinstance(llm, dict) and "digest" in llm else {"enabled": True})},
+                "eval_questions": v.obj(llm.get("eval_questions", {}) if isinstance(llm, dict) else {}, "llm.eval_questions",
+                                        {"model": (t_str, "qwen3-coder"), "per_project": (t_int(1), 40)})}
+    return s
+
+
+def _source(project, d, v, i, default_since):
+    path = f"sources[{i}]"
+    if not isinstance(d, dict):
+        v.err(path, "expected an object")
+        return None
+    typ = d.get("type")
+    base = {"id": (t_re(ID_RE, "a lowercase id (letters, digits, dashes)"), REQUIRED), "type": (t_in(*SOURCE_TYPES), REQUIRED), "label": (t_str, REQUIRED),
+            "color": (t_re(COLOR_RE, "a #rrggbb colour"), "#78716c"), "priority": (t_int(1, 9), 5), "enabled": (t_bool, True),
+            "min_interval_hours": (t_num(0), 0), "max_items_per_run": (t_int(1, nullable=True), None), "repo": (t_re(REPO_RE, "owner/name"), REQUIRED)}
+    extra = {"git": {"ref": (t_str, REQUIRED), "paths": (t_list(t_str, 1), REQUIRED), "exclude": (t_list(t_str), []),
+                     "chunkers": (t_map(lambda k: None if isinstance(k, str) and k.startswith(".") else "suffix keys start with a dot", t_in(*CHUNKERS)), REQUIRED)},
+             "github": {"include": (t_list(t_str, 1, GITHUB_INCLUDE), REQUIRED), "since": (t_re(DATE_RE, "an ISO timestamp like 2020-01-01T00:00:00Z"), default_since)},
+             "github_releases": {"tag_messages": (t_bool, False)}}.get(typ, {})
+    s = v.obj(d, path, {**base, **extra})
+    if typ == "github" and isinstance(d.get("include"), list) and {"comments"} & set(d["include"]) and not {"issues", "prs"} & set(d["include"]):
+        v.err(f"{path}.include", "comments need issues and/or prs (they are filtered by what they belong to)")
+    if typ not in SOURCE_TYPES or None in (s["id"], s["repo"]):
+        return None
+    return Source(project=project, id=s["id"], type=typ, label=s["label"] or s["id"], color=s["color"], priority=s["priority"], enabled=s["enabled"],
+                  min_interval_hours=s["min_interval_hours"], max_items_per_run=s["max_items_per_run"], repo=s["repo"], ref=s.get("ref"),
+                  paths=tuple(s.get("paths") or ()), exclude=tuple(s.get("exclude") or ()), chunkers=dict(s.get("chunkers") or {}),
+                  include=tuple(s.get("include") or ()), since=s.get("since"), tag_messages=bool(s.get("tag_messages")))
+
+
+def load(config_dir=None):
+    """Load and validate everything under `config_dir` (default pipelines/search/config). Raises ConfigError listing every problem."""
+    cdir = Path(config_dir) if config_dir else CONFIG_DIR
+    errors = []
+    raw = _load_json(cdir / "search.json", errors)
+    search = _search(raw if raw is not None else {}, errors)
+    default_since = search["github"].get("default_since") or "2000-01-01T00:00:00Z"
+    projects, universes = {}, {}
+    for f in sorted((cdir / "projects").glob("*.json")):
+        d = _load_json(f, errors)
+        if d is None:
+            continue
+        v = V(f"projects/{f.name}", errors)
+        p = v.obj(d, "", {"id": (t_re(ID_RE, "a lowercase id"), REQUIRED), "title": (t_str, REQUIRED), "sources": (t_list(lambda x: None, 1), REQUIRED)})
+        if p["id"] and p["id"] != f.stem:
+            v.err("id", f"must match the file name ({f.stem!r})")
+        srcs, seen = [], set()
+        for i, sd in enumerate(d.get("sources", []) if isinstance(d, dict) and isinstance(d.get("sources"), list) else []):
+            s = _source(p["id"] or f.stem, sd, v, i, default_since)
+            if s is None:
+                continue
+            if s.id in seen:
+                v.err(f"sources[{i}].id", f"duplicate source id {s.id!r}")
+            seen.add(s.id)
+            srcs.append(s)
+        if p["id"]:
+            projects[p["id"]] = Project(p["id"], p["title"] or p["id"], d.get("description", "") if isinstance(d, dict) else "", tuple(srcs))
+    for f in sorted((cdir / "universes").glob("*.json")):
+        d = _load_json(f, errors)
+        if d is None:
+            continue
+        v = V(f"universes/{f.name}", errors)
+        u = v.obj(d, "", {"id": (t_re(ID_RE, "a lowercase id"), REQUIRED), "title": (t_str, REQUIRED), "default": (t_bool, False),
+                          "projects": (t_list(t_str, 1), REQUIRED)})
+        if u["id"] and u["id"] != f.stem:
+            v.err("id", f"must match the file name ({f.stem!r})")
+        for pid in u["projects"] or []:
+            if pid not in projects:
+                v.err("projects", f"unknown project {pid!r} (have: {', '.join(projects) or 'none'})")
+        if u["id"]:
+            universes[u["id"]] = Universe(u["id"], u["title"] or u["id"], d.get("description", "") if isinstance(d, dict) else "", bool(u["default"]),
+                                          tuple(p for p in (u["projects"] or []) if p in projects))
+    if sum(1 for u in universes.values() if u.default) > 1:
+        errors.append(f"universes: more than one universe is marked default ({', '.join(u.id for u in universes.values() if u.default)})")
+    if not universes and not errors:
+        errors.append("universes: none defined")
+    if errors:
+        raise ConfigError(errors)
+    return Config(search, projects, universes, cdir)
+
+
+def _tree(cfg, only=None):
+    for u in cfg.universes.values():
+        if only and u.id != only:
+            continue
+        print(f"universe {u.id}  \"{u.title}\"{'  (default)' if u.default else ''}: {', '.join(u.projects)}")
+        for pid in u.projects:
+            p = cfg.projects[pid]
+            print(f"  project {p.id}  \"{p.title}\"   db: {cfg.project_db(p.id).relative_to(HERE)}")
+            for s in sorted(p.sources, key=lambda s: (s.priority, s.id)):
+                what = {"git": f"{s.repo}@{s.ref} {','.join(s.paths)} [{','.join(sorted(set(s.chunkers.values())))}]",
+                        "github": f"{s.repo} {'+'.join(s.include)} since {(s.since or '')[:10]}", "github_releases": f"{s.repo} releases{' + tag messages' if s.tag_messages else ''}"}[s.type]
+                caps = ", ".join(x for x in (f"max {s.max_items_per_run}/run" if s.max_items_per_run else "", f"every >= {s.min_interval_hours:g} h" if s.min_interval_hours else "",
+                                             "DISABLED" if not s.enabled else "") if x)
+                print(f"    p{s.priority} {s.id:9} {s.type:15} {what}{'   (' + caps + ')' if caps else ''}")
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
+    try:
+        cfg = load()
+    except ConfigError as e:
+        print(f"{len(e.errors)} configuration problem(s):", file=sys.stderr)
+        for m in e.errors:
+            print(f"  {m}", file=sys.stderr)
+        sys.exit(1)
+    if cmd == "check":
+        _tree(cfg)
+        print(f"OK: {len(cfg.projects)} projects, {sum(len(p.sources) for p in cfg.projects.values())} sources, {len(cfg.universes)} universe(s)")
+    elif cmd == "show" and len(sys.argv) > 2:
+        _tree(cfg, sys.argv[2])
+    else:
+        print(__doc__)

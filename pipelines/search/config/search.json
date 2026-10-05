@@ -1,0 +1,21 @@
+{
+  "description": "Global settings for the search indexer: where data lives, which models, GitHub politeness, and which local-model steps are on. Projects live in projects/*.json, universes in universes/*.json.",
+  "data_dir": "data",
+  "repos_dir": "data/repos",
+  "embedder": {"model": "Qwen/Qwen3-Embedding-0.6B", "via": "local", "batch": 16},
+  "reranker": {"model": "Qwen/Qwen3-Reranker-0.6B", "candidates": 30},
+  "chunking": {"max_chars": 2400, "min_chars": 20},
+  "github": {"min_remaining": 300, "page_delay_s": 0.2, "page_limit": 90, "default_since": "2000-01-01T00:00:00Z"},
+  "refresh": {
+    "at": "03:00",
+    "tiers": {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}},
+    "reconcile_every_days": 7,
+    "budget_hours": null
+  },
+  "llm": {
+    "noise_filter": {"enabled": false, "model": "jevstyle-2b"},
+    "thread_summaries": {"enabled": false, "model": "qwen3-coder", "min_comments": 8, "max_per_run": 200},
+    "digest": {"enabled": true, "model": "qwen3-coder"},
+    "eval_questions": {"model": "qwen3-coder", "per_project": 40}
+  }
+}

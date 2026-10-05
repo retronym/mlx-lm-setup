@@ -1,0 +1,13 @@
+{
+  "id": "scala-dev",
+  "title": "scala-dev",
+  "description": "The Scala team's development tracker: design discussions, infrastructure and process issues, plus the few documents on its default branch.",
+  "sources": [
+    {"id": "docs", "type": "git", "label": "scala-dev docs", "color": "#7c3aed", "priority": 3,
+     "repo": "scala/scala-dev", "ref": "scala-dev", "paths": ["."], "chunkers": {".md": "markdown"}},
+    {"id": "issues", "type": "github", "label": "scala-dev issues", "color": "#9333ea", "priority": 3,
+     "repo": "scala/scala-dev", "include": ["issues", "comments"]},
+    {"id": "prs", "type": "github", "label": "scala-dev PRs", "color": "#a855f7", "priority": 5,
+     "repo": "scala/scala-dev", "include": ["prs", "comments", "reviews"]}
+  ]
+}
