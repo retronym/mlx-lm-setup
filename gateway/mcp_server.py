@@ -308,7 +308,7 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
     async def search(query: str, k: int = 20, universe: str | None = None, projects: list[str] | None = None, sources: list[str] | None = None,
                      kinds: list[str] | None = None, mode: str = "hybrid", rerank: bool = True, open_only: bool = False, text_chars: int = 600, explain: bool = False,
                      linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, related: bool | int = True,
-                     since: str | None = None, until: str | None = None, date: str | None = None, authors: list[str] | None = None) -> dict:
+                     since: str | None = None, until: str | None = None, date: str | None = None, authors: list[str] | None = None, sort: str = "relevance") -> dict:
         """Search the local index of a universe of projects (default: Scala / Zinc: Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, spec,
         issues with comments, pull requests with their comments and review comments, release notes. Natural-language and identifier queries
         both work ("where is eta expansion of by-name parameters handled", "Await.result leaks callbacks"). `projects` limits to project ids,
@@ -325,11 +325,13 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `since` / `until` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`, inclusive at their precision) restrict to documents created in that range (`date` "updated" for last
         changed instead); files of a git tree have no date and drop out, so pair a date with `kinds` like ["issue", "pr", "commit"]. `authors` keeps documents by any of
         these people: a GitHub login, or for commits (which mostly carry only the git name) the author name, e.g. ["retronym", "Jason Zaugg"]; "me" is the owner configured in search.json.
+        `sort` "recent" orders the best `k` newest first; an empty `query` with filters lists everything they match, newest first ("everything by me this year":
+        query "", authors ["me"], since "2026").
         Starts the search backend if needed (the first call loads two small models, about 20 s)."""
         try:
             res = await run_search(catalog, get_supervisor(), get_client(), query=query, k=k, universe=universe, projects=projects, sources=sources,
                                    kinds=kinds, mode=mode, rerank=rerank, open_only=open_only, explain=explain, linked_to=linked_to, link_type=link_type, has_link=has_link, related=related,
-                                   since=since, until=until, date=date, authors=authors)
+                                   since=since, until=until, date=date, authors=authors, sort=sort if sort != "relevance" else None)
         except ApiError as e:
             raise fail(e) from None
         for h in res["results"] + res.get("related", []):
@@ -360,7 +362,8 @@ def build_mcp(catalog: Catalog, get_supervisor: Callable[[], Supervisor], get_cl
         `search` with `kinds` is as good and faster. Takes 10-30 s. Returns `answers` [{line, ref (pass to `get`), title, url, kind, state, verdict ("yes":
         the LLM picked it, "no": shown and not picked, null: not shown), quote and reason (for the pick), via (the issue it closes, if reached that way)}],
         the `plan` (with `notes` on what code decided: dropped authors or dates, the meaning of "recently"), `seconds`; `trace` adds every search and choice.
-        Confirmed answers are a local model's judgement: check the quote."""
+        Confirmed answers are a local model's judgement: check the quote. A question that asks for a list ("anything by me this year", "my PRs about the
+        optimizer") is answered by one filtered search, newest first, with no pick (plan `intent` "list"); a plain topic question by a filtered search."""
         try:
             res = await run_ask(catalog, question=question, universe=universe, k=k, rounds=rounds, trace=trace)
         except ApiError as e:

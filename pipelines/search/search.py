@@ -5,13 +5,14 @@ projects because a universe shares one embedding model), the two lists are fused
 optionally reranked by a cross-encoder.
 
 usage: search.py [--universe U] [--project P]... [--source S]... [--kind K]... [--since YYYY[-MM[-DD]]] [--until ..] [--date created|updated] [--author A]...
-                 [-k 8] [--open] [--bm25|--vec] [--rerank] [--explain] <query>
+                 [-k 8] [--open] [--bm25|--vec] [--rerank] [--explain] [--sort relevance|recent] <query>
+       (an empty query lists what the filters match, newest first)
        (a --source is an id like `issues`, or `project/source`; a --kind is one of store.KINDS, like `commit` or `file`)"""
 import json, re, sys
 sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config
 from linkdb import LinkDB, NAMES, INV, SAY, TYPES, node_id, doc_names
-from store import Store, _CAMEL, STATE_SQL, chunk_filter, check_where
+from store import Store, _CAMEL, STATE_SQL, DATE_SQL, chunk_filter, check_where
 
 STOP = set("a an the of in on to is are was be for and or not with how what where why does do this that it as by from at".split())
 
@@ -168,13 +169,41 @@ def _pinned(idx, stores, named, cond, args, limit=30):
     return out
 
 
+def _date_of(idx, key, field):
+    pid, rid = key
+    return idx.stores[pid].db.execute(f"SELECT {DATE_SQL[field]} FROM chunks c WHERE rowid = ?", (rid,)).fetchone()[0] or ""
+
+
+def browse(idx, k=8, projects=None, sources=None, open_only=False, kinds=None, link_filter=None, where=None):
+    """The documents matching the filters alone, newest first (by `where["date"]`, created by default), one per document (its newest matching chunk): what
+    an empty query with filters means ("everything by me this year"). Undated chunks (files of a git tree) come last."""
+    field = (where or {}).get("date", "created")
+    stores = {p: s for p, s in idx.stores.items() if not projects or p in projects}
+    linked = link_filter["mode"] if link_filter else None
+    rows = []
+    for pid, st in stores.items():
+        f = _source_filter(sources, pid)
+        if f == []:
+            continue
+        if link_filter:
+            st.set_link_filter(_link_pairs(idx.cfg, pid, link_filter["nodes"]))
+        cond, args = chunk_filter(f, open_only, kinds, linked, where)
+        sql = (f"SELECT c.rowid, max(COALESCE({DATE_SQL[field]}, '')) d FROM chunks c WHERE 1 {cond} GROUP BY c.source, c.doc ORDER BY d DESC LIMIT ?")
+        rows += [(d, pid, rid) for rid, d in st.db.execute(sql, (*args, k))]
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return [(pid, rid) for _, pid, rid in rows[:k]]
+
+
 def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=False, embedder=None, reranker=None, pool_docs=30, kinds=None,
-           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True, link_boost=None, where=None):
+           fusion=None, blend=BLEND, explain=False, link_filter=None, refs_in_query=True, link_boost=None, where=None, sort="relevance"):
     """Ranked [(project, rowid)] plus per-hit detail {(project, rowid): {"bm25": rank, "vec": rank, "rerank": score}} (ranks are 1-based).
     `fusion` ({k, top_bonus}) tunes the reciprocal rank fusion. Reranked hits are ordered by a position-aware blend of the fused score
     (scaled so the best is 1) and the reranker's P(relevant): the weight of the fused score is `blend_weight(fused rank)`, 75% for the top three,
     so a good retrieval order is not thrown away by a cross-encoder that is wrong about one hit; `blend=None` orders by the reranker alone.
-    `explain` adds the arithmetic to each hit's detail as "explain". `where` (store.check_where) restricts by date and author."""
+    `explain` adds the arithmetic to each hit's detail as "explain". `where` (store.check_where) restricts by date and author. An empty query lists what the
+    filters match, newest first (`browse`); `sort` "recent" orders the best `k` by date instead of relevance (newest first)."""
+    if not q.strip():
+        return browse(idx, k, projects, sources, open_only, kinds, link_filter, where), {}
     fusion = {**FUSION, **(fusion or {})}
     pool = max(50, k * 5)
     stores = {p: s for p, s in idx.stores.items() if not projects or p in projects}
@@ -259,7 +288,11 @@ def search(idx, q, k=8, projects=None, sources=None, mode="hybrid", open_only=Fa
             if explain:
                 detail[key]["explain"].update({"weight": w, "final": round(final[-1], 4)})
         out = [key for key, _ in sorted(zip(cand, final), key=lambda x: -x[1])]
-    return out[:k], detail
+    out = out[:k]
+    if sort == "recent":
+        field = (where or {}).get("date", "created")
+        out.sort(key=lambda key: _date_of(idx, key, field), reverse=True)
+    return out, detail
 
 
 _TITLE_AUTHOR = re.compile(r"\((?:comment|review comment on .+?) by ([A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?)\)\s*$")
@@ -391,12 +424,12 @@ if __name__ == "__main__":
         while name in a:
             i = a.index(name); vals.append(a[i + 1]); del a[i:i + 2]
         return vals if many else (vals[-1] if vals else default)
-    k, uni = int(opt("-k", 8)), opt("--universe")
+    cfg = config.load()
+    k, uni, sort = int(opt("-k", 8)), opt("--universe"), opt("--sort", "relevance")
     where = check_where({"since": opt("--since"), "until": opt("--until"), "date": opt("--date"), "authors": opt("--author", many=True)}, cfg.search["me"])
     projects, sources, kinds = opt("--project", many=True), opt("--source", many=True), opt("--kind", many=True)
     mode = "bm25" if "--bm25" in a else "vec" if "--vec" in a else "hybrid"
     q = " ".join(x for x in a if not x.startswith("--"))
-    cfg = config.load()
     idx = Index(cfg, uni)
     if idx.missing:
         print(f"(not indexed yet: {', '.join(idx.missing)})", file=sys.stderr)
@@ -411,4 +444,4 @@ if __name__ == "__main__":
         from rerank import Reranker
         rr = Reranker(cfg.search["reranker"]["model"])
     show(hits(idx, q, k=k, projects=projects, sources=sources, mode=mode, open_only="--open" in a, kinds=kinds, embedder=emb, reranker=rr,
-              explain="--explain" in a, where=where, **tuning(cfg)))
+              explain="--explain" in a, where=where, sort=sort, **tuning(cfg)))

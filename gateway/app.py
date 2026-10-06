@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_ask, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_ask, run_interpret, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -317,11 +317,12 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         "kinds"? [file | issue | pr | comment | review | summary | commit | release | tag], "mode"? (hybrid | bm25 | vec), "rerank"? (default true), "open_only"? (hide closed issues and unmerged-closed PRs), "explain"? (add each hit's fusion and rerank arithmetic),
         "linked_to"? (only documents linked to this one: a hit `ref`, `scala/bug#123`, `#123`, a commit sha; a list means any of them) with "link_type"? [relation, e.g. "closed_by", "mentions"; name both ends, "closes" and "closed_by", for either direction],
         "has_link"? [relation, or "no_<relation>"] (e.g. ["closed_by"]: has a fix; ["no_closed_by"] with kinds ["issue"]: no fix), "refs_in_query"? (default true: a reference spelled out in the query, like `scala/bug#123`, puts that document and what links to it first), "related"? (false, or how many: documents linked to the top hits, shown apart as `related`; default from search.json), "link_boost"? (experiment: lift hits linked to the top ones, 0 = off),
-        "since"?, "until"? (YYYY[-MM[-DD]], inclusive; files have no date and drop out), "date"? (created (default) | updated), "authors"? [GitHub login or git author name; any]} ->
+        "since"?, "until"? (YYYY[-MM[-DD]], inclusive; files have no date and drop out), "date"? (created (default) | updated), "authors"? [GitHub login or git author name; any; "me" is search.json `me`],
+        "sort"? (relevance (default) | recent: the best k newest first); an empty "query" lists what the filters match, newest first} ->
         {results: [{project, source, key, label, color, title, url, text, state?, bm25?, vec?, rerank?}], universe, missing, timing_ms, ...}."""
         body = await read_json(request)
         known = {"query", "k", "universe", "projects", "sources", "kinds", "mode", "rerank", "open_only", "explain", "text_chars", "model", "linked_to", "link_type", "has_link", "refs_in_query", "related", "link_boost",
-                 "since", "until", "date", "authors"}
+                 "since", "until", "date", "authors", "sort"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         if not isinstance(body.get("query"), str):
@@ -344,10 +345,18 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         kind, state, verdict (yes: the LLM picked it; no: shown, not picked; null: not shown), quote?, reason?, via?, p, routes, line}], trace, seconds, timing}.
         The agentic query layer (ASK.md): plans, searches several routes, follows issues to the PRs that close them, and lets the LLM pick. 10-30 s."""
         body = await read_json(request)
-        known = {"question", "universe", "k", "rounds", "trace", "model"}
+        known = {"question", "universe", "k", "rounds", "trace", "model", "plan"}
         if set(body) - known:
             raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
         return JSONResponse(await run_ask(catalog, **body))
+
+    async def search_interpret_route(request: Request):
+        """{"question"} -> {plan: {intent (one | list | topic), criterion, kinds, queries, since?, until?, authors?, open_only, notes}, seconds}: the planner
+        alone, about 1.5 s with the LLM loaded. Pass the plan (edited or not) to /api/search/ask as "plan" to skip planning again."""
+        body = await read_json(request)
+        if set(body) - {"question", "model"}:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - {'question', 'model'})}")
+        return JSONResponse(await run_interpret(catalog, **body))
 
     async def search_links_route(request: Request):
         """{"ref" (a hit `ref`, `scala/bug#123`, `#123`, `SI-123`, a commit sha), "types"? [relation], "limit"? (1..200, default 30), "story"? (time-ordered documents around it), "universe"?}
@@ -587,6 +596,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/search/get", handler(search_get_route), methods=["POST"]),
         Route("/api/search/links", handler(search_links_route), methods=["POST"]),
         Route("/api/search/ask", handler(search_ask_route), methods=["POST"]),
+        Route("/api/search/interpret", handler(search_interpret_route), methods=["POST"]),
         Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
         Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/search/outliers", handler(search_outliers_view), methods=["GET"]),

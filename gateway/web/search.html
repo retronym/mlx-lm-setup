@@ -162,10 +162,13 @@
     <label title="Re-score the top 30 with a cross-encoder: about a second slower, usually better for 'where is X' questions"><input type="checkbox" id="rerank" checked> rerank</label>
     <label title="Only issues and PRs that are still open"><input type="checkbox" id="open"> open only</label>
     <label title="Uses the links between issues, PRs, commits and releases: documents that something closes, or that nothing closes (try it with kind issue and open only)">links <select id="haslink"><option value="">any</option><option value="closed_by">has a fix</option><option value="no_closed_by">no fix yet</option><option value="shipped_in">shipped in a release</option><option value="no_shipped_in">not shipped</option></select></label>
-    <label title="Only documents created in this period. Files of a git tree have no date and drop out">when <select id="when"><option value="">any time</option><option value="1">past month</option><option value="6">past 6 months</option><option value="12">past year</option><option value="24">past 2 years</option><option value="60">past 5 years</option></select></label>
+    <label title="Only documents created in this period. Files of a git tree have no date and drop out">when <select id="when"><option value="">any time</option><option value="1">past month</option><option value="6">past 6 months</option><option value="12">past year</option><option value="24">past 2 years</option><option value="60">past 5 years</option><option value="custom" id="whencustom" hidden></option></select></label>
     <label title="GitHub login, or for commits the git author name; several separated by commas; 'me' is the owner in search.json">by <input id="authors" size="10" placeholder="anyone"></label>
+    <label title="relevance: best match first; newest: the best matches by date">sort <select id="sort"><option value="relevance">relevance</option><option value="recent">newest</option></select></label>
+    <label title="Read questions like 'anything by me this year' or 'find the PR that fixed …' as filters, shown below the box, which you can change or undo"><input type="checkbox" id="interpret" checked> interpret</label>
     <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
+  <div class="row" id="interprow" hidden></div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
   <div class="chips" id="samples"></div>
   <details id="indexbox" class="meta" hidden><summary id="indexsum"></summary><div id="index"></div></details>
@@ -299,6 +302,8 @@ function setLinked(v) { linkedTo = v; $("linkedrow").hidden = !v; if (v) $("link
 $("linkedx").onclick = () => setLinked(null);
 $("haslink").onchange = () => go();
 $("when").onchange = () => go();
+$("sort").onchange = () => go();
+{ const v = store.get("search.interpret"); if (v) $("interpret").checked = v === "1"; $("interpret").addEventListener("change", () => store.set("search.interpret", $("interpret").checked ? "1" : "0")); }
 $("authors").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
 function linksRow(h) {
   const l = h.links;
@@ -363,18 +368,91 @@ function render(d) {
 }
 
 let aborter = null, timer = null;
-async function go() {
-  const q = $("q").value.trim();
-  if (!q) return;
+// ---- interpreting the box: a natural-language question becomes filters in the controls (shown, removable), then a search, a listing or `ask` ----
+// Only text with words that name a person, a time, a state or a "find the one" request is interpreted; identifier queries search as typed.
+const NL = /\b(me|my|mine|i|i've|by\s+@?[\w-]+|recent(ly)?|lately|this\s+(year|month|week)|last\s+(year|month|week)|(19|20)\d\d|unfixed|unresolved|still open|find|which|anything|everything)\b/i;
+let interp = null;            // {text, plan, before: the controls it replaced} or {text, raw: true}: search these words as typed
+
+function controls() {
+  return { kinds: [...pickedKinds], authors: $("authors").value, when: $("when").value, whenRange: { ...whenRange }, open: $("open").checked, sort: $("sort").value };
+}
+function setControls(c) {
+  pickedKinds.clear(); c.kinds.forEach(k => pickedKinds.add(k));
+  for (const b of $("kinds").children) b.setAttribute("aria-pressed", pickedKinds.has(Object.keys(KIND_NAMES).find(k => KIND_NAMES[k] === b.textContent)));
+  $("authors").value = c.authors; whenRange = { ...c.whenRange }; setCustomWhen(); $("when").value = c.when; $("open").checked = c.open; $("sort").value = c.sort;
+}
+let whenRange = {};
+function setCustomWhen() {
+  const o = $("whencustom"), r = whenRange;
+  o.hidden = !(r.since || r.until);
+  o.textContent = r.since && r.until ? (r.since === r.until ? `in ${r.since}` : `${r.since} to ${r.until}`) : r.since ? `since ${r.since}` : `until ${r.until}`;
+}
+function dates() {
+  const v = $("when").value;
+  if (v === "custom") return Object.fromEntries(Object.entries(whenRange).filter(([, x]) => x));
+  if (v) { const d = new Date(); d.setMonth(d.getMonth() - +v); return { since: d.toISOString().slice(0, 10) }; }
+  return {};
+}
+function applyPlan(p) {
+  const before = controls();
+  setControls({ kinds: p.kinds || [], authors: (p.authors || []).join(", "), when: p.since || p.until ? "custom" : "", whenRange: { since: p.since, until: p.until },
+                open: !!p.open_only, sort: p.intent === "list" ? "recent" : "relevance" });
+  return before;
+}
+function planFromControls(p) {   // the plan as the user now sees it in the controls (they may have removed or changed what was read)
+  const authors = $("authors").value.split(",").map(x => x.trim()).filter(Boolean);
+  return { intent: p.intent, criterion: p.criterion, queries: p.queries, kinds: [...pickedKinds], open_only: $("open").checked, ...dates(), ...(authors.length ? { authors } : {}), notes: p.notes };
+}
+const INTENT = { one: "one answer: a local LLM picks it", list: "a list, newest first", topic: "a search" };
+function showInterp(p) {
+  const row = $("interprow");
+  if (!p) { row.hidden = true; return; }
+  const filt = [p.kinds?.length ? p.kinds.join(", ") : null, p.authors?.length ? `by ${p.authors.join(", ")}` : null,
+                p.since || p.until ? `${p.since || "…"} to ${p.until || "now"}` : null, p.open_only ? "open only" : null].filter(Boolean);
+  const raw = Object.assign(el("button", "lk", "search the words as typed"), { type: "button", title: "Undo the interpretation: the controls go back to what they were" });
+  raw.onclick = () => { setControls(interp.before); interp = { text: interp.text, raw: true }; showInterp(null); go(); };
+  row.replaceChildren(el("span", "meta", "read as"), el("span", "badge open", INTENT[p.intent] || p.intent),
+                      ...(p.queries?.length ? [el("span", "meta", `“${p.queries.join(" ")}”`)] : [el("span", "meta", "no topic: everything that matches")]),
+                      ...filt.map(f => el("span", "badge closed", f)), ...(p.notes || []).map(n => el("span", "meta", `(${n})`)), raw);
+  row.hidden = false;
+}
+async function interpret(text) {
+  status("reading the question…", "wait");
+  const r = await fetch("/api/search/interpret", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: text }) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+  return d.plan;
+}
+
+async function go(forceOne = false) {
+  const text = $("q").value.trim();
+  if (!text) return;
+  const fresh = !interp || interp.text !== text;
+  if (fresh && interp?.before) setControls(interp.before);          // new words: what the last reading set goes back first
+  if (fresh || (forceOne && interp?.raw)) interp = null;          // Ask always reads the question
+  if (!interp?.raw && (interp || forceOne || ($("interpret").checked && NL.test(text)))) {
+    try {
+      if (!interp) { const plan = await interpret(text); interp = { text, plan, before: applyPlan(plan) }; }
+    } catch (e) { status(e.message, "err"); return; }
+    const p = planFromControls(interp.plan);
+    if (forceOne) p.intent = "one";
+    showInterp(p);
+    if (p.intent === "one") return askGo(text, p);
+    return runSearch(p.queries?.[0] || (p.intent === "list" ? "" : text), text);
+  }
+  showInterp(null);
+  return runSearch(text, text);
+}
+
+async function runSearch(q, text) {
   if (aborter) aborter.abort();
   aborter = new AbortController();
-  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked, explain: true };
+  const body = { query: q, k: +$("k").value, mode: $("mode").value, rerank: $("rerank").checked, open_only: $("open").checked, explain: true, sort: $("sort").value, ...dates() };
   const f = $("source").value;
   if (f.startsWith("project:")) body.projects = [f.slice(8)]; else if (f.startsWith("source:")) body.sources = [f.slice(7)];
   if (pickedKinds.size) body.kinds = [...pickedKinds];
   if (linkedTo) body.linked_to = linkedTo.ref;
   if ($("haslink").value) body.has_link = [$("haslink").value];
-  if ($("when").value) { const d = new Date(); d.setMonth(d.getMonth() - +$("when").value); body.since = d.toISOString().slice(0, 10); }
   const authors = $("authors").value.split(",").map(x => x.trim()).filter(Boolean);
   if (authors.length) body.authors = authors;
   if (!$("unilabel").hidden) body.universe = $("universe").value;
@@ -388,15 +466,16 @@ async function go() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
     render(d); status("");
-    if (location.hash !== "#status") history.replaceState(null, "", `#${encodeURIComponent(q)}`);
+    if (location.hash !== "#status") history.replaceState(null, "", `#${encodeURIComponent(text)}`);
   } catch (e) {
     if (e.name !== "AbortError") status(e.message, "err");
   } finally {
     clearInterval(timer); $("go").disabled = false;
   }
 }
+
 $("form").onsubmit = e => { e.preventDefault(); go(); };
-$("askbtn").onclick = () => askGo();
+$("askbtn").onclick = () => go(true);
 
 function renderAsk(d) {
   const p = d.plan || {}, plan = el("div", "askplan");
@@ -428,16 +507,14 @@ function renderAsk(d) {
                            Object.entries(tm).map(([k, v]) => `${k} ${v} s`).join(", ")].filter(Boolean).join(" · ");
 }
 
-async function askGo() {
-  const q = $("q").value.trim();
-  if (!q) return;
+async function askGo(text, plan) {
   if (aborter) aborter.abort();
   aborter = new AbortController();
-  const body = { question: q };
+  const body = { question: text, ...(plan ? { plan } : {}) };
   if (!$("unilabel").hidden) body.universe = $("universe").value;
   const t0 = performance.now();
   clearInterval(timer);
-  const tick = () => status(`asking… ${((performance.now() - t0) / 1000).toFixed(0)} s (plans, searches, then a local LLM picks; 10-30 s)`, "wait");
+  const tick = () => status(`asking… ${((performance.now() - t0) / 1000).toFixed(0)} s (searches several ways, then a local LLM picks; 10-30 s)`, "wait");
   tick(); timer = setInterval(tick, 500);
   $("go").disabled = $("askbtn").disabled = true;
   try {
@@ -446,6 +523,7 @@ async function askGo() {
     if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
     renderAsk(d);
     status("");
+    if (location.hash !== "#status") history.replaceState(null, "", `#${encodeURIComponent(text)}`);
   } catch (e) {
     if (e.name !== "AbortError") status(e.message, "err");
   } finally {

@@ -120,6 +120,11 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(docs(authors=["carol smith", "bob"]), [("issue:1", "comment"), ("issue:2", "commit")])  # a commit's git name, or any of several
         self.assertEqual(docs(since="2000"), docs())                                                            # files drop out under a date (no date), these all have one
         self.assertEqual({h["kind"] for h in search.hits(self.idx, "needle", k=20, embedder=FakeEmbedder(), where=check_where({"since": "2000"}))} & {"file"}, set())
+        listed = search.hits(self.idx, " ", k=10, sources=["issues"], where=check_where({"since": "2019"}))       # no query: what the filters match, newest first
+        self.assertEqual([(h["doc"], h["kind"]) for h in listed], [("issue:2", "commit"), ("issue:1", "comment")])   # one per document: its newest chunk
+        self.assertEqual([h["doc"] for h in search.hits(self.idx, "", k=1, where=check_where({"authors": ["alice"]}))], ["issue:1"])
+        recent = search.hits(self.idx, "implicit shadowing", k=2, sources=["issues"], mode="bm25", sort="recent", where=check_where({"since": "2019"}))
+        self.assertEqual([h["doc"] for h in recent], ["issue:2", "issue:1"])                                      # the best k, newest first
         for bad in ({"since": "2024/01"}, {"date": "closed"}, {"authors": "x", "until": "24"}, {"author": ["x"]}, {"authors": [""]}):
             self.assertRaises(ValueError, check_where, bad)
         self.assertEqual(check_where({"authors": ["Me", "retronym", "someone"]}, ["retronym", "Jason Zaugg"])["authors"], ["retronym", "jason zaugg", "someone"])   # "me" from search.json

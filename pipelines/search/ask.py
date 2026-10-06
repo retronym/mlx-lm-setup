@@ -12,7 +12,7 @@ Returns {"plan", "answers": [{ref, node, title, url, kind, verdict, p, quote, re
 the rest by tier-1 probability and retrieval (`verdict` null: not shown to the LLM; no: shown, not picked); `trace` records every search with its filters, what each route added and every verdict.
 
 usage: ask.py "question" [--k 5] [--rounds 2] [--gate 10]       SEARCH_URL: the gateway that serves /api/search (default GATEWAY_URL)"""
-import json, os, sys, threading, time
+import datetime, json, os, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate, plan as planner
 from llm import chat, gw
@@ -100,13 +100,42 @@ def line(a):
     return f"{say}: {state}{a['title']} · {a['kind']}" + (f" · via {a['via']}" if a.get("via") else "") + f" · {a.get('url') or a['ref']}"
 
 
-def ask(question, universe="scala-zinc", k=5, rounds=2, gate_budget=10, model="qwen3-coder", log=lambda *_: None):
+def filters(p):
+    """The plan as search arguments (no query)."""
+    return {**({"kinds": p["kinds"]} if p.get("kinds") else {}), **{x: p[x] for x in ("since", "until", "authors") if p.get(x)},
+            **({"open_only": True} if p.get("open_only") else {})}
+
+
+def listing(p, universe, k, trace):
+    """A "list" or "topic" plan: one filtered search, no choice. A list is newest first (an empty query lists everything the filters match); a topic
+    is ranked by relevance, reranked."""
+    body = {"query": (p["queries"] or [""])[0], "universe": universe, "k": k, **filters(p),
+            **({"sort": "recent"} if p["intent"] == "list" else {"rerank": True})}
+    hs = _search(body)
+    trace.append({"round": 1, "route": p["intent"], "search": {x: v for x, v in body.items() if x != "universe"}, "hits": [h["ref"] for h in hs]})
+    return [{"ref": h["ref"], "node": h.get("node"), "title": h["title"], "url": h.get("url"), "kind": h["kind"], "state": h.get("state"), "author": h.get("author"),
+             "created": h.get("created"), "verdict": None, "routes": {p["intent"]: i}} for i, h in enumerate(hs, 1)]
+
+
+def ask(question, universe="scala-zinc", k=5, rounds=2, gate_budget=10, model="qwen3-coder", log=lambda *_: None, plan=None):
+    """`plan`: one made already (the page interprets first and shows it); it is validated again, against `question`."""
     t0, trace = time.time(), []
     _tl.T = {}
     gate.trim()
     gate.SEARCH_URL = SEARCH_URL
-    p = _timed("plan", planner.plan, question, model=model)
+    if plan is not None:
+        p, problems = planner.validate({x: v for x, v in plan.items() if x != "notes"}, datetime.date.today(), list(plan.get("notes") or []), question)
+        if p is None:
+            raise ValueError(f"plan: {'; '.join(problems)}")
+    else:
+        p = _timed("plan", planner.plan, question, model=model)
     log(f"plan: {json.dumps(p)}")
+    if p["intent"] in ("list", "topic"):
+        out = _timed("search", listing, p, universe, k, trace)
+        for a in out:
+            a["line"] = line(a)
+        return {"plan": p, "answers": out, "trace": trace, "seconds": round(time.time() - t0, 1), "timing": {x: round(v, 1) for x, v in _tl.T.items()},
+                "candidates": len(out), "shown": 0}
     cands, shown, picked = {}, set(), None
     for rnd in range(1, rounds + 1):
         if rnd > 1:

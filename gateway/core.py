@@ -268,12 +268,12 @@ async def run_search(catalog: Catalog, sup: Supervisor, client: httpx.AsyncClien
                      rerank: bool = True, open_only: bool = False, explain: bool = False, text_chars: int | None = None, model: str | None = None,
                      linked_to: str | list[str] | None = None, link_type: list[str] | None = None, has_link: list[str] | None = None, refs_in_query: bool | None = None,
                      related: bool | int | None = None, link_boost: float | None = None, since: str | None = None, until: str | None = None,
-                     date: str | None = None, authors: list[str] | None = None) -> dict:
+                     date: str | None = None, authors: list[str] | None = None, sort: str | None = None) -> dict:
     """Hybrid keyword + vector search, optionally reranked, over a universe of indexed projects. Returns the backend's reply plus backend and cold start."""
     spec = resolve(catalog, model, "search")
     body = {"query": query, "k": k, "mode": mode, "rerank": rerank, "open_only": open_only,
             **({"explain": True} if explain else {}), **({"text_chars": text_chars} if text_chars else {}), **{key: v for key, v in (("universe", universe), ("projects", projects), ("sources", sources), ("kinds", kinds), ("linked_to", linked_to),
-                                                                                                                                                  ("link_type", link_type), ("has_link", has_link), ("since", since), ("until", until), ("date", date), ("authors", authors)) if v},
+                                                                                                                                                  ("link_type", link_type), ("has_link", has_link), ("since", since), ("until", until), ("date", date), ("authors", authors), ("sort", sort)) if v},
             **({"refs_in_query": refs_in_query} if refs_in_query is not None else {}), **({"related": related} if related is not None else {}),
             **({"link_boost": link_boost} if link_boost is not None else {})}
     r, meta = await post_json(sup, client, spec, "/search", body)
@@ -352,14 +352,41 @@ def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw
         raise ApiError(400, "invalid_arguments", str(e)) from None
 
 
+def _ask_module(catalog: Catalog, spec):
+    """pipelines/search/ask.py, pointed back at this gateway for search (and for models, unless GATEWAY_URL says where they are)."""
+    from . import searchinfo
+    mod = searchinfo._module(spec.options["index_dir"], "ask")
+    mod.SEARCH_URL = f"http://127.0.0.1:{catalog.gateway.port}"
+    if not os.environ.get("GATEWAY_URL"):
+        mod.gw.BASE = mod.SEARCH_URL
+    return mod
+
+
+async def run_interpret(catalog: Catalog, question: str, model: str | None = None) -> dict:
+    """The planner alone (pipelines/search/plan.py): what a question means as search arguments, and whether one document, a list or a topic search answers
+    it. About 1.5 s with the LLM loaded. The page shows the plan as filters the user can remove, then searches, lists, or runs `ask` with it."""
+    import asyncio
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        raise ApiError(503, "search_unavailable", "no search index configured")
+    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 1000:
+        raise ApiError(400, "invalid_arguments", "`question` must be a string of 3..1000 characters")
+    mod = _ask_module(catalog, spec)
+    t = time.time()
+    try:
+        p = await asyncio.to_thread(mod.planner.plan, question.strip())
+    except RuntimeError as e:
+        raise ApiError(502, "backend_error", str(e)[:400]) from None
+    return {"backend": spec.name, "plan": p, "seconds": round(time.time() - t, 1)}
+
+
 async def run_ask(catalog: Catalog, question: str, model: str | None = None, universe: str | None = None, k: int = 5, rounds: int = 2,
-                  trace: bool = True) -> dict:
+                  trace: bool = True, plan: dict | None = None) -> dict:
     """The agentic query layer (pipelines/search/ask.py, ASK.md): plan the question, search along several routes (with the plan's filters, as asked, with no
     filters, and issues -> the PRs that close them), rank candidates with the decision model and let the LLM pick the answer among the best ten.
     The controller runs in a worker thread and calls this gateway back over HTTP for search, documents, links and models (GATEWAY_URL, when set, is
     where the models are: a draft gateway serves only search). Takes 10-30 s."""
     import asyncio
-    from . import searchinfo
     spec, cfg = _search_config(catalog, model)
     if cfg is None:
         raise ApiError(503, "search_unavailable", "no search index configured")
@@ -371,14 +398,15 @@ async def run_ask(catalog: Catalog, question: str, model: str | None = None, uni
         uni = cfg.universe(universe).id
     except KeyError as e:
         raise ApiError(404, "unknown_universe", e.args[0]) from None
-    mod = searchinfo._module(spec.options["index_dir"], "ask")
-    mod.SEARCH_URL = f"http://127.0.0.1:{catalog.gateway.port}"
-    if not os.environ.get("GATEWAY_URL"):
-        mod.gw.BASE = mod.SEARCH_URL
+    if plan is not None and not isinstance(plan, dict):
+        raise ApiError(400, "invalid_arguments", "`plan` must be an object (from /api/search/interpret)")
+    mod = _ask_module(catalog, spec)
     try:
-        r = await asyncio.to_thread(mod.ask, question.strip(), universe=uni, k=k, rounds=rounds)
+        r = await asyncio.to_thread(mod.ask, question.strip(), universe=uni, k=k, rounds=rounds, **({"plan": plan} if plan is not None else {}))
     except RuntimeError as e:                                           # a call back into the gateway failed
         raise ApiError(502, "backend_error", str(e)[:400]) from None
+    except ValueError as e:                                             # a plan that does not validate
+        raise ApiError(400, "invalid_arguments", str(e)[:400]) from None
     if not trace:
         r.pop("trace", None)
     return {"backend": spec.name, "universe": uni, **r}

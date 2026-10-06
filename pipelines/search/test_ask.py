@@ -57,6 +57,13 @@ class PlanTests(unittest.TestCase):
         p, _ = ok({"criterion": "the pull requests the asker wrote", "kinds": ["pr"], "queries": ["x"], "authors": ["me"]}, "my PRs about erasure")
         self.assertEqual(p["authors"], ["me"])                                                                   # kept when the question says my / I; search expands it
         self.assertNotIn("authors", ok({"criterion": "the pull requests about erasure", "kinds": ["pr"], "queries": ["x"], "authors": ["me"]}, "PRs about erasure")[0])
+        p, _ = ok({"intent": "list", "criterion": "pull requests or issues created by me this year", "kinds": ["pr", "issue"], "queries": [], "since": "this year"},
+                  "anything by me this year")
+        self.assertEqual((p["intent"], p["queries"], p["kinds"], p["authors"], p["since"], "until" in p), ("list", [], [], ["me"], "2026", False))
+        self.assertEqual(len(p["notes"]), 3)                                                                    # me added, any kind, "this year" read
+        p, _ = ok({"intent": "list", "criterion": "pull requests the asker wrote", "kinds": ["pr"], "queries": [], "since": "last month"}, "my PRs from last month")
+        self.assertEqual((p["kinds"], p["since"], p["until"]), (["pr"], "2026-09", "2026-09"))                  # a kind named: kept
+        self.assertIsNone(ok({"intent": "one", "criterion": "the pull request that fixes it", "kinds": [], "queries": []})[0])   # only a list may have no query
         p, _ = ok({"criterion": "issues reported in the last months", "kinds": [], "queries": ["x"], "since": "recent"}, "issues reported recently")
         self.assertEqual(p["since"], "2026-04-09")                                                             # "recently": a stated default, resolved by code
         self.assertIn("180 days", p["notes"][0])
@@ -122,6 +129,18 @@ class ControllerTests(unittest.TestCase):
         self.assertNotIn("p/issues:issue:9", [x["ref"] for x in a])                                    # the issue led there but is not a PR
         self.assertEqual({x["verdict"] for x in a[1:]}, {"no"})                                        # shown, not picked
         self.assertEqual(sum(1 for t in r["trace"] if "choice" in t), 1)                               # stopped after one round
+
+    def test_a_list_is_one_filtered_search_and_no_choice(self):
+        f = Fake([])
+        for m in (ask, gate):
+            m.gw.post = f.post
+        given = {"intent": "list", "criterion": "everything the asker did this year", "kinds": [], "queries": [], "since": "this year", "authors": ["me"]}
+        r = ask.ask("anything by me this year", universe="u", k=3, plan=given)                         # a plan from the page: no LLM call at all
+        self.assertEqual([{x: s.get(x) for x in ("query", "sort", "authors", "since")} for s in f.searches],
+                         [{"query": "", "sort": "recent", "authors": ["me"], "since": str(datetime.date.today().year)}])
+        self.assertEqual((r["shown"], {a["verdict"] for a in r["answers"]}), (0, {None}))
+        self.assertTrue(r["answers"][0]["line"].startswith("unchecked: "))
+        self.assertRaises(ValueError, ask.ask, "x", universe="u", plan={"intent": "nope"})
 
     def test_second_round_drops_filters(self):
         f, r = self.run_ask([self.PLAN, '{"best": null}', '["erasure bridge crash", "erased parameter"]'])

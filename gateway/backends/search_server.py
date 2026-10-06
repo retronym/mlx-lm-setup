@@ -4,7 +4,8 @@ JSON config is re-read on every request, so adding a project or editing labels n
 
   POST /search    {"query", "k"?, "universe"?, "projects"?: [id], "sources"?: [id | "project/source"], "kinds"?: [kind], "mode"? hybrid|bm25|vec, "rerank"?, "open_only"?, "explain"?,
                    "linked_to"? (a hit ref, `scala/bug#123`, `#123`, a sha: [..] too), "link_type"? [relation | edge type], "has_link"? [relation | no_relation], "refs_in_query"?, "related"? (false, or how many; default from search.json `related`), "link_boost"?,
-                   "since"?, "until"? (YYYY[-MM[-DD]]), "date"? created|updated, "authors"? [GitHub login or git author name]}
+                   "since"?, "until"? (YYYY[-MM[-DD]]), "date"? created|updated, "authors"? [GitHub login or git author name], "sort"? relevance|recent}
+                  (an empty query lists what the filters match, newest first)
                   -> {"universe", "results": [...], "timing_ms": {...}, "missing": [projects not indexed yet]}
   POST /embed     {"input": str | [str], "kind"? "document" | "query"}  ->  {"model", "dim", "embeddings": [[...]]}
   POST /rerank    {"query", "documents": [str]}                         ->  {"model", "scores": [P(relevant)]}
@@ -53,8 +54,8 @@ def _strs(v, name):
 
 def _search(r):
     q = r["query"]
-    if not isinstance(q, str) or not q.strip():
-        raise ValueError("query must be a non-empty string")
+    if not isinstance(q, str):
+        raise ValueError("query must be a string (empty: list what the filters match, newest first)")
     mode, k = r.get("mode", "hybrid"), int(r.get("k", 20))
     if mode not in MODES:
         raise ValueError(f"mode must be one of {sorted(MODES)}")
@@ -79,7 +80,10 @@ def _search_in(index, r, q, k, mode, c):
     for p in projects or []:
         if p not in index.universe.projects:
             raise ValueError(f"project {p!r} is not in universe {index.universe.id!r} (has: {', '.join(index.universe.projects)})")
-    use_rr = bool(r.get("rerank", True))
+    use_rr = bool(r.get("rerank", True)) and bool(q.strip())
+    sort = r.get("sort", "relevance")
+    if sort not in ("relevance", "recent"):
+        raise ValueError("sort must be relevance or recent")
     text_chars = int(r.get("text_chars", 1200))
     if not 1 <= text_chars <= 50000:
         raise ValueError("text_chars must be 1..50000")
@@ -91,9 +95,9 @@ def _search_in(index, r, q, k, mode, c):
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
                       reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, link_filter=lf,
-                      refs_in_query=bool(r.get("refs_in_query", True)), link_boost=r.get("link_boost"), where=where, **search.tuning(c))
+                      refs_in_query=bool(r.get("refs_in_query", True)), link_boost=r.get("link_boost"), where=where, sort=sort, **search.tuning(c))
     rel_k = r.get("related")
-    related = [] if lf or rel_k is False else search.related(index, out, None if rel_k in (None, True) else int(rel_k), kinds, projects, bool(r.get("open_only")), explain=bool(r.get("explain")), where=where)
+    related = [] if lf or rel_k is False or not q.strip() else search.related(index, out, None if rel_k in (None, True) else int(rel_k), kinds, projects, bool(r.get("open_only")), explain=bool(r.get("explain")), where=where)
     cached = {"rerank_hits": rr.hits, "rerank_misses": rr.misses} if use_rr and hasattr(rr, "hits") else None
     return {"query": q, "universe": index.universe.id, "mode": mode, "reranked": use_rr, "results": out, "missing": index.missing, "links_available": index.links is not None, "related": related, **({"link_filter": linfo} if lf else {}), **({"where": where} if where else {}),
             "timing_ms": {"total": round((time.time() - t) * 1000)}, **({"cache": cached} if cached else {})}
