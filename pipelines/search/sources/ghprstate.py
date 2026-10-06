@@ -37,7 +37,7 @@ def refresh(store, source_id, repo, max_age_hours=6, batch=50, log=print):
     cutoff = ghissues._iso(time.time() - max_age_hours * 3600)
     rows = store.db.execute("""SELECT rowid, json_extract(meta, '$.number') FROM chunks WHERE source = ? AND json_extract(meta, '$.kind') = 'pr'
                                AND json_extract(meta, '$.state') = 'open' AND id NOT LIKE '%~%'
-                               AND COALESCE(json_extract(meta, '$.pr_state.fetched'), '') < ? ORDER BY COALESCE(json_extract(meta, '$.pr_state.fetched'), '')""", (source_id, cutoff)).fetchall()
+                               AND COALESCE(json_extract(meta, '$.pr_state.fetched'), '') <= ? ORDER BY COALESCE(json_extract(meta, '$.pr_state.fetched'), '')""", (source_id, cutoff)).fetchall()
     owner, name = repo.split("/")
     done = 0
     for i in range(0, len(rows), batch):
