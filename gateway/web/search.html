@@ -101,22 +101,29 @@
   .dash { display: flex; flex-direction: column; gap: 14px; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
   .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 0; }
-  .tile b { font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; } .tile span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
-  .lane { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--muted)); border-radius: 6px; padding: 6px 10px; text-align: left; display: flex; flex-direction: column; }
-  .lane b { font-size: 20px; line-height: 1.2; font-variant-numeric: tabular-nums; } .lane span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-  .lane[aria-pressed="true"] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+  .tile b { font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; } .tile span { white-space: nowrap; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .lanes { display: flex; flex-wrap: wrap; gap: 6px 6px; align-items: center; } .lanes .gap { flex-basis: 100%; height: 0; }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px 3px 10px; display: inline-flex; align-items: baseline; gap: 7px; white-space: nowrap; font-size: 13px; }
+  .lane::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--muted)); align-self: center; }
+  .lane b { font-variant-numeric: tabular-nums; font-weight: 650; } .lane span { color: var(--muted); }
+  .lane:hover { border-color: var(--c); } .lane[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--panel)); } .lane[aria-pressed="true"] span { color: var(--ink); }
   .dsec { display: flex; flex-direction: column; gap: 6px; } .dsec > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 650; }
-  .dcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .dcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; }
   .dlist { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; }
   .dlist > div { padding: 6px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 13px; } .dlist > div:first-child { border-top: 0; }
-  .dlist .r { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .dlist .r { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .dlist > .it { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 1px 10px; align-items: baseline; } .dlist > .it .r { grid-column: 2; margin-left: 0; }
+  .dlist > .it.nk { grid-template-columns: minmax(0, 1fr); } .it.nk .what, .it.nk .extra, .it.nk .r { grid-column: 1; }
+  .it .what { grid-column: 2; min-width: 0; } .it .extra { grid-column: 2; display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: center; margin-top: 2px; } .it .extra:empty { display: none; }
+  .it .kind { color: var(--muted); font-size: 12px; } .it .kind.open { color: var(--ok); } .it .kind .chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+  .dlist > .au { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; } .au .r { margin-left: 0; text-align: right; white-space: normal; }
+  .dlist > .pr { display: grid; }
   .chart, .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; } .chart svg, .strip svg { display: block; width: 100%; overflow: visible; }
   .chart .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); padding-bottom: 4px; } .chart .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; background: var(--c); }
   .pr { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px; gap: 2px 12px; padding: 9px 12px; border-top: 1px solid var(--line); align-items: start; } .pr:first-child { border-top: 0; }
   .pr.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .pr .num { color: var(--muted); font: 12.5px ui-monospace, Menlo, monospace; text-decoration: none; }
-  .pr .flags { display: flex; flex-direction: column; gap: 1px; font-size: 12px; text-align: right; } .pr .flags .ok { color: var(--ok); } .pr .flags .bad { color: var(--bad); } .pr .flags .warn { color: var(--warn); } .pr .flags .dim { color: var(--muted); }
+  .pr .flags { white-space: nowrap; display: flex; flex-direction: column; gap: 1px; font-size: 12px; text-align: right; } .pr .flags .ok { color: var(--ok); } .pr .flags .bad { color: var(--bad); } .pr .flags .warn { color: var(--warn); } .pr .flags .dim { color: var(--muted); }
   .pr .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; } .pr .sub b { color: var(--ink); font-weight: 600; }
   .rd { font-size: 12px; font-weight: 600; color: var(--c); } .rd::before { content: "●"; margin-right: 5px; } .rd small { font-weight: 400; color: var(--muted); }
   .chip { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; } .chip.me { border-color: var(--accent); color: var(--accent); } .chip.rng { border-color: var(--ok); color: var(--ok); }
@@ -906,6 +913,12 @@ async function loadDashboard() {
     renderDash();
   } catch (e) { if (seq === DASH.seq) { $("dash-meta").textContent = e.message; $("dash").replaceChildren(); } }
 }
+function dashItem(kind, titleEl, extras, right) {                                   // a grid row: state | title + chips beneath | right-aligned detail
+  const r = el("div", "it"), k = el("span", `kind${kind === "open" ? " open" : ""}`); if (kind instanceof Node) k.append(kind); else k.textContent = kind || "";
+  const w = el("div", "what"); w.append(titleEl); const x = el("div", "extra"); for (const e of extras) if (e) x.append(e);
+  if (!kind) { r.classList.add("nk"); k.remove?.(); r.append(w, x, el("span", "r", right || "")); return r; }
+  r.append(k, w, x, el("span", "r", right || "")); return r;
+}
 const dashSec = (title, ...kids) => { const s = el("section", "dsec"); s.append(el("h2", "", title), ...kids); return s; };
 const dashTile = (n, label) => { const t = el("div", "tile"); t.append(el("b", "", (n || 0).toLocaleString()), el("span", "", label)); return t; };
 const daysSince = iso => (Date.now() - Date.parse(iso)) / 864e5;
@@ -934,11 +947,18 @@ function dashStrip(prs, onPick) {
   for (const [dd, l] of [[1, "1d"], [7, "1w"], [30, "1mo"], [91, "3mo"], [365, "1y"], [730, "2y"], [1825, "5y"]]) if (x(dd) < W - pad) {
     svg.append(mk("line", { x1: x(dd), x2: x(dd), y1: 4, y2: H - 18, stroke: "var(--line)" })); const t = mk("text", { x: x(dd), y: H - 4, "text-anchor": "middle", fill: "var(--muted)", "font-size": 10.5 }); t.textContent = l; svg.append(t);
   }
-  const placed = [];
+  const placed = [], dots = [];
   for (const p of [...prs].sort((a, b) => daysSince(a.updated) - daysSince(b.updated))) {
-    const cx = x(daysSince(p.updated)); let cy = H - 30;
+    const cx = x(daysSince(p.updated)); let cy = 0;
     while (placed.some(q => Math.abs(q[0] - cx) < 11 && Math.abs(q[1] - cy) < 11)) cy -= 11;
-    placed.push([cx, cy]);
+    placed.push([cx, cy]); dots.push([p, cx, cy]);
+  }
+  const tall = Math.max(0, ...placed.map(q => -q[1])), base = tall + 12, H2 = base + 30;       // the swarm grows upward; size the strip to fit it
+  svg.setAttribute("viewBox", `0 0 ${W} ${H2}`);
+  for (const l of svg.querySelectorAll("line")) l.setAttribute("y2", H2 - 18);
+  for (const l of svg.querySelectorAll("text")) l.setAttribute("y", H2 - 4);
+  for (const [p, cx, dy] of dots) {
+    const cy = base + dy;
     const c = mk("circle", { cx, cy, r: 5, fill: `var(${READY[p.readiness]})`, stroke: "var(--panel)", "stroke-width": 1.5, style: "cursor:pointer" });
     const t = mk("title", {}); t.textContent = `${p.repo}#${p.number} ${p.title}: ${p.readiness}, updated ${relTime(p.updated)}`; c.append(t); c.onclick = () => onPick(p); svg.append(c);
   }
@@ -1024,37 +1044,36 @@ function renderDash(judge = true) {
   kids.push(tiles, dashChart(d));
   // open PRs: lanes (a filter), staleness strip, list
   const prs = d.open_prs, me = DASH.me, multi = new Set(prs.map(p => p.repo)).size > 1;
-  const laneDefs = [["all", "All open", "--muted", () => true], ...Object.keys(READY).map(k => [k, k[0].toUpperCase() + k.slice(1), READY[k], p => p.readiness === k]),
-                    ["ci", "CI failing", "--bad", p => p.state?.ci === "fail"], ["conflict", "Conflicts", "--warn", p => p.state?.mergeable === "CONFLICTING"],
-                    ["range", "Active in range", "--ok", p => p.touched]];
-  if (me) laneDefs.push(["mine", `${me}'s PRs`, "--accent", p => p.author === me], ["asked", "Review requested from me", "--accent", p => p.state?.requested?.includes(me)]);
+  const laneDefs = [["all", "All open", "--muted", () => true, 0], ...Object.keys(READY).map(k => [k, k[0].toUpperCase() + k.slice(1), READY[k], p => p.readiness === k, 0]),
+                    ["ci", "CI failing", "--bad", p => p.state?.ci === "fail", 1], ["conflict", "Conflicts", "--warn", p => p.state?.mergeable === "CONFLICTING", 1],
+                    ["range", "Active in range", "--ok", p => p.touched, 1]];
+  if (me) laneDefs.push(["mine", `${me}'s PRs`, "--accent", p => p.author === me, 1], ["asked", "Review requested from me", "--accent", p => p.state?.requested?.includes(me), 1]);
   const jlabel = (p, q) => DASH.judge.get(prKey(p))?.[q]?.label;
   const kc = new Map(); for (const p of prs) { const k = jlabel(p, "kind"); if (k) kc.set(k, (kc.get(k) || 0) + 1); }
-  for (const [k] of [...kc].sort((a, b) => b[1] - a[1])) laneDefs.push([`kind:${k}`, JUDGE_NAMES[k] || k, "--muted", p => jlabel(p, "kind") === k]);
-  if (prs.some(p => jlabel(p, "risk") === "api")) laneDefs.push(["risk:api", "API / bincompat", "--warn", p => jlabel(p, "risk") === "api"]);
+  for (const [k] of [...kc].sort((a, b) => b[1] - a[1])) laneDefs.push([`kind:${k}`, JUDGE_NAMES[k] || k, "--muted", p => jlabel(p, "kind") === k, 2]);
+  if (prs.some(p => jlabel(p, "risk") === "api")) laneDefs.push(["risk:api", "API / bincompat", "--warn", p => jlabel(p, "risk") === "api", 2]);
   const lane = laneDefs.find(l => l[0] === DASH.lane) || laneDefs[0], q = DASH.q.trim().toLowerCase();
   const shown = prs.filter(lane[3]).filter(p => !q || q.split(/\s+/).every(w => [p.title, p.author, p.repo, "#" + p.number, p.readiness, p.reason, ...p.labels, ...Object.values(DASH.judge.get(prKey(p)) || {}).map(r => r?.label || "")].join(" ").toLowerCase().includes(w)));
   const lanes = el("div", "lanes");
-  for (const [k, label, col, f] of laneDefs) { const b = Object.assign(el("button", "lane"), { type: "button" }); b.style.setProperty("--c", `var(${col})`); b.setAttribute("aria-pressed", k === lane[0]);
-    b.append(el("b", "", prs.filter(f).length), el("span", "", label)); b.onclick = () => { DASH.lane = k === "all" ? null : k; renderDash(); }; lanes.append(b); }
+  let grp = 0;
+  for (const [k, label, col, f, g] of laneDefs) { if (g !== grp) { grp = g; lanes.append(el("span", "gap")); } const b = Object.assign(el("button", "lane"), { type: "button" }); b.style.setProperty("--c", `var(${col})`); b.setAttribute("aria-pressed", k === lane[0]);
+    b.append(el("b", "", prs.filter(f).length), el("span", "", label.replace(/^Review requested from me$/, "Review requested"))); b.onclick = () => { DASH.lane = k === "all" ? null : k; renderDash(); }; lanes.append(b); }
   const search = Object.assign(el("input"), { type: "search", placeholder: "Filter by title, author, label, #number…", value: DASH.q }); search.style.cssText = "width:100%";
   search.oninput = () => { DASH.q = search.value; renderDash(); const s2 = $("dash").querySelector("input[type=search]"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); };
   const list = el("div", "dlist"); list.append(...(shown.length ? shown.map(p => prRow(p, multi)) : [el("div", "", "No open PRs match.")]));
   kids.push(dashSec(`Open PRs · ${shown.length} of ${prs.length}`, lanes, dashStrip(prs, p => { const r = document.getElementById("pr-" + prKey(p).replace(/\W/g, "-")); if (r) { r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } }), search, list));
   // what happened
   const cols = el("div", "dcols"), li = (rows) => { const l = el("div", "dlist"); l.append(...(rows.length ? rows : [el("div", "", "Nothing in this range.")])); return l; };
-  cols.append(dashSec("Hottest threads", li(d.hot_threads.map(h => { const r = el("div"); r.append(el("span", `badge ${h.state === "open" ? "open" : "closed"}`, h.state), ghLink("title", `${h.repo}#${h.number} ${h.title}`, h.url), el("span", "r", `${h.comments} comments`)); return r; }))),
-              dashSec("Releases and tags", li(d.releases.slice(0, 12).map(x => { const r = el("div"); r.append(ghLink("title", x.title, x.url), el("span", "r", x.date)); return r; }))),
-              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url)); const jb = el("span", "jdbox"); jb.dataset.judge = prKey(n); judgeChips(jb, DASH.judge.get(prKey(n))); r.append(jb); twinChips(r, n.twins); forumChips(r, n.forum); r.append(el("span", "r", n.author || "")); return r; }))),
-              dashSec("Most active", li(d.authors.map(a => { const r = el("div"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.forum_posts && `${a.forum_posts} forum posts`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
+  cols.append(dashSec("Hottest threads", li(d.hot_threads.map(h => dashItem(h.state, ghLink("title", `${h.title}`, h.url), [el("span", "kind", `${h.repo}#${h.number}`)], `${h.comments} comments`)))),
+              dashSec("Releases and tags", li(d.releases.slice(0, 12).map(x => { const r = el("div", "au"); r.append(ghLink("title", x.title, x.url), el("span", "r", x.date)); return r; }))),
+              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = dashItem(n.state, ghLink("title", n.title, n.url), [el("span", "kind", `${n.repo}#${n.number}`)], n.author || ""), x = r.querySelector(".extra"); const jb = el("span", "jdbox"); jb.style.margin = "0"; jb.dataset.judge = prKey(n); judgeChips(jb, DASH.judge.get(prKey(n))); x.append(jb); twinChips(x, n.twins); forumChips(x, n.forum); return r; }))),
+              dashSec("Most active", li(d.authors.map(a => { const r = el("div", "au"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.forum_posts && `${a.forum_posts} forum posts`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
   kids.push(cols);
   const fo = d.forum || { new_topics: [], hot_topics: [] };
   if (fo.new_topics.length || fo.hot_topics.length) {
     const fc = el("div", "dcols");
-    fc.append(dashSec(`Forum: new topics (${t.forum_topics || 0})`, li(fo.new_topics.slice(0, 12).map(x => { const r = el("div"); if (x.category) r.append(el("span", "chip", x.category));
-                r.append(ghLink("title", x.title, x.url), el("span", "r", `${x.author || ""} · ${x.replies} repl${x.replies === 1 ? "y" : "ies"}`)); return r; }))),
-              dashSec("Forum: most discussed", li(fo.hot_topics.slice(0, 10).map(x => { const r = el("div"); if (x.category) r.append(el("span", "chip", x.category));
-                r.append(ghLink("title", x.title, x.url), el("span", "r", `${x.replies} post${x.replies === 1 ? "" : "s"}`)); return r; }))));
+    fc.append(dashSec(`Forum: new topics (${t.forum_topics || 0})`, li(fo.new_topics.slice(0, 12).map(x => dashItem("", ghLink("title", x.title, x.url), [x.category && el("span", "chip", x.category)], `${x.author || ""} · ${x.replies} repl${x.replies === 1 ? "y" : "ies"}`)))),
+              dashSec("Forum: most discussed", li(fo.hot_topics.slice(0, 10).map(x => dashItem("", ghLink("title", x.title, x.url), [x.category && el("span", "chip", x.category)], `${x.replies} post${x.replies === 1 ? "" : "s"}`)))));
     kids.push(fc);
   }
   const byp = Object.entries(d.by_project);
