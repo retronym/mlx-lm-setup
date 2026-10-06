@@ -434,16 +434,44 @@ Retrieval over the Scala compiler, docs and issue history is the first thing a l
 - Comments inherit their issue's state, so `open_only` filters comments too.
 - **Not done:** an evaluation set for fusion and rerank defaults; sbt/zinc, SIPs and Discourse sources; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
 
+### Search after the first day (2026-10-05 and 06)
+
+Also written after the fact. The step-by-step plan for this stretch is [pipelines/search/PLAN.md](pipelines/search/PLAN.md); this is the summary, and it supersedes the "Not done" list above where they differ.
+
+- **Projects and universes.** One database per project (`data/projects/<id>/index.db`), a universe federating several ("Scala / Zinc": scala2, scala3, scala-dev, zinc, scala-asm), all configured as JSON under `config/`, with managed bare clones and a priority per source that orders the refresh, the GitHub quota and the embedding queue. The gateway reads the config (`search_universes`, config-driven page).
+- **More sources.** Java chunker, `github_releases` (release notes and tag messages), `git_log` (commit messages, newest-first backfill under per-run caps). `GhRepo` walks one repo's streams once for all its sources, with a forward cursor and a windowed newest-first backfill. Code is now chunked by tree-sitter (`scala_ts`, `java_ts`) with a rechunk planner and a known-item code retrieval eval (`eval_code.py`) as a regression guard.
+- **Nightly refresh** (`refresh.py`, launchd, 03:00): phases sync, reconcile, enrich, digest, links, embed, neighbours, verify; time budget, lock, dry-run, history. Embedding goes through the gateway. Thread summaries and the digest overview are written by the local LLM and checked by the NLI model; digest bullets are rendered from data because NLI is weak on lists of identifiers. Verify runs canary queries. An Index status tab shows per-source progress, phases, last refresh and the digest (markdown, sanitised).
+- **Result metadata and filters.** Author, created/updated times and comment threads on hits (`sync --meta-only` backfills); filter by kind; `get` tool for the document behind a hit; `refs` on hits; default 20 results; explain (fused rank, RRF, top-rank bonus, blend weight).
+- **Ranking changes from the first day's findings.** RRF top-rank bonus and a position-aware rerank blend (the reranker alone demoted good hits), plus a rerank score cache and query-embedding LRU.
+- **Duplicates, clusters and outliers** over issue and PR vectors (`neighbours.py`, `data/neighbours/<universe>.db`), as tabs on `/search`.
+- **Typed links** between issues, PRs, commits, releases and files (`refs.py`, `links.py`, GitHub closing references and merge commits through GraphQL, `shipped_in` from the first containing tag): links on hits, `linked_to` / `link_type` / `has_link` filters, a reference in the query, `related` results and a boost (0.5, chosen with `eval_links.py`), a `links` tool. Design in [LINKS.md](pipelines/search/LINKS.md).
+- **Operations.** `SEARCH_DATA_DIR`, `promote_data.sh` (APFS-clone data between checkouts), `draft.sh` (a draft gateway from a worktree on its own port).
+- **In progress (uncommitted).** `reconcile` lists issues updated-ascending from a real `since` date so it can re-anchor past GitHub's 10,000-item page cap (HTTP 422 on big repos), and refuses to delete when the listing is implausibly short (more than 20 documents and over half the index), so a broken listing cannot wipe an index. Two tests added.
+- **Still not done:** the evaluation set for fusion, rerank and the LLM steps (step 7 of the search plan); SIPs and Discourse sources; the `noise_filter`; decide-model reranking; vectors keyed by content hash.
+
+## Image generation (phase 13)
+
+Written after the fact: shipped in one commit (2026-10-06) without a design pass.
+
+- **Why.** The film examples need pictures as well as voice, and "image generation for the films" was on the future-work list.
+- **Decisions.** Same shape as speech and vision: an own thin backend (`gateway/backends/image_server.py`, adapter `mflux_image`, kind `image`) on mflux in its own `.venv-image` (python 3.12, `mise run setup-image`), budgeted and evicted like any backend. FLUX.2 klein 4B (8-bit) is the default; Z-Image-Turbo 6B (8-bit) is the one for legible text in the picture. PNGs are written under `data/images`, and callers get paths and metadata, not bytes.
+- **Surfaces.** `generate_image` MCP tool, `POST /api/image`, `GET /api/image/models`, `GET /api/image/file/<name>`, and a `/image` page with a home card.
+- **Numbers (README).** Klein about 8 s per 1024² picture, Z-Image about 40 s on an idle machine; 10-12 GB and 12-16 GB resident; both slow down when sharing the GPU.
+- **Not done:** music generation; image-to-image and editing; images in the film pipeline.
+
 ## Landed without a plan
 
-Smaller changes that shipped between phases 10 and 12 with no design pass, recorded here so the plan matches the repo.
+Smaller changes that shipped between phases 10 and 13 with no design pass, recorded here so the plan matches the repo.
 
 - **Request timeline** (2026-10-03). Every lease is recorded (wait, run, outcome) and exposed as `/api/requests`; the home page draws live activity lanes, and the admin page (2026-10-04) an activity timeline coloured like the memory stack. Motivation: with several clients sharing one GPU, "why was that slow" was unanswerable without seeing who held which backend.
 - **Home page and navigation.** A home page at `/` with one panel per section (chat moved to `/chat`) and live model and memory state; chat header options show only the model id (specs in a tooltip and details card), with a short state chip and nav as one group.
 - **Admin start/stop buttons and token handling.** The gateway token is kept in `localStorage` rather than per-tab `sessionStorage`, so `/admin` reached from the home or chat links is authenticated; the read-only banner has a paste-a-token box, and a 401 drops a stale token. This supersedes the sessionStorage note under Phase 5 findings.
 - **Vision progress.** `/api/look/expand` and per-image progress on `/vision` and in MCP progress notifications (also noted under Phase 10).
 - **Translate additions** after phase 11: a `/translate` page (text or pasted or dropped screenshot, source hint steering OCR), and capture through `TranslateCapture.app` so one Screen Recording grant covers every front app. OCR lines are joined into paragraphs from Vision's line boxes (font size, position, right edge, prose cue; a capitalised continuation needs a close size match, so banner lines stay apart), so translations do not inherit screen line breaks.
-- **Build and CI.** `mise.toml` tasks (`setup`, `test`, `translate-app`, `build`, and `service-install / -uninstall / -restart / -status / -logs` wrapping `service/service.sh`), `requirements.txt` for the gateway venv, and a GitHub Actions job running the unit tests on macOS.
+- **Build and CI.** `mise.toml` tasks (`setup`, `test`, `translate-app`, `build`, and `service-install / -uninstall / -restart / -status / -logs` wrapping `service/service.sh`), `requirements.txt` for the gateway venv, and a GitHub Actions job running the unit tests on macOS. Later (2026-10-05): `gateway`, `admin`, `discover` and `live-check` tasks, which the README now uses.
+- **Docs reshuffle** (2026-10-05). README capabilities as a table, pipeline sections reduced to pointers (PR triage and emoji book READMEs live in their folders), findings linked rather than quoted, the model guide extended to vision, speech, transcription and search with the text-generation tree split out, screenshots under `docs/img`.
+- **Home page.** An index strip on the Search panel (chunks, projects, % embedded, what the indexer is doing) replaced the standalone search dashboard; a header logo (inline SVG linking home) on every page (2026-10-06).
+- **Search page.** Source list collapsed into a summary and shorter filter labels (2026-10-05); a fix for the Index status tab crashing when a run had errors (2026-10-06).
 
 ## Future work
 
@@ -452,5 +480,5 @@ Not started; each would get its own design pass first.
 - **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
 - **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
 - **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
-- **Search follow-ups:** an evaluation set, duplicate-issue detection on top of `search`, SIPs and Discourse sources, and decide-model reranking of results.
-- **New kinds of model:** a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.
+- **Search follow-ups:** the evaluation set (step 7 of the search plan), SIPs and Discourse sources, and decide-model reranking of results. Duplicate detection shipped as the Duplicates tab.
+- **New kinds of model:** a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; music generation for the films (images shipped in phase 13).
