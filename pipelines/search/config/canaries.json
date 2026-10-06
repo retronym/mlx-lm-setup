@@ -9,6 +9,7 @@
     {"q": "ASM ClassWriter COMPUTE_FRAMES getCommonSuperClass loads classes", "expect": ["getCommonSuperClass"], "projects": ["scala-asm"]},
     {"q": "why is the Scala 2 bootstrap build failing", "expect": ["bootstrap"], "projects": ["scala-dev"]},
     {"q": "what changed in Zinc 1.10 release", "expect": ["1.10"], "projects": ["zinc"]},
-    {"q": "opaque types", "expect": ["opaque"], "projects": ["scala3"]}
+    {"q": "opaque types", "expect": ["opaque"], "projects": ["scala3"]},
+    {"q": "feedback on the optional braces syntax", "expect": ["optional-braces", "significant-indentation"], "projects": ["scala-contributors"]}
   ]
 }
