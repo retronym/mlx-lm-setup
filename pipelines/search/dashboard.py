@@ -82,7 +82,7 @@ def project_facts(db, since, until, weekly, now=None):
     try:
         rows = con.execute(f"""SELECT json_extract(meta, '$.kind'), json_extract(meta, '$.state'), json_extract(meta, '$.number'), json_extract(meta, '$.author'),
                                       json_extract(meta, '$.author_name'), json_extract(meta, '$.created'), json_extract(meta, '$.updated'), source, doc, id, title, url,
-                                      json_extract(meta, '$.tag'), json_extract(meta, '$.published')
+                                      json_extract(meta, '$.tag'), json_extract(meta, '$.published'), json_extract(meta, '$.topic'), json_extract(meta, '$.labels')
                                FROM chunks WHERE {ACT} >= ?""", (since,)).fetchall()
         opens = con.execute("""SELECT source, doc, title, url, json_extract(meta, '$.number'), json_extract(meta, '$.author'), json_extract(meta, '$.created'),
                                       json_extract(meta, '$.updated'), json_extract(meta, '$.labels'), json_extract(meta, '$.pr_state'), json_extract(meta, '$.closes')
@@ -99,11 +99,19 @@ def project_facts(db, since, until, weekly, now=None):
     tot, series = Counter(), defaultdict(Counter)
     authors, hot, newest, releases, touched = defaultdict(Counter), Counter(), [], [], set()
     heads = {}
-    for kind, state, num, author, aname, created, updated, src, doc, cid, title, url, tag, published in rows:
+    forum_new, forum_posts, topic_heads = [], Counter(), {}                # forum: topics are documents, replies are chunks (kind post) of the same document
+    for kind, state, num, author, aname, created, updated, src, doc, cid, title, url, tag, published, topic, cats in rows:
         if kind in ("issue", "pr") and "~" not in cid:
             heads[(src, doc)] = (kind, state, title, url, author, created, updated)
-    for kind, state, num, author, aname, created, updated, src, doc, cid, title, url, tag, published in rows:
-        if kind in ("issue", "pr") and "~" not in cid:
+    for kind, state, num, author, aname, created, updated, src, doc, cid, title, url, tag, published, topic, cats in rows:
+        if kind in ("topic", "post") and "~" not in cid:
+            if kind == "topic":
+                topic_heads[topic] = (title, url, author, created, json.loads(cats or "[]"))
+            if inr(created):
+                forum_posts[topic] += 1; tot["forum_posts"] += 1; authors[author or "?"]["forum_posts"] += 1
+                if kind == "topic":
+                    tot["forum_topics"] += 1; forum_new.append(topic)
+        elif kind in ("issue", "pr") and "~" not in cid:
             k = "prs" if kind == "pr" else "issues"
             if inr(created):
                 tot[f"{k}_opened"] += 1; series[_bucket(created[:10], weekly)][f"{k}_opened"] += 1
@@ -123,6 +131,23 @@ def project_facts(db, since, until, weekly, now=None):
         elif kind in ("release", "tag") and cid.endswith(":header") if kind == "release" else kind == "tag":
             if inr(published or created):
                 releases.append({"tag": tag, "title": title, "url": url, "date": (published or created)[:10], "kind": kind})
+    missing = [t for t in forum_posts if t not in topic_heads]            # topics opened before the range, replied to in it: their opening post is not among `rows`
+    if missing:
+        con = _connect(db)
+        try:
+            for i in range(0, len(missing), 400):
+                part = missing[i:i + 400]
+                for title, url, author, created, cats, topic in con.execute(f"""SELECT title, url, json_extract(meta, '$.author'), json_extract(meta, '$.created'), json_extract(meta, '$.labels'),
+                                         json_extract(meta, '$.topic') FROM chunks WHERE json_extract(meta, '$.kind') = 'topic' AND json_extract(meta, '$.topic') IN ({','.join('?' * len(part))})
+                                         AND id NOT LIKE '%~%'""", part):
+                    topic_heads[topic] = (title, url, author, created, json.loads(cats or "[]"))
+        finally:
+            con.close()
+    def topic_row(t, n):
+        title, url, author, created, cats = topic_heads[t]
+        return {"topic": t, "title": title, "url": url, "author": author, "created": created, "category": cats[0] if cats else None, "replies": n}
+    new_topics = [topic_row(t, max(0, forum_posts[t] - 1)) for t in forum_new if t in topic_heads]
+    hot_topics = [topic_row(t, n) for t, n in forum_posts.most_common(TOP) if t in topic_heads and n > 0]
     hot_threads, top = [], hot.most_common(TOP)
     old = [k for k, _ in top if k not in heads]                            # a thread opened before the range, with comments in it: its head is not among `rows`
     if old:
@@ -149,7 +174,7 @@ def project_facts(db, since, until, weekly, now=None):
     return {"totals": dict(tot), "series": {k: dict(v) for k, v in series.items()}, "authors": authors, "hot_threads": hot_threads,
             "new_issues": [{"created": c, "title": _split_title(t)[2], "repo": _split_title(t)[0], "number": _split_title(t)[1], "url": u, "author": a, "state": s}
                            for c, t, u, a, s in sorted(newest, reverse=True)[:30]],
-            "releases": releases, "open_prs": out_open}
+            "releases": releases, "open_prs": out_open, "forum": {"new_topics": sorted(new_topics, key=lambda x: x["created"], reverse=True)[:30], "hot_topics": hot_topics}}
 
 
 def twins(cfg, uni, keys, min_sim=0.9):
@@ -180,6 +205,33 @@ def twins(cfg, uni, keys, min_sim=0.9):
         con.close()
 
 
+def forum_links(cfg, uni, keys, limit=2):
+    """{"repo#number": [{title, url}]}: the forum topics that mention an issue or PR (or that it mentions), newest topic first, from the links database the refresh
+    builds. A Pre-SIP thread behind a PR is exactly what a reviewer wants to know about."""
+    path = cfg.data_path("links", f"{uni.id}.db")
+    if not keys or not path.exists():
+        return {}
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+    try:
+        found = defaultdict(set)
+        for i in range(0, len(keys), 400):
+            part, marks = keys[i:i + 400], ",".join("?" * len(keys[i:i + 400]))
+            for src, dst in con.execute(f"SELECT src, dst FROM edges WHERE type = 'mentions' AND dst IN ({marks}) AND src LIKE 'topic:%'", part):
+                found[dst].add(src)
+            for src, dst in con.execute(f"SELECT src, dst FROM edges WHERE type = 'mentions' AND src IN ({marks}) AND dst LIKE 'topic:%'", part):
+                found[src].add(dst)
+        topics = {t for v in found.values() for t in v}
+        info = {}
+        for i in range(0, len(topics), 400):
+            part = sorted(topics)[i:i + 400]
+            info.update({id: {"title": title, "url": url, "created": created or ""} for id, title, url, created in con.execute(
+                f"SELECT id, title, url, created FROM nodes WHERE id IN ({','.join('?' * len(part))}) AND kind = 'topic'", part)})
+        return {k: [{"title": info[t]["title"], "url": info[t]["url"]} for t in sorted((t for t in v if t in info), key=lambda t: info[t]["created"], reverse=True)[:limit]]
+                for k, v in found.items() if any(t in info for t in v)}
+    finally:
+        con.close()
+
+
 def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None):
     """The dashboard's facts layer for `projects` (default: every project of the universe) over [since, until) (see `check_range`)."""
     since, until = check_range(since, until)
@@ -190,6 +242,7 @@ def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None
     weekly = (dt.date.fromisoformat(until) - dt.date.fromisoformat(since)).days > 92
     t0 = time.time()
     tot, series, authors, hot, new, rel, opens, per = Counter(), defaultdict(Counter), defaultdict(Counter), [], [], [], [], {}
+    forum = {"new_topics": [], "hot_topics": []}
     for pid in chosen:
         db = cfg.project_db(pid)
         if not db.exists():
@@ -204,6 +257,8 @@ def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None
         hot += [{**h, "project": pid} for h in f["hot_threads"]]
         new += [{**n, "project": pid} for n in f["new_issues"]]
         rel += [{**r, "project": pid} for r in f["releases"]]
+        forum["new_topics"] += [{**x, "project": pid} for x in f["forum"]["new_topics"]]
+        forum["hot_topics"] += [{**x, "project": pid} for x in f["forum"]["hot_topics"]]
         opens += [{**o, "project": pid} for o in f["open_prs"]]
     start, end = dt.date.fromisoformat(since), dt.date.fromisoformat(until)
     step = 7 if weekly else 1
@@ -214,10 +269,14 @@ def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None
         o["twins"] = near.get(f"{o['repo']}#{o['number']}", [])
     for n in new:
         n["twins"] = near.get(f"{n['repo']}#{n['number']}", [])
+    talk = forum_links(cfg, uni, [f"{o['repo']}#{o['number']}" for o in opens] + [f"{n['repo']}#{n['number']}" for n in new])
+    for x in opens + new:
+        x["forum"] = talk.get(f"{x['repo']}#{x['number']}", [])
     fetched = [o["state"]["fetched"] for o in opens if o["state"]]
     return {"universe": uni.id, "projects": chosen, "since": since, "until": until, "bucket": "week" if weekly else "day", "totals": dict(tot), "by_project": per,
             "series": [{"date": b, **series.get(b, {})} for b in buckets], "releases": sorted(rel, key=lambda r: r["date"], reverse=True),
-            "hot_threads": sorted(hot, key=lambda h: -h["comments"])[:TOP], "new_issues": sorted(new, key=lambda n: n["created"], reverse=True)[:30],
+            "hot_threads": sorted(hot, key=lambda h: -h["comments"])[:TOP],
+            "forum": {"new_topics": sorted(forum["new_topics"], key=lambda x: x["created"], reverse=True)[:30], "hot_topics": sorted(forum["hot_topics"], key=lambda x: -x["replies"])[:TOP]}, "new_issues": sorted(new, key=lambda n: n["created"], reverse=True)[:30],
             "authors": [{"author": a, **c} for a, c in sorted(authors.items(), key=lambda kv: -sum(kv[1].values()))[:15] if a != "?"],
             "open_prs": sorted(opens, key=lambda o: o["updated"], reverse=True),
             "readiness": dict(Counter(o["readiness"] for o in opens)), "state_oldest": min(fetched) if fetched else None, "state_missing": sum(1 for o in opens if not o["state"]),

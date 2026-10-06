@@ -94,6 +94,11 @@ class FactsTests(unittest.TestCase):
             Chunk("commits:commit:aaa", "commit:aaa", "o/r commit aaa msg", "m", "u", {"kind": "commit", "sha": "aaa", "created": "2026-09-23T00:00:00Z", "updated": "2026-09-23T00:00:00Z", "author_name": "N"}),
             Chunk("commits:commit:aaa~1", "commit:aaa", "o/r commit aaa msg", "m2", "u", {"kind": "commit", "sha": "aaa", "created": "2026-09-23T00:00:00Z", "updated": "2026-09-23T00:00:00Z", "author_name": "N"}),
             Chunk("releases:release:v1:header", "release:v1", "o/r v1", "notes", "https://github.com/o/r/releases/tag/v1", {"kind": "release", "tag": "v1", "published": "2026-09-24", "created": "2026-09-24T00:00:00Z"}),
+            Chunk("forum:post:1", "topic:7", "Pre-SIP: thing", "opening", "https://f/t/thing/7", {"kind": "topic", "topic": 7, "post": 1, "post_number": 1, "author": "t", "created": "2026-09-10T00:00:00Z", "updated": "2026-09-10T00:00:00Z", "labels": ["language-design"]}),
+            Chunk("forum:post:2", "topic:7", "Pre-SIP: thing (reply #2 by u)", "reply", "https://f/t/thing/7/2", {"kind": "post", "topic": 7, "post": 2, "post_number": 2, "author": "u", "created": "2026-09-11T00:00:00Z", "updated": "2026-09-11T00:00:00Z", "labels": ["language-design"]}),
+            Chunk("forum:post:3", "topic:7", "Pre-SIP: thing (reply #3 by u)", "reply", "https://f/t/thing/7/3", {"kind": "post", "topic": 7, "post": 3, "post_number": 3, "author": "u", "created": "2026-09-12T00:00:00Z", "updated": "2026-09-12T00:00:00Z", "labels": ["language-design"]}),
+            Chunk("forum:post:4", "topic:5", "Old topic", "opening", "https://f/t/old/5", {"kind": "topic", "topic": 5, "post": 4, "post_number": 1, "author": "o", "created": "2025-01-01T00:00:00Z", "updated": "2025-01-01T00:00:00Z", "labels": ["stdlib"]}),
+            Chunk("forum:post:5", "topic:5", "Old topic (reply #2 by u)", "reply", "https://f/t/old/5/2", {"kind": "post", "topic": 5, "post": 5, "post_number": 2, "author": "u", "created": "2026-09-13T00:00:00Z", "updated": "2026-09-13T00:00:00Z", "labels": ["stdlib"]}),
             Chunk("releases:release:v0:header", "release:v0", "o/r v0", "notes", "u", {"kind": "release", "tag": "v0", "published": "2025-01-01"}),
         ])
         s.commit(); s.db.close()
@@ -124,6 +129,13 @@ class FactsTests(unittest.TestCase):
     def test_hot_thread_whose_head_is_older_than_the_range(self):
         h = self.facts()["hot_threads"]
         self.assertEqual([(x["number"], x["comments"], x["kind"]) for x in h], [("22", 2, "issue"), ("12", 1, "pr")])
+
+    def test_forum_topics_replies_and_hot_topics_including_an_old_topic(self):
+        f = self.facts()
+        self.assertEqual((f["totals"]["forum_topics"], f["totals"]["forum_posts"]), (1, 4))                  # the new topic's three posts and one reply to the old topic
+        self.assertEqual([(x["title"], x["replies"], x["category"]) for x in f["forum"]["new_topics"]], [("Pre-SIP: thing", 2, "language-design")])
+        self.assertEqual([(x["title"], x["replies"]) for x in f["forum"]["hot_topics"]], [("Pre-SIP: thing", 3), ("Old topic", 1)])
+        self.assertNotIn("forum_posts", self.facts("2027-01-01", "2027-02-01")["totals"])
 
     def test_releases_and_new_issues(self):
         f = self.facts()

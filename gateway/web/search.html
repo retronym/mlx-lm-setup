@@ -120,6 +120,7 @@
   .pr .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; } .pr .sub b { color: var(--ink); font-weight: 600; }
   .rd { font-size: 12px; font-weight: 600; color: var(--c); } .rd::before { content: "●"; margin-right: 5px; } .rd small { font-weight: 400; color: var(--muted); }
   .chip { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; } .chip.me { border-color: var(--accent); color: var(--accent); } .chip.rng { border-color: var(--ok); color: var(--ok); }
+  .chip.fo { text-decoration: none; color: var(--muted); border-style: dashed; } .chip.fo:hover { color: var(--accent); }
   .chip.jd { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); } .chip.tw { text-decoration: none; color: var(--muted); } .chip.tw:hover { color: var(--accent); } .jdbox { display: inline-flex; gap: 4px; margin-left: 8px; }
   @media (max-width: 640px) { .pr { grid-template-columns: 48px minmax(0, 1fr); } .pr .flags { grid-column: 2; flex-direction: row; gap: 10px; text-align: left; } }
   [hidden] { display: none !important; }
@@ -955,6 +956,9 @@ function judgeChips(box, j) {                                                   
     box.append(c);
   }
 }
+function forumChips(box, topics) {                                                 // forum threads that mention the item: the Pre-SIP behind a PR
+  for (const t of topics || []) { const a = ghLink("chip fo", `forum: ${t.title.length > 48 ? t.title.slice(0, 47) + "…" : t.title}`, t.url); a.title = t.title; box.append(a); }
+}
 function twinChips(box, twins) {
   for (const t of twins || []) { const a = ghLink("chip tw", `≈ ${t.ref.replace(/^.*\//, "")} ${t.sim.toFixed(2)} ${t.state}`, t.url); a.title = `similar ${t.kind}: ${t.title}`; box.append(a); }
 }
@@ -997,6 +1001,7 @@ function prRow(p, multi) {
   if (p.comments) sub.append(el("span", "", `${p.comments} comment${p.comments > 1 ? "s" : ""}`));
   if (p.closes.length) sub.append(el("span", "", "closes " + p.closes.join(", ")));
   twinChips(sub, p.twins);
+  forumChips(sub, p.forum);
   mid.append(sub); r.append(mid);
   const fl = el("div", "flags");
   if (s) {
@@ -1014,7 +1019,8 @@ function renderDash(judge = true) {
   $("dash-meta").dataset.facts = parts.join(" · "); setMeta();
   const t = d.totals, kids = [];
   const tiles = el("div", "tiles"); tiles.append(dashTile(t.prs_merged, "PRs merged"), dashTile(t.prs_opened, "PRs opened"), dashTile(t.prs_closed, "PRs closed"), dashTile(t.issues_opened, "issues opened"),
-    dashTile(t.issues_closed, "issues closed"), dashTile(t.commits, "commits"), dashTile(t.comments, "comments"), dashTile(d.releases.length, "releases"));
+    dashTile(t.issues_closed, "issues closed"), dashTile(t.commits, "commits"), dashTile(t.comments, "comments"), dashTile(d.releases.length, "releases"),
+    ...(t.forum_posts ? [dashTile(t.forum_topics, "forum topics"), dashTile(t.forum_posts, "forum posts")] : []));
   kids.push(tiles, dashChart(d));
   // open PRs: lanes (a filter), staleness strip, list
   const prs = d.open_prs, me = DASH.me, multi = new Set(prs.map(p => p.repo)).size > 1;
@@ -1039,9 +1045,18 @@ function renderDash(judge = true) {
   const cols = el("div", "dcols"), li = (rows) => { const l = el("div", "dlist"); l.append(...(rows.length ? rows : [el("div", "", "Nothing in this range.")])); return l; };
   cols.append(dashSec("Hottest threads", li(d.hot_threads.map(h => { const r = el("div"); r.append(el("span", `badge ${h.state === "open" ? "open" : "closed"}`, h.state), ghLink("title", `${h.repo}#${h.number} ${h.title}`, h.url), el("span", "r", `${h.comments} comments`)); return r; }))),
               dashSec("Releases and tags", li(d.releases.slice(0, 12).map(x => { const r = el("div"); r.append(ghLink("title", x.title, x.url), el("span", "r", x.date)); return r; }))),
-              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url)); const jb = el("span", "jdbox"); jb.dataset.judge = prKey(n); judgeChips(jb, DASH.judge.get(prKey(n))); r.append(jb); twinChips(r, n.twins); r.append(el("span", "r", n.author || "")); return r; }))),
-              dashSec("Most active", li(d.authors.map(a => { const r = el("div"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
+              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url)); const jb = el("span", "jdbox"); jb.dataset.judge = prKey(n); judgeChips(jb, DASH.judge.get(prKey(n))); r.append(jb); twinChips(r, n.twins); forumChips(r, n.forum); r.append(el("span", "r", n.author || "")); return r; }))),
+              dashSec("Most active", li(d.authors.map(a => { const r = el("div"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.forum_posts && `${a.forum_posts} forum posts`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
   kids.push(cols);
+  const fo = d.forum || { new_topics: [], hot_topics: [] };
+  if (fo.new_topics.length || fo.hot_topics.length) {
+    const fc = el("div", "dcols");
+    fc.append(dashSec(`Forum: new topics (${t.forum_topics || 0})`, li(fo.new_topics.slice(0, 12).map(x => { const r = el("div"); if (x.category) r.append(el("span", "chip", x.category));
+                r.append(ghLink("title", x.title, x.url), el("span", "r", `${x.author || ""} · ${x.replies} repl${x.replies === 1 ? "y" : "ies"}`)); return r; }))),
+              dashSec("Forum: most discussed", li(fo.hot_topics.slice(0, 10).map(x => { const r = el("div"); if (x.category) r.append(el("span", "chip", x.category));
+                r.append(ghLink("title", x.title, x.url), el("span", "r", `${x.replies} post${x.replies === 1 ? "" : "s"}`)); return r; }))));
+    kids.push(fc);
+  }
   const byp = Object.entries(d.by_project);
   if (byp.length > 1) kids.push(dashSec("By repo", li(byp.map(([id, x]) => { const r = el("div"); r.append(el("b", "", x.title), el("span", "r", `${x.prs_merged || 0} merged · ${x.prs_opened || 0} opened · ${x.issues_opened || 0} issues · ${x.commits || 0} commits · ${x.open_prs} open PRs`)); return r; }))));
   const keep = DASH.q && document.activeElement?.type === "search";
