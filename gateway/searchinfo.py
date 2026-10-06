@@ -178,16 +178,30 @@ def _meta(con) -> dict:
     return dict(con.execute("SELECT k, v FROM meta"))
 
 
+ITEM_KINDS = ("issue", "pr", "commit", "file", "release", "tag", "topic")     # what an item of the neighbours database can be: a document of any source
+
+
+def _kinds(kind: str) -> list[str] | None:
+    """`any` (None: every kind) or a comma-separated list of ITEM_KINDS (`issue,pr`, `release,tag`)."""
+    if kind == "any":
+        return None
+    ks = [k.strip() for k in (kind or "").split(",") if k.strip()]
+    if not ks or any(k not in ITEM_KINDS for k in ks):
+        raise ValueError(f"kind must be any or a comma-separated list of {', '.join(ITEM_KINDS)}")
+    return ks
+
+
 def _item_filter(prefix: str, *, state, kind, since, until, projects) -> tuple[str, list]:
     """SQL on one item (`prefix` is its table alias) for the filters that apply to a single item. Used per item for clusters; for pairs the
-    state, kind and project filters are about the pair, so they are built in `duplicates`."""
+    state, kind and project filters are about the pair, so they are built in `duplicates`. `kind` is a list of kinds or None (any); `state` open or
+    closed keeps only items that have a state (issues and PRs), a date range only items that have a date (not files)."""
     cond, args = [], []
     if state == "open":
         cond.append(f"{prefix}.state = 'open'")
     elif state == "closed":
         cond.append(f"{prefix}.state != 'open'")
-    if kind in ("issue", "pr"):
-        cond.append(f"{prefix}.kind = ?"); args.append(kind)
+    if kind:
+        cond.append(f"{prefix}.kind IN ({','.join('?' * len(kind))})"); args += list(kind)
     if since:
         cond.append(f"substr({prefix}.created, 1, 10) >= ?"); args.append(since)
     if until:
@@ -227,8 +241,8 @@ def duplicates(cfg, universe_id: str | None = None, *, min_sim: float = 0.9, sta
         if adjacent:
             cond.append("NOT (a.project = b.project AND a.kind = b.kind AND abs(a.number - b.number) <= ? AND (a.state != 'open' OR b.state != 'open'))"); args.append(adjacent)
         if since or until:
-            ca, aa = _item_filter("a", state="any", kind="any", since=since, until=until, projects=None)
-            cb, ab = _item_filter("b", state="any", kind="any", since=since, until=until, projects=None)
+            ca, aa = _item_filter("a", state="any", kind=None, since=since, until=until, projects=None)
+            cb, ab = _item_filter("b", state="any", kind=None, since=since, until=until, projects=None)
             cond.append(f"(({ca}) OR ({cb}))"); args += aa + ab
         if projects:
             marks = ",".join("?" * len(projects))
@@ -250,11 +264,12 @@ def duplicates(cfg, universe_id: str | None = None, *, min_sim: float = 0.9, sta
 
 def clusters(cfg, universe_id: str | None = None, *, state: str = "any", kind: str = "any", since: str | None = None, until: str | None = None,
              projects: list[str] | None = None, cluster: int | None = None, limit: int = 100, offset: int = 0) -> dict:
-    """Topic clusters of issues and PRs with their counts under the filters (an item is kept or not on its own: state any | open | closed,
-    kind issue | pr | any, created since/until, repo). `recent` counts items created in the last two years, `recent_share` is the same share over
+    """Topic clusters of documents (issues, PRs, commits, files, releases, tags, forum topics) with their counts under the filters (an item is kept or
+    not on its own: state any | open | closed, kind any or a list like `issue,pr`, created since/until, repo). `recent` counts items created in the last two years, `recent_share` is the same share over
     everything matching, so recent / size / recent_share above 1 means the topic is heating up. With `cluster`, that cluster's matching items, newest first."""
-    if state not in ("any", "open", "closed") or kind not in ("issue", "pr", "any"):
-        raise ValueError("state must be any, open or closed; kind issue, pr or any")
+    if state not in ("any", "open", "closed"):
+        raise ValueError("state must be any, open or closed")
+    kind = _kinds(kind)
     since, until = _date(since, "since"), _date(until, "until")
     uni, con = _neighbours_db(cfg, universe_id)
     if con is None:
@@ -291,12 +306,13 @@ def clusters(cfg, universe_id: str | None = None, *, state: str = "any", kind: s
 
 def outliers(cfg, universe_id: str | None = None, *, by: str = "iso", state: str = "any", kind: str = "any", since: str | None = None, until: str | None = None,
              projects: list[str] | None = None, templated: bool = False, limit: int = 50, offset: int = 0) -> dict:
-    """Issues and PRs that are far from everything else, most outlying first. `by` is the score: iso (cosine to the nearest other item) or ctr (cosine
-    to the centre of the item's own cluster); lower means more of an outlier. Filters apply per item as for clusters (state any | open | closed,
-    kind issue | pr | any, since / until, projects). Dependency bumps and release procedures are hidden unless `templated`: they are unlike
+    """Documents that are far from everything else, most outlying first. `by` is the score: iso (cosine to the nearest other item of its own group:
+    issues and PRs, commits, files, releases and tags, forum topics) or ctr (cosine to the centre of the item's own cluster); lower means more of an
+    outlier. Filters apply per item as for clusters (state any | open | closed, kind any or a list like `commit`, since / until, projects). Dependency bumps and release procedures are hidden unless `templated`: they are unlike
     anything else, and uninteresting."""
-    if by not in ("iso", "ctr") or state not in ("any", "open", "closed") or kind not in ("issue", "pr", "any"):
-        raise ValueError("by must be iso or ctr; state any, open or closed; kind issue, pr or any")
+    if by not in ("iso", "ctr") or state not in ("any", "open", "closed"):
+        raise ValueError("by must be iso or ctr; state any, open or closed")
+    kind = _kinds(kind)
     since, until = _date(since, "since"), _date(until, "until")
     uni, con = _neighbours_db(cfg, universe_id)
     if con is None or "iso" not in {r[1] for r in con.execute("PRAGMA table_info(items)")}:

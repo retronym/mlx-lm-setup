@@ -10,7 +10,7 @@
   "chunking": {"max_chars": 2400, "min_chars": 20, "pack_chars": 1000},
   "discourse": {"delay_s": 1.0, "max_retries": 6, "user_agent": "scala-search-indexer (local research index; https://github.com/retronym)"},
   "github": {"min_remaining": 300, "page_delay_s": 0.2, "page_limit": 90, "default_since": "2000-01-01T00:00:00Z"},
-  "neighbours": {"enabled": true, "neighbours": 5, "min_similarity": 0.8, "clusters": 80},
+  "neighbours": {"enabled": true, "neighbours": 5, "min_similarity": 0.8, "clusters": 200},
   "links": {"enabled": true, "max_refs_per_chunk": 200, "legacy_prefixes": {"SI": "scala/bug"}, "repo_aliases": {"lampepfl/dotty": "scala/scala3"}, "bare_fallbacks": {"scala/scala": ["scala/bug"]}},
   "refresh": {
     "at": "03:00",

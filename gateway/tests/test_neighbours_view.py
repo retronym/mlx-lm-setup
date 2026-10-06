@@ -172,6 +172,26 @@ class View(unittest.TestCase):
         self.assertEqual(self.out(until="2012"), [100, 101])
         self.assertEqual(self.out(by="ctr", state="open", kind="issue")[:2], [5000, 6000])
 
+    def test_every_kind_of_document_with_kind_lists(self):
+        con = sqlite3.connect(Path(self.tmp.name) / "data" / "neighbours" / "u.db")
+        con.executemany("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+            (13, "x", "x:c1", "commit", None, "2024-01-01T00:00:00Z", None, "A Person", "o/r commit abc12345 Fix lazy vals", "https://github.com/o/r/commit/abc", 2, 0.1, 0.4),
+            (14, "x", "x:f1", "file", None, None, None, None, "src/LazyVals.scala", "https://github.com/o/r/blob/x/src/LazyVals.scala", 2, 0.2, 0.3),
+            (15, "y", "y:t1", "topic", None, "2015-01-01T00:00:00Z", None, "b", "Pre-SIP: lazy vals", "https://forum.example.org/t/x/1", 2, 0.15, 0.35)])
+        con.commit(); con.close()
+        sizes = lambda **kw: {c["k"]: c["size"] for c in searchinfo.clusters(self.cfg, "u", **kw)["clusters"]}
+        self.assertEqual(sizes()[2], 7)                                                        # any: every kind
+        self.assertEqual(sizes(kind="commit,file,topic"), {2: 3})
+        self.assertEqual(sizes(kind="issue,pr")[2], 4)
+        self.assertEqual(sizes(kind="file", since="2000"), {})                                 # a file has no date: a date range leaves it out
+        self.assertEqual(sizes(kind="commit,topic", state="open"), {})                         # only issues and PRs have a state
+        ids = lambda **kw: [i["id"] for i in searchinfo.outliers(self.cfg, "u", **kw)["items"]]
+        self.assertEqual(ids()[:3], ["x:c1", "y:t1", "x:f1"])
+        self.assertEqual(ids(kind="topic"), ["y:t1"])
+        for bad in ("commits", "issue,mixed", ""):
+            with self.assertRaises(ValueError):
+                searchinfo.outliers(self.cfg, "u", kind=bad)
+
     def test_outliers_page(self):
         d = searchinfo.outliers(self.cfg, "u", limit=3, offset=2)
         self.assertEqual((d["total"], [i["number"] for i in d["items"]]), (10, [88, 6000, 95]))

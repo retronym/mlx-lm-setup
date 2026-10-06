@@ -121,10 +121,10 @@
     <div class="row">
       <label><span id="nb-statelabel">state</span> <select id="nb-state"></select></label>
       <label>kind <select id="nb-kind"></select></label>
-      <label title="Keep an item if it was created on or after this date">from <input type="date" id="nb-since"></label>
+      <label title="Keep an item if it was created on or after this date (files have no date: a date range leaves them out)">from <input type="date" id="nb-since"></label>
       <label title="Keep an item if it was created before this date">before <input type="date" id="nb-until"></label>
       <label class="dup-only" title="Cosine similarity of the two vectors. Above 0.95 is nearly always the same text; 0.90 to 0.95 real duplicates or follow-ups; below 0.90 related topics">similarity <select id="nb-sim"><option>0.95</option><option selected>0.9</option><option>0.85</option><option>0.8</option></select></label>
-      <label class="ol-only" title="Isolation is the similarity to the nearest other item; cluster is the similarity to the centre of the item's own topic cluster. Lower means more of an outlier">order by <select id="nb-by"><option value="iso">most isolated</option><option value="ctr">furthest from its cluster</option></select></label>
+      <label class="ol-only" title="Isolation is the similarity to the nearest other item of the same kind (issues and PRs together); cluster is the similarity to the centre of the item's own topic cluster. Lower means more of an outlier">order by <select id="nb-by"><option value="iso">most isolated</option><option value="ctr">furthest from its cluster</option></select></label>
       <label class="cl-only">sort <select id="nb-sort"><option value="size">size</option><option value="trend">heating up</option><option value="open">open items</option></select></label>
     </div>
     <div class="row"><span class="meta">repos</span><div class="chips" id="nb-projects" title="Pick any to limit to those repos; for duplicates, a pair is kept if either issue is in one of them"></div></div>
@@ -659,13 +659,15 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && !$
 const NB = { projects: [], picked: new Set((store.get("search.nb.projects") || "").split(",").filter(Boolean)), tab: null, offset: 0 };
 const NB_VIEWS = { duplicates: "dups", clusters: "cls", outliers: "ols" };
 const NB_STATES = { outliers: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]], duplicates: [["any", "any"], ["open", "one is open"], ["closed", "both closed"]], clusters: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]] };
-const NB_KINDS = { outliers: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]], duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]] };
+const DOC_KINDS = [["any", "everything"], ["issue,pr", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"], ["commit", "commits"], ["file", "code & docs"], ["release,tag", "releases & tags"], ["topic", "forum topics"]];
+const NB_KINDS = { outliers: DOC_KINDS, duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: DOC_KINDS };
+const ITEM_KIND = { issue: "issue", pr: "PR", commit: "commit", file: "file", release: "release", tag: "tag", topic: "forum" };
 const fill = (sel, opts, value) => { sel.replaceChildren(...opts.map(([v, t]) => Object.assign(el("option", "", t), { value: v }))); sel.value = opts.some(o => o[0] === value) ? value : opts[0][0]; };
 const ghLink = (cls, text, url) => { const a = el("a", cls, text); a.rel = "noopener noreferrer"; a.target = "_blank"; if (outbound(url)) a.href = url; return a; };
 function itemRow(it) {
   const row = el("div", "item");
-  row.append(el("span", "badge", it.project), el("span", "badge", it.kind === "pr" ? "PR" : "issue"));
-  row.append(it.state === "open" ? el("span", "badge open", "open") : el("span", "badge closed", it.state || "closed"));
+  row.append(el("span", "badge", it.project), el("span", "badge", ITEM_KIND[it.kind] || it.kind));
+  if (it.state) row.append(it.state === "open" ? el("span", "badge open", "open") : el("span", "badge closed", it.state));      // only issues and PRs have one
   row.append(ghLink("title", it.title, it.url));
   if (it.created) { const w = el("span", "when"); w.append(timeEl(it.created)); w.title = it.created.slice(0, 10); row.append(w); }
   return row;
@@ -800,7 +802,7 @@ async function loadOutliers(more) {
     const cards = d.items.map(it => {
       const box = el("div", "ol"), score = d.by === "ctr" ? it.ctr : it.iso;
       const row = itemRow(it), s = el("span", "sim", score.toFixed(3));
-      s.title = d.by === "ctr" ? "similarity to the centre of its cluster" : "similarity to the nearest other item";
+      s.title = d.by === "ctr" ? "similarity to the centre of its cluster" : "similarity to the nearest other item of the same kind";
       row.prepend(s);
       const where = el("div", "where", `${it.label ? `cluster: ${it.label} · ` : ""}nearest other item ${it.iso.toFixed(3)} · cluster centre ${it.ctr.toFixed(3)}`);
       box.append(row, where);

@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Nearest-neighbour pairs and topic clusters over the issues and PRs of a universe, from vectors already in the indexes (numpy only; no model).
+"""Nearest-neighbour pairs, topic clusters and outlier scores over the documents of a universe, from vectors already in the indexes (numpy only; no model).
 
   neighbours.py [universe] [--force]
 
-Writes <data>/neighbours/<universe>.db, which the gateway reads for the Duplicates and Clusters tabs:
-  items(idx, ..., cluster, iso, ctr)                                                  one per issue or PR (its first chunk's vector); iso = cosine to the nearest other item, ctr = cosine to its cluster centre (low = outlier)
-  pairs(a, b, sim)                                                                    a < b; each item's `neighbours` best matches >= `min_similarity`
-  clusters(k, label, samples)                                                         spherical k-means; label = distinctive title terms, samples = idx closest to the centre
+Items are documents, one per issue, PR, commit, release, tag, forum topic and file: the vector of its first chunk (a release's header, a topic's opening
+post), or for a file the normalised mean of its chunks. Comments, review comments and forum replies are part of their thread, not items.
+
+Writes <data>/neighbours/<universe>.db, which the gateway reads for the Duplicates, Clusters and Outliers tabs:
+  items(idx, ..., cluster, iso, ctr)                                                  iso = cosine to the nearest other item OF THE SAME GROUP (issues and PRs; commits;
+                                                                                      files; releases and tags; forum topics), ctr = cosine to its cluster centre (low = outlier).
+                                                                                      Per group, because across kinds a merged PR's nearest item is its own squash commit.
+  pairs(a, b, sim)                                                                    issues and PRs only (the Duplicates tab): a < b; each item's `neighbours` best matches >= `min_similarity`
+  clusters(k, label, samples)                                                         spherical k-means over every item, so a topic gathers issues, PRs, commits, code and
+                                                                                      forum threads; label = distinctive title terms, samples = idx closest to the centre
   meta(k, v)                                                                          model, stamp, counts
 
 Everything that depends on a filter (state, kind, dates, repo, the old-import adjacency rule) is applied by the reader, so one run serves every
@@ -17,8 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import config, runstate
 
-BLOCK = 2048
-VERSION = "2"
+BLOCK = 1024
+VERSION = "3"
+GROUP = {"issue": "issues", "pr": "issues", "commit": "commits", "file": "files", "release": "releases", "tag": "releases", "topic": "topics"}
+# the chunks that stand for a document: an issue's or PR's body, a commit, a release's header chunk, a tag, a forum topic's opening post (files are averaged)
+HEADS = ("(json_extract(c.meta, '$.kind') IN ('issue', 'pr', 'commit', 'tag', 'topic') AND c.id NOT LIKE '%~%' "
+         "OR json_extract(c.meta, '$.kind') = 'release' AND c.id LIKE '%:header')")
 STOP = set("the a an of in on to for and or with is not be by as at from when using use fix add remove update support error warning scala scalac compiler "
            "code should does doesn don it its this that are was can cannot no new bug issue pr via into after before than more only also".split())
 
@@ -28,24 +38,39 @@ def db_path(cfg, universe):
 
 
 def load_items(cfg, universe):
-    """[(item dict, float32 vector)] for every issue and PR of the universe that has a current vector."""
+    """[item dict], float32 unit vectors: every document of the universe that has current vectors (see the module doc)."""
     model = cfg.search["embedder"]["model"]
     items, vecs = [], []
     for pid in cfg.universe(universe).projects:
         path = cfg.project_db(pid)
         if not path.exists():
             continue
+        git = {s.id for s in cfg.projects[pid].sources if s.type == "git"}
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=60)
         try:
-            for cid, title, url, meta, v in con.execute("""SELECT c.id, c.title, c.url, c.meta, v.v FROM chunks c JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash AND v.model = ?
-                                                           WHERE json_extract(c.meta, '$.kind') IN ('issue', 'pr') AND c.id NOT LIKE '%~%'""", (model,)):
+            for cid, title, url, meta, v in con.execute(f"""SELECT c.id, c.title, c.url, c.meta, v.v FROM chunks c JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash AND v.model = ?
+                                                            WHERE {HEADS}""", (model,)):
                 m = json.loads(meta or "{}")
-                items.append({"project": pid, "id": cid, "kind": m["kind"], "state": m.get("state"), "created": m.get("created"), "number": m.get("number"),
-                              "author": m.get("author"), "title": title, "url": url})
-                vecs.append(np.frombuffer(v, dtype=np.float16))
+                items.append({"project": pid, "id": cid, "kind": m["kind"], "state": m.get("state"), "created": m.get("created") or m.get("published"), "number": m.get("number"),
+                              "author": m.get("author") or m.get("author_name"), "title": title, "url": url})
+                vecs.append(np.frombuffer(v, dtype=np.float16).astype(np.float32))
+            cur, acc = None, None                                # files: the mean of their chunks, in (source, doc) order
+            for sid, doc, cid, url, v in con.execute("""SELECT c.source, c.doc, c.id, c.url, v.v FROM chunks c JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash AND v.model = ?
+                                                        WHERE json_extract(c.meta, '$.kind') IS NULL ORDER BY c.source, c.doc, c.rowid""", (model,)):
+                if sid not in git:
+                    continue
+                if cur != (sid, doc):
+                    if acc is not None:
+                        vecs.append(acc / (np.linalg.norm(acc) or 1))
+                    cur, acc = (sid, doc), np.zeros(len(v) // 2, dtype=np.float32)
+                    items.append({"project": pid, "id": cid, "kind": "file", "state": None, "created": None, "number": None, "author": None,
+                                  "title": doc, "url": (url or "").split("#")[0]})
+                acc += np.frombuffer(v, dtype=np.float16)
+            if acc is not None:
+                vecs.append(acc / (np.linalg.norm(acc) or 1))
         finally:
             con.close()
-    return items, (np.vstack(vecs).astype(np.float32) if vecs else np.zeros((0, 1), dtype=np.float32))
+    return items, (np.vstack(vecs) if vecs else np.zeros((0, 1), dtype=np.float32))
 
 
 def stamp(cfg, universe):
@@ -57,8 +82,8 @@ def stamp(cfg, universe):
             continue
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=60)
         try:
-            n, newest, states = con.execute("""SELECT count(*), max(c.updated), sum(json_extract(c.meta, '$.state') = 'open') FROM chunks c JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash AND v.model = ?
-                                               WHERE json_extract(c.meta, '$.kind') IN ('issue', 'pr') AND c.id NOT LIKE '%~%'""", (model,)).fetchone()
+            n, newest, states = con.execute(f"""SELECT count(*), max(c.updated), sum(json_extract(c.meta, '$.state') = 'open') FROM chunks c JOIN vec v ON v.rowid = c.rowid AND v.hash = c.hash AND v.model = ?
+                                                WHERE {HEADS} OR json_extract(c.meta, '$.kind') IS NULL""", (model,)).fetchone()
         finally:
             con.close()
         out.append([pid, n, newest, states])
@@ -112,8 +137,24 @@ def kmeans(X, k, seed=0, iters=50):
     return s.argmax(1), s.max(1)
 
 
+def nearest(X):
+    """For every row, the cosine to its nearest other row."""
+    n = len(X)
+    out = np.zeros(n, dtype=np.float32)
+    if n < 2:
+        return out
+    for a in range(0, n, BLOCK):
+        s = X[a:a + BLOCK] @ X.T
+        s[np.arange(s.shape[0]), a + np.arange(s.shape[0])] = -1
+        out[a:a + BLOCK] = s.max(1)
+    return out
+
+
+_PREFIX = re.compile(r"^(?:\S+#\d+ |\S+ commit [0-9a-f]{7,40} |\S+ (?:release|tag) )")
+
+
 def tokens(title):
-    t = re.sub(r"^\S+#\d+ ", "", title).lower()
+    t = re.sub(r"\s+\((?:reply #\d+|comment|review comment).*\)$", "", _PREFIX.sub("", title)).lower()
     return {w for w in re.findall(r"[a-z][a-z0-9_.]{2,}", t) if w not in STOP}
 
 
@@ -143,15 +184,26 @@ def compute(cfg, universe, run=None, force=False):
             meta = dict(con.execute("SELECT k, v FROM meta"))
             con.close()
             if meta.get("stamp") == cur and meta.get("model") == model and meta.get("params") == json.dumps(nb, sort_keys=True) and meta.get("version") == VERSION:
-                log("neighbours: no new or changed issue and PR vectors")
+                log("neighbours: no new or changed document vectors")
                 return None
         except sqlite3.Error:
             pass
     t0 = time.time()
     items, X = load_items(cfg, universe)
     n = len(items)
-    log(f"neighbours: {n} issues and PRs")
-    pairs, nearest = neighbour_pairs(X, nb["neighbours"], nb["min_similarity"]) if n else ({}, np.zeros(0, dtype=np.float32))
+    log(f"neighbours: {n} documents ({', '.join(f'{k} {v}' for k, v in Counter(it['kind'] for it in items).most_common())})")
+    iso, pairs = np.zeros(n, dtype=np.float32), {}
+    for g in sorted(set(GROUP.values())):
+        rows = np.array([i for i, it in enumerate(items) if GROUP[it["kind"]] == g], dtype=int)
+        if not len(rows):
+            continue
+        t = time.time()
+        if g == "issues":                                        # duplicate candidates are issues and PRs only
+            p, iso[rows] = neighbour_pairs(X[rows], nb["neighbours"], nb["min_similarity"])
+            pairs = {(int(rows[a]), int(rows[b])): v for (a, b), v in p.items()}
+        else:
+            iso[rows] = nearest(X[rows])
+        log(f"neighbours: nearest within {g} ({len(rows)}) in {time.time() - t:.0f} s")
     k = max(1, min(nb["clusters"], n // 10)) if n else 0
     assign, best = kmeans(X, k) if n else (np.zeros(0, dtype=int), np.zeros(0))
     names = labels(items, assign, k) if n else []
@@ -166,7 +218,7 @@ def compute(cfg, universe, run=None, force=False):
                          CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);""")
     con.executemany("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     [(i, it["project"], it["id"], it["kind"], it["state"], it["created"], it["number"], it["author"], it["title"], it["url"], int(assign[i]),
-                      round(float(nearest[i]), 4), round(float(best[i]), 4)) for i, it in enumerate(items)])
+                      round(float(iso[i]), 4), round(float(best[i]), 4)) for i, it in enumerate(items)])
     con.executemany("INSERT INTO pairs VALUES(?,?,?)", [(a, b, round(s, 4)) for (a, b), s in pairs.items()])
     for c in range(k):
         members = np.nonzero(assign == c)[0]

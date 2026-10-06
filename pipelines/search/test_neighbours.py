@@ -9,7 +9,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import config, embed, neighbours, refresh
 from store import Store, Chunk
-from test_config import write, proj, uni, GH
+from test_config import write, proj, uni, GH, GIT
 
 
 class FakeEmbedder:
@@ -157,6 +157,68 @@ class NeighboursTests(unittest.TestCase):
         off = config.load(self.root)
         self.assertFalse(dict((p, on) for p, on, _ in refresh.plan(off, "u", [], {"only": set(), "skip": set()}, {}, 0))["neighbours"])
         self.assertTrue(dict((p, on) for p, on, _ in refresh.plan(off, "u", [], {"only": {"neighbours"}, "skip": set()}, {}, 0))["neighbours"])
+
+
+class AllKindsTests(unittest.TestCase):
+    """Every kind of document is an item: commits, releases (their header), tags, forum topics (the opening post), files (the mean of their chunks)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write(self.root, search={"data_dir": str(self.root / "data"), "embedder": {"model": "fake"}, "neighbours": {"clusters": 2, "min_similarity": 0.8}},
+              projects=[proj("p", {**GH, "id": "issues", "include": ["issues", "prs", "comments"]}, {"id": "commits", "type": "git_log", "label": "c", "repo": "o/r", "ref": "main"},
+                             {"id": "rel", "type": "github_releases", "label": "r", "repo": "o/r", "tag_messages": True}, {**GIT, "id": "code"}),
+                        proj("f", {"id": "forum", "type": "discourse", "label": "f", "site": "forum.example.org"})],
+              universes=[uni("u", "p", "f", default=True)])
+        self.cfg = config.load(self.root)
+        st = Store(self.cfg.project_db("p"))
+        st.apply("issues", [issue(1, "typer crash", TYPER), issue(2, "fix typer crash", TYPER, kind="pr", state="merged"),
+                            Chunk("issues:comment:9", "issue:1", "o/r#1 typer crash  (comment by a)", TYPER, "https://x/c", {"kind": "comment", "number": 1})])
+        st.apply("commits", [Chunk("commits:commit:" + "a" * 40, "commit:" + "a" * 40, "o/r commit aaaaaaaa fix typer crash", TYPER, "https://x/commit",
+                                   {"kind": "commit", "sha": "a" * 40, "author_name": "A Person", "created": "2024-03-02T00:00:00Z"}),
+                             Chunk("commits:commit:" + "b" * 40, "commit:" + "b" * 40, "o/r commit bbbbbbbb asm frames", ASM, "https://x/commit2",
+                                   {"kind": "commit", "sha": "b" * 40, "created": "2024-03-03T00:00:00Z"})])
+        st.apply("rel", [Chunk("rel:release:v1:header", "release:v1", "o/r release v1", "typer fixes " + TYPER, "https://x/r", {"kind": "release", "tag": "v1", "published": "2024-04-01"}),
+                         Chunk("rel:release:v1:notes", "release:v1", "o/r release v1  Notes", ASM, "https://x/r", {"kind": "release", "tag": "v1", "published": "2024-04-01"}),
+                         Chunk("rel:tag:v0", "tag:v0", "o/r tag v0", "first tag " + ASM, "https://x/t", {"kind": "tag", "tag": "v0", "published": "2023-01-01"})])
+        st.apply("code", [Chunk("code:src/Typer.scala:a", "src/Typer.scala", "src/Typer.scala  typer  A", TYPER, "https://x/Typer.scala#L1", {}),
+                          Chunk("code:src/Typer.scala:b", "src/Typer.scala", "src/Typer.scala  typer  B", "implicit scope resolution", "https://x/Typer.scala#L9", {})])
+        st.commit()
+        embed.fill(st, FakeEmbedder(), log=lambda *_: None)
+        st.db.execute("UPDATE vec SET model = 'fake'"); st.commit()
+        st = Store(self.cfg.project_db("f"))
+        st.apply("forum", [Chunk("forum:post:1", "topic:7", "Pre-SIP: frames", ASM, "https://forum.example.org/t/x/7", {"kind": "topic", "topic": 7, "author": "b", "created": "2024-05-01T00:00:00Z"}),
+                           Chunk("forum:post:2", "topic:7", "Pre-SIP: frames  (reply #2 by c)", TYPER, "https://forum.example.org/t/x/7/2", {"kind": "post", "topic": 7})])
+        st.commit()
+        embed.fill(st, FakeEmbedder(), log=lambda *_: None)
+        st.db.execute("UPDATE vec SET model = 'fake'"); st.commit()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def con(self):
+        import sqlite3
+        return sqlite3.connect(neighbours.db_path(self.cfg, "u"))
+
+    def test_one_item_per_document_of_every_kind(self):
+        s = neighbours.compute(self.cfg, "u")
+        rows = {r[0]: r[1:] for r in self.con().execute("SELECT id, kind, title, url, author, created FROM items")}
+        self.assertEqual(sorted(k for k, *_ in rows.values()), ["commit", "commit", "file", "issue", "pr", "release", "tag", "topic"])
+        self.assertEqual(s["items"], 8)
+        self.assertEqual(rows["code:src/Typer.scala:a"][1:3], ("src/Typer.scala", "https://x/Typer.scala"))          # a file: its path, the URL without a line
+        self.assertEqual(rows["commits:commit:" + "a" * 40][3], "A Person")                                         # a commit's git name when there is no handle
+        self.assertEqual(rows["rel:release:v1:header"][4], "2024-04-01")                                             # a release dates by when it was published
+        self.assertNotIn("forum:post:2", rows)                                                                      # replies and comments belong to their thread
+        self.assertNotIn("rel:release:v1:notes", rows)
+
+    def test_isolation_is_within_a_group_and_pairs_are_issues_and_prs(self):
+        neighbours.compute(self.cfg, "u")
+        con = self.con()
+        iso = dict(con.execute("SELECT kind, iso FROM items WHERE kind IN ('pr', 'topic')"))
+        self.assertGreater(iso["pr"], 0.9)                                    # its issue says the same: not isolated
+        self.assertEqual(iso["topic"], 0.0)                                   # the only forum topic: nothing of its group to be near
+        kinds = {k for a, b in con.execute("SELECT a, b FROM pairs").fetchall() for (k,) in con.execute("SELECT kind FROM items WHERE idx IN (?, ?)", (a, b))}
+        self.assertEqual(kinds, {"issue", "pr"})                              # the identical commit is no duplicate candidate
 
 
 if __name__ == "__main__":

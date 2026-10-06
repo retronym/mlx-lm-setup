@@ -52,5 +52,5 @@ Sampled by eye, every edge in a random 16 (8 each way) was a real reference: for
 
 - users.scala-lang.org as a second forum project (a config file).
 - Thread summaries for long topics: the `enrich` phase reads GitHub threads only; a 578-post design thread is where a summary pays most.
-- Forum topics in Duplicates and Clusters (the neighbours phase reads issues and PRs).
+- Forum topics in Duplicates (clusters and outliers have them; duplicate pairs are issues and PRs only).
 - Edits deep in long topics, if they turn out to matter: re-read topics whose listing `posts_count` differs from what is stored.

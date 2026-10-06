@@ -407,15 +407,15 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         return JSONResponse(search_duplicates(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
 
     async def search_clusters_view(request: Request):
-        """Topic clusters with counts under the filters (universe, state, kind issue | pr | any, since, until, projects). With cluster=<k>, that
-        cluster's items (limit, offset) instead."""
+        """Topic clusters of documents with counts under the filters (universe, state, kind: any or a comma-separated list of issue, pr, commit, file,
+        release, tag, topic; since, until, projects). With cluster=<k>, that cluster's items (limit, offset) instead."""
         f = neighbour_filters(request, {**common, "cluster": int, **paging})
         return JSONResponse(search_clusters(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
 
     async def search_outliers_view(request: Request):
-        """Issues and PRs far from everything else, most outlying first. Query: universe, by (iso: similarity to the nearest other item | ctr: similarity
-        to the centre of its cluster; default iso), state, kind (issue | pr | any), since, until, projects, templated (0 | 1: keep dependency bumps and
-        release procedures), limit, offset."""
+        """Documents far from everything else, most outlying first. Query: universe, by (iso: similarity to the nearest other item of its group | ctr:
+        similarity to the centre of its cluster; default iso), state, kind (any or a comma-separated list of issue, pr, commit, file, release, tag, topic),
+        since, until, projects, templated (0 | 1: keep dependency bumps and release procedures), limit, offset."""
         f = neighbour_filters(request, {**common, "by": str, "templated": flag, **paging})
         return JSONResponse(search_outliers(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
 
