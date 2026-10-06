@@ -207,11 +207,11 @@ for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (
 const KIND_NAMES = { file: "code & docs", issue: "issues", pr: "PRs", comment: "comments", review: "review comments", summary: "thread summaries", commit: "commits", release: "releases", tag: "tags",
                      topic: "forum topics", post: "forum replies" };
 const pickedKinds = new Set((store.get("search.kinds") || "").split(",").filter(Boolean));
-function renderKinds(universe) {
-  const have = new Set((universe?.projects || []).flatMap(p => p.sources.flatMap(s => s.kinds || [])));
+function renderKinds(universe) {                                                 // null: the universe is not known yet; the saved picks still filter, so they are shown
+  const have = universe ? new Set(universe.projects.flatMap(p => p.sources.flatMap(s => s.kinds || []))) : new Set(pickedKinds);
   const kinds = Object.keys(KIND_NAMES).filter(k => have.has(k));
   for (const k of [...pickedKinds]) if (!have.has(k)) pickedKinds.delete(k);
-  $("kindrow").hidden = kinds.length < 2;
+  $("kindrow").hidden = kinds.length < 2 && !pickedKinds.size;                  // never a filter the page does not show
   $("kinds").replaceChildren(...kinds.map(k => {
     const b = Object.assign(el("button", "", KIND_NAMES[k]), { type: "button" });
     b.setAttribute("aria-pressed", pickedKinds.has(k));
@@ -259,7 +259,14 @@ async function loadUniverse(id) {
   })));
   return d;
 }
-const loadedUniversePromise = loadUniverse().catch(() => {});
+renderKinds(null);
+async function loadUniverseRetrying() {                                          // the gateway may be restarting: keep trying, and say so, rather than run with half a page
+  for (let wait = 2000, failed = false; ; wait = Math.min(wait * 2, 30000)) {
+    try { const d = await loadUniverse(); if (failed) status(""); return d; }
+    catch (e) { failed = true; status(`index status not loaded (${e.message}); retrying in ${wait / 1000} s`, "err"); await new Promise(r => setTimeout(r, wait)); }
+  }
+}
+const loadedUniversePromise = loadUniverseRetrying();
 $("universe").addEventListener("change", () => loadUniverse($("universe").value).then(() => { if (NB.tab) nbSetup(NB.tab); }));
 
 // ---- who and when: "opened by @x 3 y ago · updated 2 d ago", "@y commented 2 y ago · on PR #12 opened by @x 3 y ago", "committed by @z 5 mo ago" ----

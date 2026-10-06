@@ -178,6 +178,9 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         body = html[html.index("// ---- duplicates and clusters"):html.index('$("t-search").onclick')]
         self.assertNotIn("innerHTML", body)                                            # titles come from GitHub: text nodes, and links only to allowed hosts
         self.assertIn("if (outbound(url)) a.href = url", body)
+        self.assertIn('$("kindrow").hidden = kinds.length < 2 && !pickedKinds.size;', html)    # saved kind picks always show: no invisible filter
+        self.assertIn("renderKinds(null);", html)
+        self.assertNotIn("loadUniverse().catch(() => {})", html)                        # a failed status load is retried and reported, not swallowed
         self.assertIn('u.protocol === "https:" && OUTBOUND.has(u.host)', html)         # GitHub and the configured forums, https only
         for line in re.findall(r".*\.href = \w+\.url.*", html):
             self.assertIn("if (outbound(", line)                                        # no hit URL bypasses the check
