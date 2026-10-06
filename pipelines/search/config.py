@@ -227,6 +227,10 @@ class Config:
     def universe_sources(self, uid=None):
         return [s for p in self.universe(uid).projects for s in self.projects[p].sources]
 
+    def forums(self):
+        """Discourse hosts whose topic URLs are references: `links.forums` and the site of every discourse source."""
+        return tuple(dict.fromkeys([*self.search["links"].get("forums", []), *(s.repo for p in self.projects.values() for s in p.sources if s.type == "discourse")]))
+
     def data_path(self, *parts):
         """Under the data directory: $SEARCH_DATA_DIR if set, else search.json's data_dir (relative to pipelines/search). Each checkout (main, a
         worktree) has its own by default, so experiments never touch the index a running service reads; promote_data.sh moves data across."""
@@ -278,6 +282,7 @@ def _search(d, errors):
                                                                   "clusters": (t_int(1, 1000), 80)}) if isinstance(d, dict) else {}
     s["links"] = v.obj(d.get("links", {}), "links", {"enabled": (t_bool, True), "max_refs_per_chunk": (t_int(1, 5000), 200),
                                                     "github": (lambda x: None, {}),
+                                                    "forums": (t_list(t_re(SITE_RE, "a host name")), ["contributors.scala-lang.org", "users.scala-lang.org"]),
                                                     "repo_aliases": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items()) else "expected {old owner/repo: current owner/repo}", {"lampepfl/dotty": "scala/scala3"}),
                                                     "bare_fallbacks": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and REPO_RE.match(k) and isinstance(r, list) and all(isinstance(y, str) and REPO_RE.match(y) for y in r) for k, r in x.items()) else "expected {repo: [repos whose issues a bare #N may mean when it is none of the repo's own]}", {"scala/scala": ["scala/bug"]}),
                                                     "legacy_prefixes": (lambda x: None if isinstance(x, dict) and all(isinstance(k, str) and re.match(r"^[A-Z]{2,5}$", k) and isinstance(r, str) and REPO_RE.match(r) for k, r in x.items())

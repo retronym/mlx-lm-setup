@@ -44,6 +44,14 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(keys("blob https://github.com/o/r/blob/" + "c" * 40 + "/x.scala"), [])
         self.assertEqual(keys("SI-38 = NameAndType SI-46:SI-47;// clone"), [])
 
+    def test_forum_topics(self):
+        fp = make_parser({}, ("forum.example.org",))
+        k = lambda t: [(r.kind, r.repo, r.key) for r in fp(t)]
+        self.assertEqual(k("see https://forum.example.org/t/pre-sip-named-tuples/6403/12, https://forum.example.org/t/7/3 and https://forum.example.org/t/6403"),
+                         [("topic", "forum.example.org", "6403"), ("topic", "forum.example.org", "7")])
+        self.assertEqual(k("https://forum.example.org/c/sip/13 https://other.org/t/x/5"), [])
+        self.assertEqual(keys("https://forum.example.org/t/x/5"), [])              # not a forum this parser knows
+
     def test_code_comments(self):
         src = "val x = 1 // scala/bug#1\nval u = \"http://x\"\n/* see\n * #2 */\n  * #3 (chunk started inside a block)\ndef f = 2"
         c = code_comments(src)
@@ -203,6 +211,59 @@ class LinksTests(unittest.TestCase):
         self.cfg.search["links"]["enabled"] = False
         self.assertFalse(dict((ph, on) for ph, on, _ in refresh.plan(self.cfg, "u", [], args, {}, 0))["links"])
         self.assertTrue(dict((ph, on) for ph, on, _ in refresh.plan(self.cfg, "u", [], {"only": {"links"}, "skip": set()}, {}, 0))["links"])
+
+
+def forum_post(tid, pid, n, text, urls=()):
+    return Chunk(f"forum:post:{pid}", f"topic:{tid}", f"Topic {tid}" + ("" if n == 1 else f"  (reply #{n} by b)"), text, f"https://forum.example.org/t/x/{tid}/{n}",
+                 {"kind": "topic" if n == 1 else "post", "topic": tid, "post": pid, "post_number": n, "author": "b", "created": f"2024-01-0{n}T00:00:00Z", "urls": list(urls)})
+
+
+class ForumLinksTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        write(self.root, search={"data_dir": str(self.root / "data"), "links": {"forums": ["users.example.org"]}},
+              projects=[proj("p", {**GH, "include": ["issues", "prs", "comments"]}),
+                        proj("f", {"id": "forum", "type": "discourse", "label": "f", "site": "forum.example.org"})], universes=[uni("u", "p", "f", default=True)])
+        self.cfg = config.load(self.root)
+        st = Store(self.cfg.project_db("p"))
+        st.apply("issues", [item(5, "Implement named tuples", "As discussed in https://forum.example.org/t/pre-sip-named-tuples/10/4", kind="pr")])
+        st.commit()
+        st = Store(self.cfg.project_db("f"))
+        st.apply("forum", [forum_post(10, 100, 1, "Proposal. Prototype: https://github.com/o/r/pull/5 and #77 (no repo)"),
+                           forum_post(10, 101, 2, "See also the [older thread](https://forum.example.org/t/old/11) and this one https://forum.example.org/t/x/10/1",
+                                      urls=["https://forum.example.org/t/old/11", "https://users.example.org/t/q/3", "https://github.com/o/r/commit/" + "a" * 40]),
+                           forum_post(11, 110, 1, "The older thread.")])
+        st.commit()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_topic_nodes_and_edges_both_ways(self):
+        links.compute(self.cfg, "u", force=True, run=None)
+        con = sqlite3.connect(links.db_path(self.cfg, "u"))
+        nodes = {r[0]: r[1:] for r in con.execute("SELECT id, kind, project, ref, title, indexed FROM nodes")}
+        self.assertEqual(nodes["topic:forum.example.org/10"], ("topic", "f", "10", "Topic 10", 1))
+        self.assertEqual((nodes["topic:users.example.org/3"][0], nodes["topic:users.example.org/3"][4]), ("topic", 0))     # a forum that is not indexed: dangling
+        edges = {(s, d, t): (c, h) for s, d, t, c, h in con.execute("SELECT src, dst, type, conf, how FROM edges")}
+        self.assertEqual(edges[("topic:forum.example.org/10", "o/r#5", "mentions")], (0.7, "topic"))      # the opening post links the PR
+        self.assertEqual(edges[("o/r#5", "topic:forum.example.org/10", "mentions")][1], "body")             # and the PR links the thread
+        self.assertEqual(edges[("topic:forum.example.org/10", "topic:forum.example.org/11", "mentions")], (0.5, "post"))
+        self.assertIn(("topic:forum.example.org/10", "topic:users.example.org/3", "mentions"), edges)
+        self.assertIn(("topic:forum.example.org/10", "commit:o/r@" + "a" * 40, "mentions"), edges)
+        self.assertFalse([e for e in edges if e[0] == e[1]])                                              # a reply linking its own topic is no edge
+        self.assertFalse([e for e in edges if e[1].endswith("#77")])                                      # a bare #N in a forum post names nothing
+
+    def test_linkdb_names_and_maps_topics(self):
+        import linkdb
+        links.compute(self.cfg, "u", force=True, run=None)
+        db = linkdb.LinkDB.open(self.cfg, "u")
+        self.assertEqual([n["id"] for n in db.resolve("https://forum.example.org/t/pre-sip-named-tuples/10/7")], ["topic:forum.example.org/10"])
+        self.assertEqual([n["id"] for n in db.names_in_text("what came of https://forum.example.org/t/10 ?")], ["topic:forum.example.org/10"])
+        self.assertEqual(linkdb.node_id("forum.example.org", "post", {"topic": 10}, "topic:10"), "topic:forum.example.org/10")
+        self.assertEqual(linkdb.doc_names("topic", "10"), ["topic:10"])
+        rel = {(r["rel"], r["node"]["id"]) for r in db.neighbours("o/r#5")}
+        self.assertIn(("mentioned_by", "topic:forum.example.org/10"), rel)
 
 
 if __name__ == "__main__":

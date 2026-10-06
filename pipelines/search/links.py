@@ -15,6 +15,9 @@ the item is backfilled. Edges are directed from the document whose text says it:
   shipped_in issue/PR/commit -> release   the release note (or tag message) names it, or the release's tag is the first, by date, to contain the commit (a PR through its merge commit)
   touches    commit -> file          the paths of a commit message chunk, only to files that are indexed (conf falls with the number of files)
   defines    file -> issue/PR/commit a reference in a comment of the source file
+Forum topics (`topic:<host>/<id>`, from a discourse source: the opening post and its replies are one node) mention what their posts link to (GitHub items
+and commits by URL, other topics), and are mentioned by anything whose text links to them (a PR that cites the Pre-SIP thread). A bare `#N` in a forum post
+names no repo: it is not a reference.
 `conf` is the evidence's strength times how sure the target is (a bare `#N` that is no item of the document's own repo but one of its `bare_fallbacks` trackers, as in
 scala/scala commits that mean Trac tickets, is a guess). `how` says where the words were found and `snip` quotes them."""
 import bisect, json, os, random, re, sqlite3, subprocess, sys, time
@@ -22,9 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, repos, runstate
 from refs import make_parser, code_comments
 
-VERSION = "2"
+VERSION = "3"
 TYPES = ("closes", "merged_as", "mentions", "shipped_in", "touches", "defines")
-BASE = {"github": 1.0, "git": 0.95, "title": 0.8, "body": 0.7, "commit msg": 0.7, "comment": 0.5, "review": 0.5, "closing": 0.85, "code comment": 0.9, "release note": 0.9, "tag message": 0.9}
+BASE = {"github": 1.0, "git": 0.95, "title": 0.8, "body": 0.7, "commit msg": 0.7, "comment": 0.5, "review": 0.5, "closing": 0.85, "code comment": 0.9, "release note": 0.9, "tag message": 0.9, "topic": 0.7, "post": 0.5}
 _FILES = re.compile(r"\s+and \d+ more$")
 _PREFIX = re.compile(r"^\S+#\d+ ")
 
@@ -57,7 +60,7 @@ class Builder:
     def __init__(self, cfg, universe, db, log):
         self.cfg, self.universe, self.db, self.log = cfg, universe, db, log
         lk = cfg.search["links"]
-        self.parse = make_parser(lk["legacy_prefixes"])
+        self.parse = make_parser(lk["legacy_prefixes"], cfg.forums())
         self.max_refs = lk["max_refs_per_chunk"]
         self.alias, self.fallbacks = lk["repo_aliases"], lk["bare_fallbacks"]
         self.items = set()                  # indexed `owner/repo#N`
@@ -95,6 +98,8 @@ class Builder:
                     elif kind == "commit":
                         commits.append(m["sha"]); self.commit_repo[m["sha"]] = src.repo
                         self.node(f"commit:{src.repo}@{m['sha']}", "commit", pid, src.repo, m["sha"], title, None, m.get("created"), url, chunk=cid)
+                    elif kind == "topic" and "~" not in cid:
+                        self.node(f"topic:{src.repo}/{m['topic']}", "topic", pid, src.repo, str(m["topic"]), title, None, m.get("created"), url, chunk=cid)
                     elif kind in ("release", "tag"):
                         if m.get("tag"):
                             self.node(f"release:{src.repo}@{m['tag']}", "release", pid, src.repo, m["tag"], title, None, m.get("published"), url, chunk=cid)
@@ -121,8 +126,12 @@ class Builder:
                 sha = hits[0]
             repo = self.commit_repo.get(sha) or (self.alias.get(ref.repo, ref.repo) if ref.via == "url" else None)
             return [(f"commit:{repo}@{sha}", 1.0)] if repo else []         # a bare sha that is no indexed commit could be of any repo: dropped
+        if ref.kind == "topic":
+            return [(f"topic:{ref.repo}/{ref.key}", 1.0)]
         if ref.repo:
             return [(f"{self.alias.get(ref.repo, ref.repo)}#{ref.key}", 1.0)]
+        if ctx_repo is None:
+            return []                                                      # a bare #N in a forum post: no repo to read it against
         own = f"{ctx_repo}#{ref.key}"
         if own in self.items:
             return [(own, 1.0)]
@@ -143,6 +152,9 @@ class Builder:
         if nid.startswith("commit:"):
             repo, sha = nid[7:].split("@", 1)
             self.node(nid, "commit", None, repo, sha, indexed=0)
+        elif nid.startswith("topic:"):
+            host, tid = nid[6:].split("/", 1)
+            self.node(nid, "topic", None, host, tid, url=f"https://{host}/t/{tid}", indexed=0)
         else:
             repo, n = nid.split("#", 1)
             self.node(nid, "item", None, repo, n, indexed=0)
@@ -195,6 +207,8 @@ class Builder:
                         if m.get("tag"):
                             node = f"release:{repo}@{m['tag']}"
                             self.refs_of(text, node, repo, "release note" if kind == "release" else "tag message", "shipped_in", False, flip=True)
+                    elif kind in ("topic", "post"):
+                        self.refs_of(text + "\n" + "\n".join(m.get("urls") or []), f"topic:{repo}/{m['topic']}", None, kind, "mentions", False)
                     elif kind == "file" and src.type == "git":
                         self.refs_of(code_comments(text), f"file:{repo}:{doc}", repo, "code comment", "defines", False)
                     n += 1

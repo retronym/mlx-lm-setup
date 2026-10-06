@@ -318,6 +318,10 @@ def _who_and_when(db, sid, title, m):
                        (f"{sid}:issue:{m['number']}",)).fetchone()
         if r:
             thread = {"number": m["number"], "kind": r[2], "author": r[0], "created": r[1]}
+    if kind == "post" and m.get("topic") is not None:                   # a forum reply: the topic it is in, and who opened it
+        r = db.execute("SELECT json_extract(meta, '$.author'), json_extract(meta, '$.created') FROM chunks WHERE source = ? AND doc = ? AND json_extract(meta, '$.kind') = 'topic' LIMIT 1",
+                       (sid, f"topic:{m['topic']}")).fetchone()
+        thread = {"number": m["topic"], "kind": "topic", "author": r[0] if r else None, "created": r[1] if r else None}
     return {"kind": kind, "author": author, "author_name": name, "created": created, "updated": updated, "thread": thread}
 
 
