@@ -1,6 +1,7 @@
 """Logic shared by the HTTP routes and the MCP tools: error mapping, model resolution, lease-and-POST."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -349,6 +350,38 @@ def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw
         return {"backend": spec.name, **searchget.get(cfg, refs, repos=searchinfo._module(spec.options["index_dir"], "repos"), **kw)}
     except ValueError as e:
         raise ApiError(400, "invalid_arguments", str(e)) from None
+
+
+async def run_ask(catalog: Catalog, question: str, model: str | None = None, universe: str | None = None, k: int = 5, rounds: int = 2,
+                  trace: bool = True) -> dict:
+    """The agentic query layer (pipelines/search/ask.py, ASK.md): plan the question, search along several routes (with the plan's filters, as asked, with no
+    filters, and issues -> the PRs that close them), rank candidates with the decision model and let the LLM pick the answer among the best ten.
+    The controller runs in a worker thread and calls this gateway back over HTTP for search, documents, links and models (GATEWAY_URL, when set, is
+    where the models are: a draft gateway serves only search). Takes 10-30 s."""
+    import asyncio
+    from . import searchinfo
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        raise ApiError(503, "search_unavailable", "no search index configured")
+    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 1000:
+        raise ApiError(400, "invalid_arguments", "`question` must be a string of 3..1000 characters")
+    if not (isinstance(k, int) and 1 <= k <= 20) or not (isinstance(rounds, int) and 1 <= rounds <= 3):
+        raise ApiError(400, "invalid_arguments", "`k` must be 1..20 and `rounds` 1..3")
+    try:
+        uni = cfg.universe(universe).id
+    except KeyError as e:
+        raise ApiError(404, "unknown_universe", e.args[0]) from None
+    mod = searchinfo._module(spec.options["index_dir"], "ask")
+    mod.SEARCH_URL = f"http://127.0.0.1:{catalog.gateway.port}"
+    if not os.environ.get("GATEWAY_URL"):
+        mod.gw.BASE = mod.SEARCH_URL
+    try:
+        r = await asyncio.to_thread(mod.ask, question.strip(), universe=uni, k=k, rounds=rounds)
+    except RuntimeError as e:                                           # a call back into the gateway failed
+        raise ApiError(502, "backend_error", str(e)[:400]) from None
+    if not trace:
+        r.pop("trace", None)
+    return {"backend": spec.name, "universe": uni, **r}
 
 
 def search_links(catalog: Catalog, ref: str, model: str | None = None, universe: str | None = None, types: list[str] | None = None, limit: int = 30, story: bool = False) -> dict:

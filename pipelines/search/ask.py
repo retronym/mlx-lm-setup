@@ -12,7 +12,7 @@ Returns {"plan", "answers": [{ref, node, title, url, kind, verdict, p, quote, re
 the rest by tier-1 probability and retrieval (`verdict` null: not shown to the LLM; no: shown, not picked); `trace` records every search with its filters, what each route added and every verdict.
 
 usage: ask.py "question" [--k 5] [--rounds 2] [--gate 10]       SEARCH_URL: the gateway that serves /api/search (default GATEWAY_URL)"""
-import json, os, sys, time
+import json, os, sys, threading, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate, plan as planner
 from llm import chat, gw
@@ -21,7 +21,7 @@ SEARCH_URL = os.environ.get("SEARCH_URL")
 RRF_K = 60
 
 
-T = {}                                                                   # seconds per phase of the current `ask`
+_tl = threading.local()                                                  # seconds per phase of this thread's `ask` (the gateway runs several at once)
 
 
 def _timed(phase, f, *a, **kw):
@@ -29,6 +29,7 @@ def _timed(phase, f, *a, **kw):
     try:
         return f(*a, **kw)
     finally:
+        T = _tl.__dict__.setdefault("T", {})
         T[phase] = T.get(phase, 0) + time.time() - t
 
 
@@ -92,9 +93,18 @@ def reword(p, rejected):
         return []
 
 
+def line(a):
+    """One line a client can show as is: verdict, state, title, kind, how it was reached, link."""
+    say = {"yes": "confirmed", "no": "not picked", None: "unchecked"}[a.get("verdict")]
+    state = f"[{a['state']}] " if a.get("state") in ("open", "closed", "merged") else ""
+    return f"{say}: {state}{a['title']} · {a['kind']}" + (f" · via {a['via']}" if a.get("via") else "") + f" · {a.get('url') or a['ref']}"
+
+
 def ask(question, universe="scala-zinc", k=5, rounds=2, gate_budget=10, model="qwen3-coder", log=lambda *_: None):
     t0, trace = time.time(), []
-    T.clear()
+    _tl.T = {}
+    gate.trim()
+    gate.SEARCH_URL = SEARCH_URL
     p = _timed("plan", planner.plan, question, model=model)
     log(f"plan: {json.dumps(p)}")
     cands, shown, picked = {}, set(), None
@@ -128,7 +138,9 @@ def ask(question, universe="scala-zinc", k=5, rounds=2, gate_budget=10, model="q
     for c in answers[:k]:
         v = "yes" if c["ref"] in confirmed else "no" if c["ref"] in shown else None
         out.append({**c, "verdict": v, **({"quote": picked["quote"], "reason": picked["reason"]} if picked and c["ref"] == picked["best"] else {})})
-    return {"plan": p, "answers": out, "trace": trace, "seconds": round(time.time() - t0, 1), "timing": {x: round(v, 1) for x, v in T.items()},
+    for a in out:
+        a["line"] = line(a)
+    return {"plan": p, "answers": out, "trace": trace, "seconds": round(time.time() - t0, 1), "timing": {x: round(v, 1) for x, v in _tl.T.items()},
             "candidates": len(cands), "shown": len(shown)}
 
 

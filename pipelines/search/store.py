@@ -28,9 +28,9 @@ DATE_SQL = {"created": "COALESCE(json_extract(c.meta, '$.created'), json_extract
 _DAY = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
 
 
-def check_where(where):
+def check_where(where, me=()):
     """`where` normalised, or ValueError: {"since", "until"} (`YYYY[-MM[-DD]]`, both ends inclusive at their own precision: until 2024 is the end of 2024),
-    "date" (`created`, the default, or `updated`), "authors" ([GitHub login or git author name], any of them, case-insensitive). None when nothing is set."""
+    "date" (`created`, the default, or `updated`), "authors" ([GitHub login or git author name], any of them, case-insensitive; "me" is `me`, search.json's `me`). None when nothing is set."""
     if not where:
         return None
     unknown = set(where) - {"since", "until", "date", "authors"}
@@ -47,7 +47,7 @@ def check_where(where):
         a = [a] if isinstance(a, str) else a
         if not isinstance(a, list) or not all(isinstance(x, str) and x.strip() for x in a):
             raise ValueError("authors must be a list of names")
-        out["authors"] = [x.strip().lstrip("@").lower() for x in a]
+        out["authors"] = list(dict.fromkeys(y.lower() for x in a for y in (me if x.strip().lower() == "me" and me else [x.strip().lstrip("@")])))
     return out if set(out) - {"date"} else None
 
 

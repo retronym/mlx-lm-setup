@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_ask, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -339,6 +339,16 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
             raise ApiError(400, "invalid_arguments", "`refs` must be a list of strings")
         return JSONResponse(search_get(catalog, **body))
 
+    async def search_ask_route(request: Request):
+        """{"question" (3..1000 characters), "universe"?, "k"? (1..20, default 5), "rounds"? (1..3, default 2), "trace"? (default true)} -> {plan, answers: [{ref, node, title, url,
+        kind, state, verdict (yes: the LLM picked it; no: shown, not picked; null: not shown), quote?, reason?, via?, p, routes, line}], trace, seconds, timing}.
+        The agentic query layer (ASK.md): plans, searches several routes, follows issues to the PRs that close them, and lets the LLM pick. 10-30 s."""
+        body = await read_json(request)
+        known = {"question", "universe", "k", "rounds", "trace", "model"}
+        if set(body) - known:
+            raise ApiError(400, "invalid_arguments", f"unknown keys {sorted(set(body) - known)}")
+        return JSONResponse(await run_ask(catalog, **body))
+
     async def search_links_route(request: Request):
         """{"ref" (a hit `ref`, `scala/bug#123`, `#123`, `SI-123`, a commit sha), "types"? [relation], "limit"? (1..200, default 30), "story"? (time-ordered documents around it), "universe"?}
         -> {found, node, counts, links: [{rel, id, kind, title, state, created, url, get_ref, conf, how, snip}]} or {story: [...]}. Reads a file; starts nothing."""
@@ -576,6 +586,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/search/status", handler(search_status), methods=["GET"]),
         Route("/api/search/get", handler(search_get_route), methods=["POST"]),
         Route("/api/search/links", handler(search_links_route), methods=["POST"]),
+        Route("/api/search/ask", handler(search_ask_route), methods=["POST"]),
         Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
         Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/search/outliers", handler(search_outliers_view), methods=["GET"]),

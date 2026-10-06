@@ -54,6 +54,9 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(problems, [])
         self.assertEqual((p["since"], p["until"], p["authors"]), ("2021", "2021", ["retronym"]))              # an author the question does not name is dropped
         self.assertIn("dropped authors", p["notes"][0])
+        p, _ = ok({"criterion": "the pull requests the asker wrote", "kinds": ["pr"], "queries": ["x"], "authors": ["me"]}, "my PRs about erasure")
+        self.assertEqual(p["authors"], ["me"])                                                                   # kept when the question says my / I; search expands it
+        self.assertNotIn("authors", ok({"criterion": "the pull requests about erasure", "kinds": ["pr"], "queries": ["x"], "authors": ["me"]}, "PRs about erasure")[0])
         p, _ = ok({"criterion": "issues reported in the last months", "kinds": [], "queries": ["x"], "since": "recent"}, "issues reported recently")
         self.assertEqual(p["since"], "2026-04-09")                                                             # "recently": a stated default, resolved by code
         self.assertIn("180 days", p["notes"][0])

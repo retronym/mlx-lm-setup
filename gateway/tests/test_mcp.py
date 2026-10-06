@@ -70,7 +70,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
     async def test_tools_are_listed_with_descriptions_and_instructions(self):
         async with self.client() as s:
             tools = {t.name: t for t in (await s.list_tools()).tools}
-            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "generate_image", "transcribe", "narrate", "voices", "look", "translate", "search", "get", "links", "search_universes", "start_backend", "stop_backend", "set_backend_policy"})
+            self.assertEqual(set(tools), {"backends_status", "chat", "iterate", "decide", "entail", "speak", "generate_image", "transcribe", "narrate", "voices", "look", "translate", "search", "ask", "get", "links", "search_universes", "start_backend", "stop_backend", "set_backend_policy"})
             self.assertTrue(all(t.description for t in tools.values()))
             self.assertIn("token", tools["start_backend"].description)
             init = await s.initialize()

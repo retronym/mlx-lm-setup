@@ -202,6 +202,35 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         r = await self.http.post("/api/search", json={"query": "q", "model": "llm"})
         self.assertEqual(r.status_code, 400)                                          # llm is not a search backend
 
+    async def test_search_ask_route_validates_and_runs_the_controller_in_a_thread(self):
+        r = await self.http.post("/api/search/ask", json={"question": "q?", "bogus": 1})
+        self.assertEqual((r.status_code, r.json()["error"]["type"]), (400, "invalid_arguments"))
+        r = await self.http.post("/api/search/ask", json={"question": "which PR fixed it?"})
+        self.assertEqual(r.status_code, 503)                                            # the test backend has no index
+        import threading, types
+        from unittest import mock
+        from gateway import core, searchinfo
+        seen = {}
+        def fake_ask(question, universe, k, rounds):
+            seen.update(question=question, universe=universe, k=k, rounds=rounds, thread=threading.current_thread() is not threading.main_thread())
+            return {"plan": {}, "answers": [{"ref": "p/x", "line": "confirmed: x"}], "trace": [{"round": 1}], "seconds": 1.0}
+        mod = types.SimpleNamespace(ask=fake_ask, gw=types.SimpleNamespace(BASE="unset"), SEARCH_URL=None)
+        cfg = types.SimpleNamespace(universe=lambda u: (_ for _ in ()).throw(KeyError(f"no universe {u}")) if u == "nope" else types.SimpleNamespace(id=u or "default-u"))
+        spec = types.SimpleNamespace(name="find", options={"index_dir": "/x"})
+        with mock.patch.object(core, "_search_config", return_value=(spec, cfg)), mock.patch.object(searchinfo, "_module", return_value=mod):
+            r = await self.http.post("/api/search/ask", json={"question": "  which PR fixed it? ", "k": 3, "trace": False})
+            d = r.json()
+            self.assertEqual((r.status_code, d["universe"], d["answers"][0]["ref"], "trace" in d), (200, "default-u", "p/x", False))
+            self.assertEqual(seen, {"question": "which PR fixed it?", "universe": "default-u", "k": 3, "rounds": 2, "thread": True})
+            self.assertEqual(mod.SEARCH_URL, f"http://127.0.0.1:{self.port}")             # the controller calls this gateway back
+            for bad in ({"question": "x"}, {"question": "which?", "k": 50}, {"question": "which?", "rounds": 0}):
+                self.assertEqual((await self.http.post("/api/search/ask", json=bad)).status_code, 400, bad)
+            r = await self.http.post("/api/search/ask", json={"question": "which?", "universe": "nope"})
+            self.assertEqual(r.status_code, 404)
+            mod.ask = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("POST /api/decide: 503 no room"))
+            r = await self.http.post("/api/search/ask", json={"question": "which?"})
+            self.assertEqual((r.status_code, r.json()["error"]["type"]), (502, "backend_error"))
+
     async def test_search_get_route_validates_and_reports_missing_index(self):
         r = await self.http.post("/api/search/get", json={"refs": ["p/issues:issue:1"]})
         self.assertEqual((r.status_code, r.json()["results"][0]["found"]), (200, False))        # the test backend has no index

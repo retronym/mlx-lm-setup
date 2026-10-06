@@ -392,7 +392,7 @@ if __name__ == "__main__":
             i = a.index(name); vals.append(a[i + 1]); del a[i:i + 2]
         return vals if many else (vals[-1] if vals else default)
     k, uni = int(opt("-k", 8)), opt("--universe")
-    where = check_where({"since": opt("--since"), "until": opt("--until"), "date": opt("--date"), "authors": opt("--author", many=True)})
+    where = check_where({"since": opt("--since"), "until": opt("--until"), "date": opt("--date"), "authors": opt("--author", many=True)}, cfg.search["me"])
     projects, sources, kinds = opt("--project", many=True), opt("--source", many=True), opt("--kind", many=True)
     mode = "bm25" if "--bm25" in a else "vec" if "--vec" in a else "hybrid"
     q = " ".join(x for x in a if not x.startswith("--"))

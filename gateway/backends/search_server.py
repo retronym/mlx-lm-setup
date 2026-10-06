@@ -87,7 +87,7 @@ def _search_in(index, r, q, k, mode, c):
         lf, linfo = search.link_filter(index, r.get("linked_to"), _strs(r.get("link_type"), "link_type"), _strs(r.get("has_link"), "has_link"))
     except ValueError as e:
         raise ValueError(str(e))
-    where = check_where({key: r.get(key) for key in ("since", "until", "date", "authors")})
+    where = check_where({key: r.get(key) for key in ("since", "until", "date", "authors")}, c.search["me"])
     t = time.time()
     out = search.hits(index, q, k=k, projects=projects, sources=sources, mode=mode, open_only=bool(r.get("open_only")), kinds=kinds, embedder=emb,
                       reranker=rr if use_rr else None, explain=bool(r.get("explain")), text_chars=text_chars, link_filter=lf,

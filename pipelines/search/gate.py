@@ -9,26 +9,27 @@ the issues it closes (a PR's own text rarely describes the symptom its issue rep
      asked for" is a judgement about relevance, not a claim the text entails; NLI is for checking generated prose, and the gate generates none.)
 
 Verdicts are cached on (criterion, view hash) for the life of the process. Everything goes through the gateway (gateway_client), so nothing here loads a model."""
-import hashlib, json, re
+import hashlib, json, os, re
 
 from llm import chat, gw
 
 VIEW_CHARS, ISSUE_CHARS = 1800, 700
+SEARCH_URL = os.environ.get("SEARCH_URL")    # the gateway with the index (documents, links); models come from gateway_client's own BASE
 TIER1_BAND = (0.2, 0.9)          # below: no, above: yes, between: ask the LLM
 _cache = {}
 
 
 def view(ref):
     """The text the gate judges for a hit `ref` (`project/chunk id`): the document head, plus what a PR closes. None if the ref is gone."""
-    d = gw.post("/api/search/get", {"refs": [ref], "max_chars": VIEW_CHARS})["results"][0]
+    d = gw.post("/api/search/get", {"refs": [ref], "max_chars": VIEW_CHARS}, base=SEARCH_URL)["results"][0]
     if not d.get("found"):
         return None
     head = f"{d['kind']} {d['title']}\nstate: {d.get('state') or '-'} · author: {d.get('author') or '-'} · created: {(d.get('created') or '')[:10]}\n\n{d['text']}"
     if d["kind"] == "pr":
-        ln = gw.post("/api/search/links", {"ref": ref, "types": ["closes"], "limit": 3})
+        ln = gw.post("/api/search/links", {"ref": ref, "types": ["closes"], "limit": 3}, base=SEARCH_URL)
         for x in ln.get("links", []):
             if x.get("get_ref"):
-                i = gw.post("/api/search/get", {"refs": [x["get_ref"]], "max_chars": ISSUE_CHARS})["results"][0]
+                i = gw.post("/api/search/get", {"refs": [x["get_ref"]], "max_chars": ISSUE_CHARS}, base=SEARCH_URL)["results"][0]
                 head += f"\n\n--- closes {x['id']}: {x.get('title', '')}\n{i.get('text', '') if i.get('found') else ''}"
             else:
                 head += f"\n\n--- closes {x['id']}: {x.get('title', '')}"
@@ -72,6 +73,14 @@ def tier2(criterion, v, model):
 
 
 _views, _p = {}, {}
+MAX_CACHED = 5000
+
+
+def trim():
+    """Bound the caches of a long-running process (the gateway): views and tier-1 scores are cheap to recompute, a stale view is worse."""
+    for c in (_views, _p, _cache):
+        if len(c) > MAX_CACHED:
+            c.clear()
 
 
 def prescreen(criterion, ref):

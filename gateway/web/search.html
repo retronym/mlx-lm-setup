@@ -44,6 +44,12 @@
   .url { color: var(--muted); font-size: 12px; word-break: break-all; }
   pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.45 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0; max-height: 9.5em; overflow: hidden; cursor: pointer; }
   pre.open { max-height: none; }
+  .askplan { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .askplan b { font-weight: 600; }
+  .badge.yes { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .badge.unk { color: var(--muted); border-color: var(--line); }
+  blockquote.q { margin: 0; padding: 2px 10px; border-left: 3px solid var(--ok); font-size: 13px; }
+  details.trace pre { max-height: none; cursor: auto; }
   #indexbox summary { cursor: pointer; width: fit-content; } #indexbox summary:hover { color: var(--ink); }
   #index { display: flex; flex-wrap: wrap; gap: 4px 16px; padding-top: 6px; }
   #index span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 6px; }
@@ -146,6 +152,7 @@
   <form class="row" id="form">
     <input id="q" type="search" placeholder="Ask about the Scala compiler, library or build tools…" autocomplete="off" autofocus>
     <button class="primary" id="go">Search</button>
+    <button type="button" id="askbtn" title="Find the one document that answers, e.g. 'Find the PR that fixed the crash when …': plans filters, follows issues to the PRs that fix them, and a local LLM picks among the candidates. 10-30 s">Ask</button>
     <span class="status" id="status"></span>
   </form>
   <div class="row">
@@ -156,7 +163,7 @@
     <label title="Only issues and PRs that are still open"><input type="checkbox" id="open"> open only</label>
     <label title="Uses the links between issues, PRs, commits and releases: documents that something closes, or that nothing closes (try it with kind issue and open only)">links <select id="haslink"><option value="">any</option><option value="closed_by">has a fix</option><option value="no_closed_by">no fix yet</option><option value="shipped_in">shipped in a release</option><option value="no_shipped_in">not shipped</option></select></label>
     <label title="Only documents created in this period. Files of a git tree have no date and drop out">when <select id="when"><option value="">any time</option><option value="1">past month</option><option value="6">past 6 months</option><option value="12">past year</option><option value="24">past 2 years</option><option value="60">past 5 years</option></select></label>
-    <label title="GitHub login, or for commits the git author name; several separated by commas">by <input id="authors" size="10" placeholder="anyone"></label>
+    <label title="GitHub login, or for commits the git author name; several separated by commas; 'me' is the owner in search.json">by <input id="authors" size="10" placeholder="anyone"></label>
     <label>top <select id="k"><option>10</option><option selected>20</option><option>30</option><option>50</option></select></label>
   </div>
   <div class="row" id="kindrow" hidden><span class="meta">only</span><div class="chips" id="kinds" title="Pick any to limit hits to those kinds, across all sources; none picked means everything"></div></div>
@@ -389,6 +396,63 @@ async function go() {
   }
 }
 $("form").onsubmit = e => { e.preventDefault(); go(); };
+$("askbtn").onclick = () => askGo();
+
+function renderAsk(d) {
+  const p = d.plan || {}, plan = el("div", "askplan");
+  const filt = [p.kinds?.length ? `kinds ${p.kinds.join(", ")}` : null, p.since || p.until ? `${p.since || "…"} to ${p.until || "now"}` : null,
+                p.authors?.length ? `by ${p.authors.join(", ")}` : null, p.open_only ? "open only" : null].filter(Boolean).join(" · ");
+  plan.append(el("div", "", ""), el("div", "meta", `queries: ${(p.queries || []).join(" | ")}`));
+  plan.firstChild.append(el("b", "", "Looking for: "), document.createTextNode(p.criterion || ""), el("span", "meta", filt ? `  (${filt})` : ""));
+  for (const n of p.notes || []) plan.append(el("div", "meta", `note: ${n}`));
+  const SAY = { yes: ["picked", "yes"], no: ["not picked", "closed"], null: ["unchecked", "unk"] };
+  const cards = (d.answers || []).map((a, i) => {
+    const box = el("div", "hit"), top = el("div", "top"), [say, cls] = SAY[a.verdict ?? null];
+    top.append(el("span", "n", i + 1), el("span", `badge ${cls}`, say), el("span", "badge closed", a.kind));
+    if (a.state) top.append(el("span", a.state === "open" ? "badge open" : "badge closed", a.state));
+    const t = el("a", "title", a.title); t.rel = "noopener noreferrer"; t.target = "_blank";
+    if (/^https:\/\/github\.com\//.test(a.url || "")) t.href = a.url;            // the index is data, never a javascript: URL
+    top.append(t);
+    box.append(top);
+    if (a.via) box.append(el("div", "meta", `reached through the issue it closes: ${a.via.replace(/^closes /, "")}`));
+    if (a.quote) box.append(el("blockquote", "q", a.quote));
+    if (a.reason) box.append(el("div", "meta", a.reason));
+    box.append(el("div", "url", a.url || a.ref));
+    return box;
+  });
+  const tr = el("details", "trace meta");
+  tr.append(el("summary", "", "trace: every search, what it found, and the choice"), el("pre", "", JSON.stringify(d.trace, null, 1)));
+  $("results").replaceChildren(plan, ...(cards.length ? cards : [el("div", "", "Nothing found.")]), tr);
+  const tm = d.timing || {};
+  $("meta").textContent = [`${d.candidates} candidates`, `${d.shown} shown to the LLM`, d.universe, `${d.seconds} s`,
+                           Object.entries(tm).map(([k, v]) => `${k} ${v} s`).join(", ")].filter(Boolean).join(" · ");
+}
+
+async function askGo() {
+  const q = $("q").value.trim();
+  if (!q) return;
+  if (aborter) aborter.abort();
+  aborter = new AbortController();
+  const body = { question: q };
+  if (!$("unilabel").hidden) body.universe = $("universe").value;
+  const t0 = performance.now();
+  clearInterval(timer);
+  const tick = () => status(`asking… ${((performance.now() - t0) / 1000).toFixed(0)} s (plans, searches, then a local LLM picks; 10-30 s)`, "wait");
+  tick(); timer = setInterval(tick, 500);
+  $("go").disabled = $("askbtn").disabled = true;
+  try {
+    const r = await fetch("/api/search/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: aborter.signal });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error?.message || `HTTP ${r.status}`);
+    renderAsk(d);
+    status("");
+  } catch (e) {
+    if (e.name !== "AbortError") status(e.message, "err");
+  } finally {
+    clearInterval(timer);
+    $("go").disabled = $("askbtn").disabled = false;
+  }
+}
 
 // ---- index status tab ------------------------------------------------------------------------------------------------
 const pct = f => `${(f * 100).toFixed(f > .995 && f < 1 ? 2 : 1)}%`;

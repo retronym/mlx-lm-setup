@@ -122,6 +122,8 @@ class SearchTests(unittest.TestCase):
         self.assertEqual({h["kind"] for h in search.hits(self.idx, "needle", k=20, embedder=FakeEmbedder(), where=check_where({"since": "2000"}))} & {"file"}, set())
         for bad in ({"since": "2024/01"}, {"date": "closed"}, {"authors": "x", "until": "24"}, {"author": ["x"]}, {"authors": [""]}):
             self.assertRaises(ValueError, check_where, bad)
+        self.assertEqual(check_where({"authors": ["Me", "retronym", "someone"]}, ["retronym", "Jason Zaugg"])["authors"], ["retronym", "jason zaugg", "someone"])   # "me" from search.json
+        self.assertEqual(check_where({"authors": ["me"]})["authors"], ["me"])                                    # no `me` configured: a name like any other
         self.assertIsNone(check_where({"since": None, "date": "updated", "authors": []}))                       # nothing to filter on
 
     def test_vector_scores_merge_across_projects(self):

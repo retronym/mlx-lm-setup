@@ -28,7 +28,8 @@ Answer with JSON only, these keys:
 - "since", "until": a date range only if the question gives one ("in 2021" -> since 2021, until 2021; "in early 2024" -> since 2024-01, until 2024-05;
   "around 2020" -> since 2019, until 2021; "after 2.13.0" is not a date: leave it out). Format YYYY, YYYY-MM or YYYY-MM-DD. Write "recent" as the value
   of "since" for "recently", "lately", "new".
-- "authors": only GitHub logins or names of people written in the question ("by <login>"), else omit.
+- "authors": only GitHub logins or names of people written in the question ("by <login>"); ["me"] when the asker means their own work ("my PRs",
+  "what did I change"); else omit.
 - "open_only": true only if the question asks for open / unresolved / not yet fixed items."""
 
 
@@ -65,7 +66,8 @@ def validate(j, today, notes, question=""):
         j.pop("since", None); j.pop("until", None)
     j = _resolve(j, today, notes)
     if isinstance(j.get("authors"), list):
-        named = [a for a in j["authors"] if isinstance(a, str) and a.strip().lstrip("@").lower() in question.lower()]
+        mine = re.search(r"\b(me|my|mine|I)\b", question)
+        named = [a for a in j["authors"] if isinstance(a, str) and (a.strip().lstrip("@").lower() in question.lower() or (a.strip().lower() == "me" and mine))]
         if len(named) < len(j["authors"]):
             notes.append(f"dropped authors the question does not name: {[a for a in j['authors'] if a not in named]}")
         j["authors"] = named

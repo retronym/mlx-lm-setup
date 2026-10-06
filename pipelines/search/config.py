@@ -243,6 +243,7 @@ RELATED_WEIGHTS = {"closes": 1.0, "closed_by": 1.0, "merged_as": 0.9, "merge_of"
                    "touches": 0.15, "touched_by": 0.15, "defines": 0.6, "defined_by": 0.6}
 SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
+    "me": (t_list(t_str), []),                       # who `authors: ["me"]` is: the asker's GitHub login and git author name
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
     "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}), "related": (lambda v: None, {}),
 }
