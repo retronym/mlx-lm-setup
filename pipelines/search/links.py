@@ -170,7 +170,10 @@ class Builder:
                     base = BASE[how]
                 if dst != src_node:
                     self.dangling(dst)
-                a, b = (dst, src_node) if flip else (src_node, dst)
+                fl = flip
+                if flip and ref.kind == "topic":                           # a release note linking its forum announcement mentions it; it does not ship it
+                    t, fl = "mentions", False
+                a, b = (dst, src_node) if fl else (src_node, dst)
                 self.edge(a, b, t, base * certainty, how, ref.snip)
 
     # ---- pass 2: the edges ------------------------------------------------------------------------------------------------------

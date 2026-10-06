@@ -432,7 +432,7 @@ Retrieval over the Scala compiler, docs and issue history is the first thing a l
 - Initial scalac sync (37k chunks) 18 s, scala/bug since 2020 75 s, incremental issue sync 1.5 s; embedding is the slow step (~17 min for everything, once, ~50 chunks/s on MPS).
 - Reranking helps "where is X implemented" queries clearly and can demote a good hit (`EtaExpansion.expand` left the top 5 for the eta-expansion query); six hand-picked queries judged by eye is not an evaluation.
 - Comments inherit their issue's state, so `open_only` filters comments too.
-- **Not done:** an evaluation set for fusion and rerank defaults; sbt/zinc, SIPs and Discourse sources; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
+- **Not done:** an evaluation set for fusion and rerank defaults; the SIPs repository; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
 
 ## Landed without a plan
 
@@ -452,5 +452,5 @@ Not started; each would get its own design pass first.
 - **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
 - **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
 - **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
-- **Search follow-ups:** an evaluation set, duplicate-issue detection on top of `search`, SIPs and Discourse sources, and decide-model reranking of results.
+- **Search follow-ups:** an evaluation set, duplicate-issue detection on top of `search`, the SIPs repository (the Contributors forum is indexed), and decide-model reranking of results.
 - **New kinds of model:** a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; image or music generation for the films.

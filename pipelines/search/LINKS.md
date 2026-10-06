@@ -84,7 +84,7 @@ This ties into the still-open evaluation step 7 in [PLAN.md](PLAN.md). Cheap gro
 3. **DONE** Direct: `links` on hits, `linked_to` / `link_type` / `has_link` filters, canonical ref tokens in FTS, MCP `links` tool and `POST /api/search/links`, README section.
 4. **DONE** Indirect: seed expansion, weights and hub guard in `search.json`, Related group (API, MCP, page) with `via`, `explain`.
 5. **DONE** Evaluation set from closing PR/issue pairs; decide the boost and depth defaults on numbers. Fold `similar` edges in.
-6. **Future** `blame` / `log -L` edges for a code hit, on demand; NLI-confirmed `mentions` -> `closes` upgrade for prose like "this supersedes #123"; Discourse and SIP links once those sources exist; a graph tab (cluster the link graph, find orphan issues with no PR and orphan PRs with no issue).
+6. **Future** `blame` / `log -L` edges for a code hit, on demand; NLI-confirmed `mentions` -> `closes` upgrade for prose like "this supersedes #123"; SIP links once that source exists (Discourse links are in: forum topics are nodes, see DISCOURSE.md); a graph tab (cluster the link graph, find orphan issues with no PR and orphan PRs with no issue).
 
 ## Status
 

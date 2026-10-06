@@ -223,11 +223,13 @@ class ForumLinksTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         write(self.root, search={"data_dir": str(self.root / "data"), "links": {"forums": ["users.example.org"]}},
-              projects=[proj("p", {**GH, "include": ["issues", "prs", "comments"]}),
+              projects=[proj("p", {**GH, "include": ["issues", "prs", "comments"]}, {"id": "releases", "type": "github_releases", "label": "r", "repo": "o/r"}),
                         proj("f", {"id": "forum", "type": "discourse", "label": "f", "site": "forum.example.org"})], universes=[uni("u", "p", "f", default=True)])
         self.cfg = config.load(self.root)
         st = Store(self.cfg.project_db("p"))
         st.apply("issues", [item(5, "Implement named tuples", "As discussed in https://forum.example.org/t/pre-sip-named-tuples/10/4", kind="pr")])
+        st.apply("releases", [Chunk("releases:release:v1:header", "release:v1", "o/r v1", "Named tuples (#5). Announcement: https://forum.example.org/t/x/11", "https://x",
+                                    {"kind": "release", "tag": "v1", "published": "2024-03-01T00:00:00Z"})])
         st.commit()
         st = Store(self.cfg.project_db("f"))
         st.apply("forum", [forum_post(10, 100, 1, "Proposal. Prototype: https://github.com/o/r/pull/5 and #77 (no repo)"),
@@ -252,7 +254,9 @@ class ForumLinksTests(unittest.TestCase):
         self.assertIn(("topic:forum.example.org/10", "topic:users.example.org/3", "mentions"), edges)
         self.assertIn(("topic:forum.example.org/10", "commit:o/r@" + "a" * 40, "mentions"), edges)
         self.assertFalse([e for e in edges if e[0] == e[1]])                                              # a reply linking its own topic is no edge
-        self.assertFalse([e for e in edges if e[1].endswith("#77")])                                      # a bare #N in a forum post names nothing
+        self.assertFalse([e for e in edges if e[1].endswith("#77")])
+        self.assertIn(("o/r#5", "release:o/r@v1", "shipped_in"), edges)
+        self.assertIn(("release:o/r@v1", "topic:forum.example.org/11", "mentions"), edges)                # the announcement thread is mentioned, not shipped                                      # a bare #N in a forum post names nothing
 
     def test_linkdb_names_and_maps_topics(self):
         import linkdb
