@@ -157,3 +157,7 @@ mise run live-check  # against the real models, needs a running gateway
 ## Next
 
 Ideas not yet started are parked under "Future work" in [PLAN.md](PLAN.md).
+
+## License
+
+Copyright 2026 Jason Zaugg. Licensed under the [Apache License, Version 2.0](LICENSE).
