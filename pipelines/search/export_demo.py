@@ -4,9 +4,12 @@
 It asks a running gateway for the dashboard facts over each range preset and for the model labels (kind, risk) of every open PR and new issue,
 then writes gateway/web/search.html with its two scripts inlined and a small shim in front of the page's own script: fetch() answers the dashboard
 endpoints from the embedded snapshot (everything else says it is not in the demo), and Date.now() is frozen at the snapshot time so "updated 3 d
-ago" stays true. Only the Dashboard tab is shown. The page code is the live page's, unchanged, so the demo cannot drift from it.
+ago" stays true. The Dashboard, Duplicates, Clusters, Outliers and Index status tabs are shown (Search needs a live gateway). The page code is the live page's, unchanged, so the demo cannot drift from it.
 
-    export_demo.py [--gateway http://127.0.0.1:8090] [--out FILE] [--no-judge]
+    export_demo.py [--gateway http://127.0.0.1:8090] [--out FILE] [--no-judge] [--pairs N] [--cluster-items N] [--outliers N]
+
+Duplicates, Clusters and Outliers are exported with the page's default filters (issue pairs at 0.9 or more, everything in the clusters), so their filters are mostly
+hidden. The pair list is cut to the best N, and each cluster keeps its samples plus its first N items; the N most isolated outliers, and the N furthest from their cluster, are kept; the page says so.
 """
 import argparse, json, re, sys, time, urllib.error, urllib.request
 from pathlib import Path
@@ -14,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "gateway" / "web"
 DAYS = [7, 30, 90, 365]                                                   # the page's range presets
+PAIRS, CLUSTER_ITEMS, OUTLIERS = 300, 30, 300                                          # defaults: how much of the duplicates and of each cluster to embed (the share tool takes 5 MiB)
 BATCH = 10                                                                # what the page asks per judge request
 
 
@@ -32,7 +36,23 @@ def day(ts, back):
     return time.strftime("%Y-%m-%d", time.gmtime(ts - back * 86400))
 
 
-def snapshot(base, judge):
+def neighbours(base, snap, pairs, items, outliers):
+    d = call(base, f"/api/search/duplicates?kind=issue&state=any&min_sim=0.9&adjacent=1&templated=0&limit={pairs}&offset=0")
+    snap["duplicates"] = d
+    print(f"  duplicates: {len(d['pairs'])} of {d['total']} pairs", flush=True)
+    snap["outliers"] = {by: call(base, f"/api/search/outliers?state=any&kind=any&by={by}&templated=0&limit={outliers}&offset=0") for by in ("iso", "ctr")}
+    print(f"  outliers: {outliers} of {snap['outliers']['iso']['total']:,} by each order", flush=True)
+    c = call(base, "/api/search/clusters?state=any&kind=any")
+    snap["clusters"], snap["cluster_items"] = c, {}
+    if c.get("available") and items:
+        t0, ks = time.time(), [x["k"] for x in c["clusters"]]
+        for i, k in enumerate(ks, 1):
+            snap["cluster_items"][k] = call(base, f"/api/search/clusters?state=any&kind=any&cluster={k}&limit={items}&offset=0")["items"]
+            if i % 20 == 0 or i == len(ks):
+                print(f"  cluster items {i} of {len(ks)} ({time.time() - t0:.0f} s)", flush=True)
+
+
+def snapshot(base, judge, pairs, items, outliers):
     now = time.time()
     snap = {"generated": int(now * 1000), "status": call(base, "/api/search/status"), "dashboards": {}, "judge": {}}
     for n in DAYS:
@@ -51,6 +71,7 @@ def snapshot(base, judge):
             snap["judge"].update(r["results"])
             done = min(i + BATCH, len(refs)); el = time.time() - t0
             print(f"  labelled {done} of {len(refs)} ({el:.0f} s, about {el / done * (len(refs) - done):.0f} s left)", flush=True)
+    neighbours(base, snap, pairs, items, outliers)
     return snap
 
 
@@ -76,15 +97,35 @@ window.fetch = async (url, opts = {}) => {
     for (const r of refs) { const v = DEMO.judge[`${r.repo}#${r.number}`]; if (v) results[`${r.repo}#${r.number}`] = v; }
     return json({ results, seconds: 0 });
   }
+  if (path === "/api/search/duplicates") {                                          // the exported pairs, filtered here by similarity, state and repo
+    const q = u.searchParams, min = +(q.get("min_sim") || 0), state = q.get("state") || "any", only = q.getAll("projects"), d = DEMO.duplicates;
+    const open = x => x.state === "open", keep = x => x.sim >= min && (state === "any" || (state === "open" ? open(x.a) || open(x.b) : !open(x.a) && !open(x.b)))
+      && (!only.length || only.includes(x.a.project) || only.includes(x.b.project));
+    const all = d.pairs.filter(keep), off = +(q.get("offset") || 0), lim = +(q.get("limit") || 50);
+    return json({ ...d, total: all.length, offset: off, pairs: all.slice(off, off + lim) });
+  }
+  if (path === "/api/search/outliers") {
+    const q = u.searchParams, d = DEMO.outliers[q.get("by") === "ctr" ? "ctr" : "iso"], state = q.get("state") || "any";
+    const all = d.items.filter(x => state === "any" || (state === "open") === (x.state === "open")), off = +(q.get("offset") || 0), lim = +(q.get("limit") || 50);
+    return json({ ...d, total: all.length, offset: off, items: all.slice(off, off + lim) });
+  }
+  if (path === "/api/search/clusters") {
+    const k = u.searchParams.get("cluster");
+    if (k == null) return json(DEMO.clusters);
+    const all = DEMO.cluster_items[k] || [], off = +(u.searchParams.get("offset") || 0), lim = +(u.searchParams.get("limit") || 50);
+    return json({ ...DEMO.clusters, cluster: +k, total: all.length, offset: off, items: all.slice(off, off + lim) });
+  }
   return json({ error: { message: "Not available in the static demo" } }, 404);
 };
-location.hash = "#dashboard";
+if (!["dashboard", "duplicates", "clusters", "outliers", "status"].includes(location.hash.slice(1))) location.hash = "#dashboard";
+document.addEventListener("DOMContentLoaded", () => { for (const o of [...document.querySelectorAll("#nb-sim option")]) if (+o.value < 0.9) o.remove(); });   // only pairs at 0.9 or more were exported
 </script>
 """
 
 CSS = """<style>
 /* demo: only the dashboard works without a gateway */
-#t-search, #t-duplicates, #t-clusters, #t-outliers, #t-status, header > a, header .logo, label:has(#dash-since), label:has(#dash-until) { display: none !important; }
+#t-search, header > a, header .logo, label:has(#dash-since), label:has(#dash-until),
+label:has(#nb-kind), label:has(#nb-since), label:has(#nb-until), .row:has(#nb-projects), .row:has(#nb-import), .row:has(#nb-bumps), .card.cls label:has(#nb-state) { display: none !important; }   /* filters the snapshot cannot recompute */
 .demo-banner { font-size: 13px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
 </style>
 """
@@ -99,7 +140,7 @@ def build(snap, out):
     when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(snap["generated"] / 1000))
     html = html[:first] + SHIM.replace("__SNAPSHOT__", data) + html[first:]
     html = html.replace("</head>", CSS + "</head>", 1)
-    banner = f'<div class="demo-banner">A static snapshot of the Dashboard tab, taken {when}. The live page also searches, asks, and shows duplicates and clusters, over local models.</div>'
+    banner = f'<div class="demo-banner">A static snapshot taken {when}: the Dashboard, Duplicates, Clusters, Outliers and Index status tabs. Duplicates show the best {len(snap["duplicates"]["pairs"])} of {snap["duplicates"]["total"]} pairs; a cluster opens to its first items; outliers are the top {len(snap["outliers"]["iso"]["items"])} of each order. The live page also searches and asks, over local models.</div>'
     html = html.replace("<main>", "<main>" + banner, 1)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)
@@ -110,12 +151,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--gateway", default="http://127.0.0.1:8090")
     ap.add_argument("--out", type=Path, default=Path(__file__).parent / "data" / "demo" / "search-dashboard.html")
+    ap.add_argument("--pairs", type=int, default=PAIRS, help="duplicate pairs to embed, best first")
+    ap.add_argument("--cluster-items", type=int, default=CLUSTER_ITEMS, help="items to embed per cluster beyond its samples (0: samples only)")
+    ap.add_argument("--outliers", type=int, default=OUTLIERS, help="outliers to embed for each order")
     ap.add_argument("--no-judge", action="store_true", help="skip the model labels (the decision model need not be running)")
     a = ap.parse_args()
     print(f"snapshot from {a.gateway}", flush=True)
-    snap = snapshot(a.gateway.rstrip("/"), not a.no_judge)
+    snap = snapshot(a.gateway.rstrip("/"), not a.no_judge, a.pairs, a.cluster_items, a.outliers)
     n = build(snap, a.out)
     print(f"wrote {a.out} ({n / 1024:.0f} KiB, {len(snap['judge'])} labelled items)")
+    if n > 5 * 1024 * 1024:
+        print("warning: over 5 MiB, which bin/share refuses; lower --pairs, --cluster-items or --outliers", file=sys.stderr)
 
 
 if __name__ == "__main__":
