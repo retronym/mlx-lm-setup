@@ -152,6 +152,34 @@ def project_facts(db, since, until, weekly, now=None):
             "releases": releases, "open_prs": out_open}
 
 
+def twins(cfg, uni, keys, min_sim=0.9):
+    """{"repo#number": [{ref, title, state, url, sim}]} up to two of the nearest items (issues and PRs, any state) at least `min_sim` similar, for the wanted
+    keys, from the neighbours database the refresh builds (nothing when it has not been built)."""
+    path = cfg.data_path("neighbours", f"{uni.id}.db")
+    if not keys or not path.exists():
+        return {}
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+    try:
+        keys = list(dict.fromkeys(keys))
+        mine = {}                                                          # idx -> ref, for the wanted items (an item's title starts with its ref)
+        for i in range(0, len(keys), 400):
+            part = keys[i:i + 400]
+            mine.update(con.execute(f"SELECT idx, substr(title, 1, instr(title, ' ') - 1) FROM items WHERE kind IN ('issue', 'pr') "
+                                    f"AND substr(title, 1, instr(title, ' ') - 1) IN ({','.join('?' * len(part))})", part).fetchall())
+        pairs = [(a, b, sim) for a, b, sim in con.execute("SELECT a, b, sim FROM pairs WHERE sim >= ? ORDER BY sim DESC", (min_sim,)) if a in mine or b in mine]
+        info = {idx: (title, state, url, kind) for idx, title, state, url, kind in con.execute(
+            f"SELECT idx, title, state, url, kind FROM items WHERE idx IN ({','.join('?' * len({x for p in pairs for x in p[:2]}))})", sorted({x for p in pairs for x in p[:2]}))} if pairs else {}
+        out = defaultdict(list)
+        for a, b, sim in pairs:
+            for me, other in ((a, b), (b, a)):
+                if me in mine and other in info and len(out[mine[me]]) < 2:
+                    title, state, url, kind = info[other]
+                    out[mine[me]].append({"ref": title.split(" ", 1)[0], "title": title.split(" ", 1)[1] if " " in title else "", "state": state, "url": url, "kind": kind, "sim": round(sim, 3)})
+        return dict(out)
+    finally:
+        con.close()
+
+
 def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None):
     """The dashboard's facts layer for `projects` (default: every project of the universe) over [since, until) (see `check_range`)."""
     since, until = check_range(since, until)
@@ -181,6 +209,11 @@ def facts(cfg, universe_id=None, projects=None, since=None, until=None, now=None
     step = 7 if weekly else 1
     first = start - dt.timedelta(days=start.weekday()) if weekly else start
     buckets = [(first + dt.timedelta(days=i)).isoformat() for i in range(0, (end - first).days, step)]
+    near = twins(cfg, uni, [f"{o['repo']}#{o['number']}" for o in opens] + [f"{n['repo']}#{n['number']}" for n in new])
+    for o in opens:
+        o["twins"] = near.get(f"{o['repo']}#{o['number']}", [])
+    for n in new:
+        n["twins"] = near.get(f"{n['repo']}#{n['number']}", [])
     fetched = [o["state"]["fetched"] for o in opens if o["state"]]
     return {"universe": uni.id, "projects": chosen, "since": since, "until": until, "bucket": "week" if weekly else "day", "totals": dict(tot), "by_project": per,
             "series": [{"date": b, **series.get(b, {})} for b in buckets], "releases": sorted(rel, key=lambda r: r["date"], reverse=True),

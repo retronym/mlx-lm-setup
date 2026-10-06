@@ -172,7 +172,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_search_page_has_duplicates_and_clusters_tabs_that_never_inject_html(self):
         html = (WEB / "search.html").read_text()
-        for needle in ('id="t-duplicates"', 'id="t-clusters"', 'id="t-outliers"', 'id="t-dashboard"', 'id="dash-since"', "/api/search/dashboard", "function renderDash(", 'id="nb-by"', 'id="nb-bumps"', "/api/search/duplicates", "/api/search/clusters", "/api/search/outliers", 'id="nb-since"', 'id="nb-until"', 'id="nb-state"', 'id="nb-kind"',
+        for needle in ('id="t-duplicates"', 'id="t-clusters"', 'id="t-outliers"', 'id="t-dashboard"', 'id="dash-since"', "/api/search/dashboard", "function renderDash(", "/api/search/dashboard/judge", "function judgeAll(", 'id="nb-by"', 'id="nb-bumps"', "/api/search/duplicates", "/api/search/clusters", "/api/search/outliers", 'id="nb-since"', 'id="nb-until"', 'id="nb-state"', 'id="nb-kind"',
                        'id="nb-import"', "function itemRow(", "function fromHash("):
             self.assertIn(needle, html)
         body = html[html.index("// ---- duplicates and clusters"):html.index('$("t-search").onclick')]

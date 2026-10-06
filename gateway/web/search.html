@@ -120,6 +120,7 @@
   .pr .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; } .pr .sub b { color: var(--ink); font-weight: 600; }
   .rd { font-size: 12px; font-weight: 600; color: var(--c); } .rd::before { content: "●"; margin-right: 5px; } .rd small { font-weight: 400; color: var(--muted); }
   .chip { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; } .chip.me { border-color: var(--accent); color: var(--accent); } .chip.rng { border-color: var(--ok); color: var(--ok); }
+  .chip.jd { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); } .chip.tw { text-decoration: none; color: var(--muted); } .chip.tw:hover { color: var(--accent); } .jdbox { display: inline-flex; gap: 4px; margin-left: 8px; }
   @media (max-width: 640px) { .pr { grid-template-columns: 48px minmax(0, 1fr); } .pr .flags { grid-column: 2; flex-direction: row; gap: 10px; text-align: left; } }
   [hidden] { display: none !important; }
   .logo { display: inline-flex; color: var(--ink); margin-right: 6px; vertical-align: middle; } .logo svg { display: block; }
@@ -857,7 +858,7 @@ $("olmore").onclick = () => loadOutliers(true);
 // ---- dashboard: what happened in the chosen repos over a range (at most a year), and every open PR to triage. Facts only here (SQL over the indexes,
 // well under a second); the GitHub state of open PRs was stored by the last sync, so it is as old as that, and said to be. ----
 const DASH = { picked: new Set((store.get("search.dash.projects") || "").split(",").filter(Boolean)), days: +(store.get("search.dash.days") || 30), lane: null, q: "",
-               me: store.get("search.dash.me") || "", data: null, seq: 0, ready: false };
+               me: store.get("search.dash.me") || "", data: null, seq: 0, ready: false, judge: new Map() };
 const DASH_DAYS = [[7, "7 days"], [30, "30 days"], [90, "90 days"], [365, "1 year"]];
 const READY = { "ready to merge": "--ok", "needs author": "--bad", "needs review": "--warn", "in review": "--accent", "draft": "--muted", "stale": "--muted" };
 const READY_TIP = { "ready to merge": "approved, CI green, no conflicts", "needs author": "conflicts, failing CI or changes requested", "needs review": "no reviews or comments yet",
@@ -892,7 +893,7 @@ function dashSetup() {
 function dashChips() { const custom = $("dash-since").value || $("dash-until").value; for (const b of $("dash-days").children) b.setAttribute("aria-pressed", !custom && +b.dataset.n === DASH.days); }
 async function loadDashboard() {
   const seq = ++DASH.seq;
-  $("dash-meta").textContent = "loading…";
+  $("dash-meta").dataset.judge = ""; $("dash-meta").dataset.facts = ""; $("dash-meta").textContent = "loading…";
   try {
     const d = await nbFetch("/api/search/dashboard", dashParams());
     if (seq !== DASH.seq) return;
@@ -943,12 +944,48 @@ function dashStrip(prs, onPick) {
   const box = el("div", "strip"); box.append(svg); return box;
 }
 const prKey = p => `${p.repo}#${p.number}`;
+const JUDGE_NAMES = { api: "API / bincompat", semantics: "semantics", backend: "backend", local: "low risk", "needs-info": "needs info", dependency: "dep bump" };
+function judgeChips(box, j) {                                                      // the labels the model is confident about; the rest is unsure and not shown
+  box.replaceChildren();
+  if (!j) return;
+  for (const [q, r] of Object.entries(j)) {
+    if (!r || typeof r !== "object" || !r.label) continue;
+    const c = el("span", "chip jd", JUDGE_NAMES[r.label] || r.label);
+    c.title = `${q}: ${r.top.map(([k, p]) => `${k} ${Math.round(p * 100)}%`).join(", ")}`;
+    box.append(c);
+  }
+}
+function twinChips(box, twins) {
+  for (const t of twins || []) { const a = ghLink("chip tw", `≈ ${t.ref.replace(/^.*\//, "")} ${t.sim.toFixed(2)} ${t.state}`, t.url); a.title = `similar ${t.kind}: ${t.title}`; box.append(a); }
+}
+function applyJudge(key) { for (const box of document.querySelectorAll("[data-judge]")) if (box.dataset.judge === key) judgeChips(box, DASH.judge.get(key)); }
+async function judgeAll(d, seq) {                                                  // the slow part, after the facts are on screen: label open PRs and new issues, a few per request
+  const want = [...d.open_prs.slice().sort((a, b) => (b.touched - a.touched) || b.updated.localeCompare(a.updated)), ...d.new_issues.slice(0, 15)].filter(x => !DASH.judge.has(prKey(x)));
+  const total = want.length; let done = 0;
+  const note = t => { if (seq === DASH.seq) { $("dash-meta").dataset.judge = t; setMeta(); } };
+  for (let i = 0; i < want.length && seq === DASH.seq; i += 10) {
+    const part = want.slice(i, i + 10);
+    note(`labelling ${done} of ${total}…`);
+    try {
+      const r = await fetch("/api/search/dashboard/judge", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refs: part.map(x => ({ project: x.project, repo: x.repo, number: +x.number })) }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error?.message || `HTTP ${r.status}`);
+      if (seq !== DASH.seq) return;
+      for (const x of part) { const v = j.results[prKey(x)]; if (v) { DASH.judge.set(prKey(x), v); applyJudge(prKey(x)); } }
+      done += part.length;
+    } catch (e) { note(`labelling stopped: ${e.message}`); return; }
+  }
+  if (seq === DASH.seq) { note(""); if (total) renderDash(false); }               // lanes for the kinds that turned up
+}
+function setMeta() { const m = $("dash-meta"); m.textContent = [m.dataset.facts, m.dataset.judge].filter(Boolean).join(" · "); }
 function prRow(p, multi) {
   const r = el("div", "pr"); r.id = "pr-" + prKey(p).replace(/\W/g, "-");
   const s = p.state, me = DASH.me;
   r.append(ghLink("num", `#${p.number}`, p.url));
   const mid = el("div"), rd = el("div", "rd"); rd.style.setProperty("--c", `var(${READY[p.readiness]})`); rd.title = READY_TIP[p.readiness];
   rd.append(p.readiness, " ", Object.assign(el("small", "", `· ${p.reason}`), {})); mid.append(ghLink("title", p.title, p.url), rd);
+  const jd = el("span", "jdbox"); jd.dataset.judge = prKey(p); judgeChips(jd, DASH.judge.get(prKey(p))); rd.append(jd);
   const sub = el("div", "sub"), by = el("span"); by.append(el("b", "", p.author || "?")); if (me && p.author === me) by.append(" ", el("span", "chip me", "me")); sub.append(by);
   if (multi) sub.append(el("span", "chip", p.repo));
   if (p.touched) sub.append(Object.assign(el("span", "chip rng", "active in range"), { title: "updated within the selected range" }));
@@ -959,6 +996,7 @@ function prRow(p, multi) {
   if (s?.reviews?.length) sub.append(el("span", "", "reviewed: " + s.reviews.map(x => `${x.who} ${{ APPROVED: "✓", CHANGES_REQUESTED: "✕" }[x.state] || "·"}`).join(", ")));
   if (p.comments) sub.append(el("span", "", `${p.comments} comment${p.comments > 1 ? "s" : ""}`));
   if (p.closes.length) sub.append(el("span", "", "closes " + p.closes.join(", ")));
+  twinChips(sub, p.twins);
   mid.append(sub); r.append(mid);
   const fl = el("div", "flags");
   if (s) {
@@ -969,11 +1007,11 @@ function prRow(p, multi) {
   fl.append(Object.assign(el("span", "dim", `upd ${relTime(p.updated)}`), { title: `opened ${p.created.slice(0, 10)}` })); r.append(fl);
   return r;
 }
-function renderDash() {
+function renderDash(judge = true) {
   const d = DASH.data, root = $("dash"); if (!d) return;
-  const parts = [`${d.since} to ${d.until} (${d.bucket}ly)`, `${d.projects.length} repos`, `${d.elapsed_s} s`];
-  parts.push(d.state_oldest ? `PR state from GitHub, up to ${relTime(d.state_oldest)} old${d.state_missing ? ` (${d.state_missing} PRs without)` : ""}` : "no GitHub state for open PRs yet (the next sync fetches it)");
-  $("dash-meta").textContent = parts.join(" · ");
+  const parts = [`${d.since} to ${d.until} (${d.bucket === "week" ? "weekly" : "daily"})`, `${d.projects.length} repos`, `${d.elapsed_s} s`];
+  parts.push(d.state_oldest ? `PR state from GitHub, oldest fetched ${relTime(d.state_oldest)}${d.state_missing ? ` (${d.state_missing} PRs without)` : ""}` : "no GitHub state for open PRs yet (the next sync fetches it)");
+  $("dash-meta").dataset.facts = parts.join(" · "); setMeta();
   const t = d.totals, kids = [];
   const tiles = el("div", "tiles"); tiles.append(dashTile(t.prs_merged, "PRs merged"), dashTile(t.prs_opened, "PRs opened"), dashTile(t.prs_closed, "PRs closed"), dashTile(t.issues_opened, "issues opened"),
     dashTile(t.issues_closed, "issues closed"), dashTile(t.commits, "commits"), dashTile(t.comments, "comments"), dashTile(d.releases.length, "releases"));
@@ -984,8 +1022,12 @@ function renderDash() {
                     ["ci", "CI failing", "--bad", p => p.state?.ci === "fail"], ["conflict", "Conflicts", "--warn", p => p.state?.mergeable === "CONFLICTING"],
                     ["range", "Active in range", "--ok", p => p.touched]];
   if (me) laneDefs.push(["mine", `${me}'s PRs`, "--accent", p => p.author === me], ["asked", "Review requested from me", "--accent", p => p.state?.requested?.includes(me)]);
+  const jlabel = (p, q) => DASH.judge.get(prKey(p))?.[q]?.label;
+  const kc = new Map(); for (const p of prs) { const k = jlabel(p, "kind"); if (k) kc.set(k, (kc.get(k) || 0) + 1); }
+  for (const [k] of [...kc].sort((a, b) => b[1] - a[1])) laneDefs.push([`kind:${k}`, JUDGE_NAMES[k] || k, "--muted", p => jlabel(p, "kind") === k]);
+  if (prs.some(p => jlabel(p, "risk") === "api")) laneDefs.push(["risk:api", "API / bincompat", "--warn", p => jlabel(p, "risk") === "api"]);
   const lane = laneDefs.find(l => l[0] === DASH.lane) || laneDefs[0], q = DASH.q.trim().toLowerCase();
-  const shown = prs.filter(lane[3]).filter(p => !q || q.split(/\s+/).every(w => [p.title, p.author, p.repo, "#" + p.number, p.readiness, p.reason, ...p.labels].join(" ").toLowerCase().includes(w)));
+  const shown = prs.filter(lane[3]).filter(p => !q || q.split(/\s+/).every(w => [p.title, p.author, p.repo, "#" + p.number, p.readiness, p.reason, ...p.labels, ...Object.values(DASH.judge.get(prKey(p)) || {}).map(r => r?.label || "")].join(" ").toLowerCase().includes(w)));
   const lanes = el("div", "lanes");
   for (const [k, label, col, f] of laneDefs) { const b = Object.assign(el("button", "lane"), { type: "button" }); b.style.setProperty("--c", `var(${col})`); b.setAttribute("aria-pressed", k === lane[0]);
     b.append(el("b", "", prs.filter(f).length), el("span", "", label)); b.onclick = () => { DASH.lane = k === "all" ? null : k; renderDash(); }; lanes.append(b); }
@@ -997,7 +1039,7 @@ function renderDash() {
   const cols = el("div", "dcols"), li = (rows) => { const l = el("div", "dlist"); l.append(...(rows.length ? rows : [el("div", "", "Nothing in this range.")])); return l; };
   cols.append(dashSec("Hottest threads", li(d.hot_threads.map(h => { const r = el("div"); r.append(el("span", `badge ${h.state === "open" ? "open" : "closed"}`, h.state), ghLink("title", `${h.repo}#${h.number} ${h.title}`, h.url), el("span", "r", `${h.comments} comments`)); return r; }))),
               dashSec("Releases and tags", li(d.releases.slice(0, 12).map(x => { const r = el("div"); r.append(ghLink("title", x.title, x.url), el("span", "r", x.date)); return r; }))),
-              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url), el("span", "r", n.author || "")); return r; }))),
+              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url)); const jb = el("span", "jdbox"); jb.dataset.judge = prKey(n); judgeChips(jb, DASH.judge.get(prKey(n))); r.append(jb); twinChips(r, n.twins); r.append(el("span", "r", n.author || "")); return r; }))),
               dashSec("Most active", li(d.authors.map(a => { const r = el("div"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
   kids.push(cols);
   const byp = Object.entries(d.by_project);
@@ -1005,6 +1047,7 @@ function renderDash() {
   const keep = DASH.q && document.activeElement?.type === "search";
   root.replaceChildren(...kids);
   if (keep) { const s2 = root.querySelector("input[type=search]"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }
+  if (judge) judgeAll(d, DASH.seq);
 }
 
 $("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-dashboard").onclick = () => tab("dashboard"); $("t-clusters").onclick = () => tab("clusters"); $("t-outliers").onclick = () => tab("outliers"); $("t-status").onclick = () => tab("status");

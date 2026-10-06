@@ -1,6 +1,6 @@
 # Dashboard tab
 
-Status: steps 1 and 2 are DONE (facts layer, tab, stored GitHub state of open PRs, rule-based readiness); steps 3 to 5 are TODO. Live PR state is deferred.
+Status: steps 1 to 3 are DONE (facts layer, tab, stored GitHub state of open PRs, rule-based readiness, typed labels and similar-item chips); steps 4 and 5 are TODO. Live PR state is deferred.
 
 A tab on `/search` that builds a dashboard for the selected projects and a time range: what happened (activity), and which open PRs need a decision (triage). It is generated on request from the indexes, in layers: the first paint is plain SQL and takes well under a second, model-written parts arrive as they finish.
 
@@ -53,7 +53,7 @@ Each step compiles and is committed on its own.
 
 1. **DONE** Facts layer: `dashboard.py` (SQL only), API route, tab with totals, series, releases, hot threads, an open-PR table with staleness; range cap and tests on a fixture database.
 2. **DONE** PR state: stored by the sync (`sources/ghprstate.py`) rather than fetched live; flags, lanes, the staleness strip and the rule-based readiness label. A live fetch stays possible later.
-3. **TODO** Cheap model layer: typed labels via `decide`, neighbour/link chips; job endpoint and progressive fill.
+3. **DONE** Cheap model layer: typed labels via `decide` (`dashjudge.py`: PR kind and risk, issue kind and actionability, each with its probability; only labels at 0.5 or more are shown, the rest stay unsure), cached in `cache.db` by the item's text, and `≈ #N 0.93` chips from the neighbours database. Instead of a job id and polling, `POST /api/search/dashboard/judge` takes up to 20 refs and the page asks in batches of 10, filling rows in as answers return (about 0.4 s per item cold, free when cached; 165 items in about a minute). Kind lanes appear as labels arrive. Risk is the weak question (mostly under 0.5, so mostly unshown): step 5 decides whether it stays.
 4. **TODO** Written layer: per-PR summary and next action, range overview, hot-thread summaries, all `llm.grounded` and cached by content hash.
 5. **TODO** Evaluate: label agreement against the maintainer-labelled PRs already used for the NLI triage work (the 300), and timing on a 30-day and 1-year range; record in this file.
 

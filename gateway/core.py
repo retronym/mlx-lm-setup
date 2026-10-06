@@ -355,6 +355,29 @@ def search_dashboard(catalog: Catalog, model: str | None = None, universe: str |
         raise ApiError(400, "invalid_arguments", str(e)) from None
 
 
+async def run_dashboard_judge(catalog: Catalog, refs: list, model: str | None = None, universe: str | None = None) -> dict:
+    """Judgement for dashboard rows (pipelines/search/dashjudge.py): per PR a kind and a risk, per issue a kind and whether it can be acted on, typed choices from
+    the decision model with probabilities, cached by the item's text. `refs` is up to 20 of {project, repo, number}; items not done within the time budget are left
+    out, so the page asks again for the rest."""
+    import asyncio
+    spec, cfg = _search_config(catalog, model)
+    if cfg is None:
+        raise ApiError(503, "search_unavailable", "no search index configured")
+    ok = isinstance(refs, list) and 1 <= len(refs) <= 20 and all(isinstance(r, dict) and isinstance(r.get("project"), str) and isinstance(r.get("repo"), str)
+                                                                 and isinstance(r.get("number"), int) and not isinstance(r.get("number"), bool) for r in refs)
+    if not ok:
+        raise ApiError(400, "invalid_arguments", "`refs` must be 1..20 objects {project, repo, number}")
+    if any(r["project"] not in cfg.projects for r in refs):
+        raise ApiError(400, "invalid_arguments", "unknown project in `refs`")
+    mod = _ask_module(catalog, spec, "dashjudge")
+    t = time.time()
+    try:
+        out = await asyncio.to_thread(mod.judge, cfg, [{k: r[k] for k in ("project", "repo", "number")} for r in refs], budget_s=20)
+    except RuntimeError as e:                                          # the decision model is not reachable or failed
+        raise ApiError(502, "judgement_failed", str(e)[:300]) from None
+    return {"backend": spec.name, "results": out, "seconds": round(time.time() - t, 2)}
+
+
 def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw) -> dict:
     """Whole documents behind search hits (`ref`s): an issue with its comments, a file, a commit. Reads the index files and the managed clones, starts nothing."""
     from . import searchget, searchinfo
@@ -367,10 +390,11 @@ def search_get(catalog: Catalog, refs: list[str], model: str | None = None, **kw
         raise ApiError(400, "invalid_arguments", str(e)) from None
 
 
-def _ask_module(catalog: Catalog, spec):
-    """pipelines/search/ask.py, pointed back at this gateway for search (and for models, unless GATEWAY_URL says where they are)."""
+def _ask_module(catalog: Catalog, spec, name: str = "ask"):
+    """pipelines/search/ask.py (or another indexer module that calls the gateway: `name`), pointed back at this gateway for search (and for models, unless
+    GATEWAY_URL says where they are)."""
     from . import searchinfo
-    mod = searchinfo._module(spec.options["index_dir"], "ask")
+    mod = searchinfo._module(spec.options["index_dir"], name)
     mod.SEARCH_URL = f"http://127.0.0.1:{catalog.gateway.port}"
     if not os.environ.get("GATEWAY_URL"):
         mod.gw.BASE = mod.SEARCH_URL

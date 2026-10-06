@@ -323,6 +323,14 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             r = await self.http.get(path)
             self.assertEqual((r.status_code, r.json()["error"]["code"]), (400, "invalid_arguments"), path)
 
+    async def test_dashboard_judge_route_validates_its_body(self):
+        for body in ({}, {"refs": []}, {"refs": ["x"]}, {"refs": [{"project": "p", "repo": "o/r", "number": "1"}]}, {"refs": [{"project": "p", "repo": "o/r", "number": True}]},
+                     {"refs": [{"project": "p", "repo": "o/r", "number": 1}] * 21}, {"refs": [{"project": "p", "repo": "o/r", "number": 1}], "extra": 1}):
+            r = await self.http.post("/api/search/dashboard/judge", json=body)
+            self.assertIn(r.status_code, (400, 503), body)                                              # the test backend has no index: 503 comes before the shape check
+            if r.status_code == 400:
+                self.assertEqual(r.json()["error"]["code"], "invalid_arguments")
+
     async def test_score_routes_to_the_score_backend(self):
         r = await self.http.post("/api/score", json={"prompt": "p", "candidates": [" a", " bb"]})
         self.assertEqual((r.status_code, r.json()["logprobs"], r.headers["x-gateway-backend"]), (200, [-2.0, -3.0], "lms"))

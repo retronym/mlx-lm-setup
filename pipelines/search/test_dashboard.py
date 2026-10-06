@@ -5,7 +5,8 @@ with their stored GitHub state and the rule-based readiness (and without state: 
 import datetime as dt, os, sys, tempfile, time, unittest
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
-import dashboard
+import dashboard, dashjudge
+from unittest import mock
 from store import Store, Chunk
 
 NOW = time.mktime(dt.datetime(2026, 10, 6, 12).timetuple())
@@ -128,6 +129,48 @@ class FactsTests(unittest.TestCase):
         f = self.facts()
         self.assertEqual([(r["tag"], r["date"]) for r in f["releases"]], [("v1", "2026-09-24")])
         self.assertEqual([n["number"] for n in f["new_issues"]], ["20"])
+
+
+class JudgeTests(unittest.TestCase):
+    """dashjudge: the text the model reads, labels only above the confidence floor, results cached by that text (a changed PR is judged again)."""
+    def setUp(self):
+        import dashjudge
+        self.dj = dashjudge
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.db = Path(self.tmp.name) / "p.db"
+        s = Store(self.db)
+        s.apply("prs", [pr(1, pr_state=st(add=9, files=2, base="2.12.x")), issue(7)])
+        s.commit(); s.db.close()
+        root = Path(self.tmp.name)
+        class Cfg:
+            def project_db(_, pid): return self.db
+            def data_path(_, *p): return root.joinpath(*p)
+        self.cfg, self.calls = Cfg(), []
+        def decide_many(state, questions, model=None):
+            self.calls.append((state, [q["ins"] for q in questions]))
+            return [{"answer": next(iter(q["crit"])), "top_probability": 0.9 if i == 0 else 0.4, "probabilities": {k: 1 / len(q["crit"]) for k in q["crit"]}} for i, q in enumerate(questions)]
+        p = mock.patch.object(dashjudge.gw, "decide_many", decide_many); p.start(); self.addCleanup(p.stop)
+
+    def test_view_has_title_labels_size_and_base(self):
+        v = self.dj.view("pr", "Fix it", "the body", {"labels": ["performance"], "pr_state": st(add=9, files=2, base="2.12.x")})
+        self.assertIn("Title: Fix it", v); self.assertIn("Labels: performance", v); self.assertIn("Base branch: 2.12.x", v); self.assertIn("Description: the body", v)
+
+    def test_label_only_when_confident_and_cached_by_text(self):
+        refs = [{"project": "p", "repo": "o/r", "number": 1}, {"project": "p", "repo": "o/r", "number": 7}]
+        r = self.dj.judge(self.cfg, refs)
+        self.assertEqual((r["o/r#1"]["type"], r["o/r#7"]["type"]), ("pr", "issue"))
+        self.assertEqual((r["o/r#1"]["kind"]["label"], r["o/r#1"]["risk"]["label"], r["o/r#1"]["risk"]["guess"]), ("bugfix", None, "api"))     # 0.4 is below the floor: a guess, not a label
+        self.assertEqual(sorted(k for k in r["o/r#7"] if k not in ("type", "cached")), ["kind", "triage"])
+        self.assertEqual(len(self.calls), 2); self.assertFalse(r["o/r#1"]["cached"])
+        self.calls.clear()
+        r = self.dj.judge(self.cfg, refs)
+        self.assertEqual(self.calls, []); self.assertTrue(r["o/r#1"]["cached"] and r["o/r#7"]["cached"])
+
+    def test_unknown_items_are_left_out_and_the_budget_stops_work(self):
+        r = self.dj.judge(self.cfg, [{"project": "p", "repo": "o/r", "number": 99}, {"project": "p", "repo": "x/y", "number": 1}])
+        self.assertEqual(r, {})                                                                           # no such number, and the same number in another repo
+        r = self.dj.judge(self.cfg, [{"project": "p", "repo": "o/r", "number": 1}], budget_s=-1)
+        self.assertEqual(r, {})
 
 
 if __name__ == "__main__":
