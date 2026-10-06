@@ -1,6 +1,7 @@
 {
   "description": "Global settings for the search indexer: where data lives, which models, GitHub politeness, and which local-model steps are on. Projects live in projects/*.json, universes in universes/*.json.",
   "data_dir": "data",
+  "me": ["retronym", "Jason Zaugg"],
   "repos_dir": "repos",
   "embedder": {"model": "Qwen/Qwen3-Embedding-0.6B", "via": "gateway", "batch": 16},
   "reranker": {"model": "Qwen/Qwen3-Reranker-0.6B", "candidates": 30, "blend": [[3, 0.75], [10, 0.6], [1000, 0.4]]},
