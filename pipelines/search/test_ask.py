@@ -64,6 +64,12 @@ class PlanTests(unittest.TestCase):
         p, _ = ok({"intent": "list", "criterion": "pull requests the asker wrote", "kinds": ["pr"], "queries": [], "since": "last month"}, "my PRs from last month")
         self.assertEqual((p["kinds"], p["since"], p["until"]), (["pr"], "2026-09", "2026-09"))                  # a kind named: kept
         self.assertIsNone(ok({"intent": "one", "criterion": "the pull request that fixes it", "kinds": [], "queries": []})[0])   # only a list may have no query
+        p, _ = ok({"intent": "list", "criterion": "pull requests by the asker about implicits", "kinds": ["pr"], "queries": ["implicits"], "since": "2020-10-06",
+                   "until": "2026-10-06", "authors": ["me"]}, "PRs by me more than 6 years ago about implicits")
+        self.assertEqual((p.get("since"), p["until"]), (None, "2020-10-06"))                                     # code reads ages; the model had it backwards
+        for q, want in (("issues from the last 2 years", ("2024-10-06", None)), ("commits 3 years ago", ("2022-10-06", "2024-10-06")),
+                        ("within the last week", ("2026-09-29", None)), ("over a year ago", (None, "2025-10-06")), ("2 years of work", None), ("typedApply", None)):
+            self.assertEqual(plan.ages(q, TODAY) and plan.ages(q, TODAY)[:2], want, q)
         p, _ = ok({"criterion": "issues reported in the last months", "kinds": [], "queries": ["x"], "since": "recent"}, "issues reported recently")
         self.assertEqual(p["since"], "2026-04-09")                                                             # "recently": a stated default, resolved by code
         self.assertIn("180 days", p["notes"][0])

@@ -107,10 +107,10 @@ def filters(p):
 
 
 def listing(p, universe, k, trace):
-    """A "list" or "topic" plan: one filtered search, no choice. A list is newest first (an empty query lists everything the filters match); a topic
-    is ranked by relevance, reranked."""
+    """A "list" or "topic" plan: one filtered search, no choice, ranked by relevance and reranked; a list with no topic is everything the filters match,
+    newest first (sorting a topic's best hits by date put weak matches above the real ones)."""
     body = {"query": (p["queries"] or [""])[0], "universe": universe, "k": k, **filters(p),
-            **({"sort": "recent"} if p["intent"] == "list" else {"rerank": True})}
+            **({"sort": "recent"} if p["intent"] == "list" and not p["queries"] else {"rerank": True})}
     hs = _search(body)
     trace.append({"round": 1, "route": p["intent"], "search": {x: v for x, v in body.items() if x != "universe"}, "hits": [h["ref"] for h in hs]})
     return [{"ref": h["ref"], "node": h.get("node"), "title": h["title"], "url": h.get("url"), "kind": h["kind"], "state": h.get("state"), "author": h.get("author"),

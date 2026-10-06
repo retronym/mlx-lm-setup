@@ -51,6 +51,42 @@ def relative(phrase, today):
             "last week": ((today - datetime.timedelta(days=14)).isoformat(), (today - datetime.timedelta(days=8)).isoformat())}.get((phrase or "").strip().lower())
 
 
+_UNITS = {"day": 1, "week": 7, "month": 30, "year": 365}
+_AGE = re.compile(r"\b(?:(more than|over|at least|older than|less than|under|within(?: the last)?|in the (?:last|past)|the (?:last|past)|past|last)\s+)?"
+                  r"(?:(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a few|a couple of)\s+)?(day|week|month|year)s?(\s+ago|\s+old)?\b", re.I)
+_NUM = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "a few": 3, "a couple of": 2}
+
+
+def _back(today, n, unit):
+    if unit == "year":
+        try:
+            return today.replace(year=today.year - n)
+        except ValueError:                                                   # 29 February
+            return today.replace(year=today.year - n, day=28)
+    if unit == "month":
+        y, m = divmod(today.year * 12 + today.month - 1 - n, 12)
+        return today.replace(year=y, month=m + 1, day=min(today.day, 28))
+    return today - datetime.timedelta(days=n * _UNITS[unit])
+
+
+def ages(question, today):
+    """(since, until, phrase) for an age phrase in the question, or None: "more than 6 years ago" -> until then, "in the last 2 years" / "less than a
+    month ago" -> since then, "3 years ago" -> a year either side of then. Read by code: the model gets the direction wrong."""
+    m = _AGE.search(question)
+    if not m or not (m[4] or m[1] and not m[1].lower().startswith(("more", "over", "at least", "older"))):
+        return None                                                          # "2 years" with neither "ago" nor "the last ...": not a time
+    if not m[2] and (not m[1] or m[1].lower() == "last"):
+        return None                                                          # "years ago" alone; "last month" is the calendar month (`relative`)
+    n = 1 if not m[2] else int(m[2]) if m[2].isdigit() else _NUM[m[2].lower()]
+    unit, mod = m[3].lower(), (m[1] or "").lower()
+    then = _back(today, n, unit)
+    if mod.startswith(("more", "over", "at least", "older")):
+        return None, then.isoformat(), m[0]
+    if mod:
+        return then.isoformat(), None, m[0]
+    return _back(today, n + 1, unit).isoformat(), _back(today, max(n - 1, 0), unit).isoformat(), m[0]
+
+
 def _resolve(plan, today, notes):
     for key in ("since", "until"):
         r = relative(plan.get(key), today)
@@ -90,7 +126,11 @@ def validate(j, today, notes, question=""):
     if not isinstance(qs, list) or not lo <= len(qs) <= 3 or not all(isinstance(q, str) and q.strip() for q in qs):
         problems.append(f"queries must be a list of {lo} to 3 non-empty strings")
     j = dict(j)
-    if (j.get("since") or j.get("until")) and question and not _WHEN.search(question):
+    age = ages(question, today) if question else None
+    if age:
+        j["since"], j["until"] = age[0], age[1]
+        notes.append(f"'{age[2]}' read as {age[0] or 'the beginning'} to {age[1] or 'now'}")
+    elif (j.get("since") or j.get("until")) and question and not _WHEN.search(question):
         notes.append(f"dropped a date range the question does not give: {j.get('since')}..{j.get('until')}")
         j.pop("since", None); j.pop("until", None)
     j = _resolve(j, today, notes)

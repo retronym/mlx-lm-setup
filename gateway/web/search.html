@@ -396,14 +396,14 @@ function dates() {
 function applyPlan(p) {
   const before = controls();
   setControls({ kinds: p.kinds || [], authors: (p.authors || []).join(", "), when: p.since || p.until ? "custom" : "", whenRange: { since: p.since, until: p.until },
-                open: !!p.open_only, sort: p.intent === "list" ? "recent" : "relevance" });
+                open: !!p.open_only, sort: p.intent === "list" && !p.queries?.length ? "recent" : "relevance" });   // with a topic, newest first buries the matches
   return before;
 }
 function planFromControls(p) {   // the plan as the user now sees it in the controls (they may have removed or changed what was read)
   const authors = $("authors").value.split(",").map(x => x.trim()).filter(Boolean);
   return { intent: p.intent, criterion: p.criterion, queries: p.queries, kinds: [...pickedKinds], open_only: $("open").checked, ...dates(), ...(authors.length ? { authors } : {}), notes: p.notes };
 }
-const INTENT = { one: "one answer: a local LLM picks it", list: "a list, newest first", topic: "a search" };
+const INTENT = { one: "one answer: a local LLM picks it", list: "a list", topic: "a search" };
 function showInterp(p) {
   const row = $("interprow");
   if (!p) { row.hidden = true; return; }
@@ -412,7 +412,8 @@ function showInterp(p) {
   const raw = Object.assign(el("button", "lk", "search the words as typed"), { type: "button", title: "Undo the interpretation: the controls go back to what they were" });
   raw.onclick = () => { setControls(interp.before); interp = { text: interp.text, raw: true }; showInterp(null); go(); };
   row.replaceChildren(el("span", "meta", "read as"), el("span", "badge open", INTENT[p.intent] || p.intent),
-                      ...(p.queries?.length ? [el("span", "meta", `“${p.queries.join(" ")}”`)] : [el("span", "meta", "no topic: everything that matches")]),
+                      ...(p.queries?.length ? [Object.assign(el("span", "meta", `“${p.queries[0]}”`), { title: p.intent === "one" ? `also searched: ${p.queries.slice(1).join(" | ")}` : "the search text" })]
+                                         : [el("span", "meta", "no topic: everything that matches")]),
                       ...filt.map(f => el("span", "badge closed", f)), ...(p.notes || []).map(n => el("span", "meta", `(${n})`)), raw);
   row.hidden = false;
 }
