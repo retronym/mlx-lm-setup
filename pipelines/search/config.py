@@ -289,7 +289,8 @@ def _search(d, errors):
                                                                         else "expected {PREFIX: owner/repo}, e.g. {\"SI\": \"scala/bug\"}", {"SI": "scala/bug"})}) if isinstance(d, dict) else {}
     if isinstance(d, dict):
         s["links"]["github"] = v.obj(d.get("links", {}).get("github", {}) if isinstance(d.get("links"), dict) else {}, "links.github",
-                                     {"enabled": (t_bool, True), "max_prs_per_run": (t_int(0), 3000), "batch": (t_int(1, 100), 50), "closing_first": (t_int(1, 100), 10)})
+                                     {"enabled": (t_bool, True), "max_prs_per_run": (t_int(0), 3000), "batch": (t_int(1, 100), 50), "closing_first": (t_int(1, 100), 10),
+                                      "pr_state": (t_bool, True), "pr_state_max_age_hours": (t_num(0), 6)})
     s["related"] = v.obj(d.get("related", {}), "related", {"enabled": (t_bool, True), "seeds": (t_int(1, 50), 5), "limit": (t_int(1, 50), 8), "per_kind": (t_int(1, 50), 4),
                                                            "depth2": (t_bool, True), "hub_degree": (t_int(1), 150), "boost": (t_num(0), 0.5),
                                                            "weights": (lambda x: None, {})}) if isinstance(d, dict) else {}

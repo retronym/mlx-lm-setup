@@ -23,11 +23,11 @@ def _query(owner, name, numbers, first):
     return f'query {{ repository(owner: "{owner}", name: "{name}") {{ {body} }} rateLimit {{ remaining resetAt }} }}'
 
 
-def fetch(repo, numbers, first=10, log=print):
-    """{number: {"closes": [...], "merge_sha": sha | None}} for the PR numbers that exist (a deleted or transferred PR is simply absent)."""
-    owner, name = repo.split("/")
+def run_query(repo, query, log=print):
+    """The `repository` object of a GraphQL query over one repo's PRs (`p<N>: pullRequest(number: N) {...}` aliases), retrying a rate limit and sleeping to
+    the reset when few points are left. A PR GitHub no longer has comes back null; any other error is raised."""
     for attempt in range(6):
-        r = _graphql(_query(owner, name, numbers, first))
+        r = _graphql(query)
         try:
             d = json.loads(r.stdout)
         except ValueError:
@@ -46,9 +46,16 @@ def fetch(repo, numbers, first=10, log=print):
     if rl.get("remaining", 9999) < ghissues.LOW_WATER:
         wait = max(0, ghissues._ts(rl["resetAt"].replace("+00:00", "Z")) - time.time()) + 5
         log(f"  graphql rate limit: {rl['remaining']} points left, sleeping {wait / 60:.1f} min until the reset"); time.sleep(wait)
+    return d["data"]["repository"]
+
+
+def fetch(repo, numbers, first=10, log=print):
+    """{number: {"closes": [...], "merge_sha": sha | None}} for the PR numbers that exist (a deleted or transferred PR is simply absent)."""
+    owner, name = repo.split("/")
+    got = run_query(repo, _query(owner, name, numbers, first), log)
     out = {}
     for n in numbers:
-        pr = d["data"]["repository"].get(f"p{n}")
+        pr = got.get(f"p{n}")
         if pr:
             out[n] = {"closes": [f"{x['repository']['nameWithOwner']}#{x['number']}" for x in pr["closingIssuesReferences"]["nodes"]],
                       "merge_sha": (pr.get("mergeCommit") or {}).get("oid")}
