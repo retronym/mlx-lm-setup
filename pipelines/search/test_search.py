@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 import config, embed, search
-from store import Store, Chunk, check_where
+from store import Store, Chunk, check_where, chunk_filter
 from test_config import write, proj, uni, GIT, GH
 
 
@@ -120,6 +120,10 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(docs(authors=["carol smith", "bob"]), [("issue:1", "comment"), ("issue:2", "commit")])  # a commit's git name, or any of several
         self.assertEqual(docs(since="2000"), docs())                                                            # files drop out under a date (no date), these all have one
         self.assertEqual({h["kind"] for h in search.hits(self.idx, "needle", k=20, embedder=FakeEmbedder(), where=check_where({"since": "2000"}))} & {"file"}, set())
+        names = {r[0] for r in st.db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        self.assertTrue({"chunks_author", "chunks_author_name", "chunks_created", "chunks_updated"} <= names)
+        plan = " ".join(r[3] for r in st.db.execute("EXPLAIN QUERY PLAN SELECT c.rowid FROM chunks c WHERE 1" + chunk_filter(where=check_where({"authors": ["bob"]}))[0], ["bob", "bob"]))
+        self.assertIn("chunks_author", plan)                                                                       # the filter's expressions match the indexes
         listed = search.hits(self.idx, " ", k=10, sources=["issues"], where=check_where({"since": "2019"}))       # no query: what the filters match, newest first
         self.assertEqual([(h["doc"], h["kind"]) for h in listed], [("issue:2", "commit"), ("issue:1", "comment")])   # one per document: its newest chunk
         self.assertEqual([h["doc"] for h in search.hits(self.idx, "", k=1, where=check_where({"authors": ["alice"]}))], ["issue:1"])

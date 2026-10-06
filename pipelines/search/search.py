@@ -188,7 +188,9 @@ def browse(idx, k=8, projects=None, sources=None, open_only=False, kinds=None, l
         if link_filter:
             st.set_link_filter(_link_pairs(idx.cfg, pid, link_filter["nodes"]))
         cond, args = chunk_filter(f, open_only, kinds, linked, where)
-        sql = (f"SELECT c.rowid, max(COALESCE({DATE_SQL[field]}, '')) d FROM chunks c WHERE 1 {cond} GROUP BY c.source, c.doc ORDER BY d DESC LIMIT ?")
+        # filter first (through the date and author indexes), then one row per document: grouped directly, SQLite scans every chunk in document order
+        sql = (f"WITH m AS MATERIALIZED (SELECT c.rowid r, c.source s, c.doc doc, COALESCE({DATE_SQL[field]}, '') d FROM chunks c WHERE 1 {cond}) "
+               f"SELECT r, max(d) d FROM m GROUP BY s, doc ORDER BY d DESC LIMIT ?")
         rows += [(d, pid, rid) for rid, d in st.db.execute(sql, (*args, k))]
     rows.sort(key=lambda r: r[0], reverse=True)
     return [(pid, rid) for _, pid, rid in rows[:k]]

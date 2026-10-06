@@ -25,6 +25,11 @@ LINKED_SQL = "EXISTS (SELECT 1 FROM temp.linkfilter f WHERE f.source = c.source 
 # A file in a git tree has neither, so a date filter leaves files out.
 DATE_SQL = {"created": "COALESCE(json_extract(c.meta, '$.created'), json_extract(c.meta, '$.published'))",
             "updated": "COALESCE(json_extract(c.meta, '$.updated'), json_extract(c.meta, '$.published'), json_extract(c.meta, '$.created'))"}
+# Expression indexes for the date and author filters (`chunk_filter` writes exactly these expressions, so SQLite uses them): listing "everything by me
+# this year" reads a few hundred rows instead of every chunk's JSON. Built on the first open of a database that lacks them (a few seconds).
+INDEXES = "".join(f"CREATE INDEX IF NOT EXISTS {name} ON chunks({expr});\n" for name, expr in (
+    ("chunks_author", "lower(json_extract(meta, '$.author'))"), ("chunks_author_name", "lower(json_extract(meta, '$.author_name'))"),
+    ("chunks_created", DATE_SQL["created"].replace("c.meta", "meta")), ("chunks_updated", DATE_SQL["updated"].replace("c.meta", "meta"))))
 _DAY = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
 
 
@@ -58,9 +63,10 @@ def chunk_filter(sources=None, open_only=False, kinds=None, linked=None, where=N
     cond, args = "", []
     if where:
         d = DATE_SQL[where.get("date", "created")]
-        for k, op in (("since", ">="), ("until", "<=")):
-            if where.get(k):
-                cond += f" AND substr({d}, 1, {len(where[k])}) {op} ?"; args.append(where[k])
+        if where.get("since"):                                   # a range on the indexed expression: "2026" <= "2026-03-01T..."
+            cond += f" AND {d} >= ?"; args.append(where["since"])
+        if where.get("until"):                                   # inclusive at its precision: "2024-05~" sorts after every date in May 2024
+            cond += f" AND {d} <= ?"; args.append(where["until"] + "~")
         if where.get("authors"):
             ph = ",".join("?" * len(where["authors"]))
             cond += (f" AND (lower(json_extract(c.meta, '$.author')) IN ({ph}) OR lower(json_extract(c.meta, '$.author_name')) IN ({ph}))")
@@ -110,7 +116,7 @@ class Store:
             CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(title, body, tokenize="unicode61 remove_diacritics 2");
             CREATE TABLE IF NOT EXISTS vec(rowid INTEGER PRIMARY KEY, model TEXT, hash TEXT, v BLOB);
             CREATE TABLE IF NOT EXISTS state(source TEXT, k TEXT, v TEXT, PRIMARY KEY(source, k));
-        """)
+        """ + INDEXES)
 
     # --- per-source cursors: last indexed commit, last updated_at, per-file blob sha ---
     def get(self, source, k, default=None):
