@@ -98,6 +98,29 @@
   .dup-only, .cl-only, .ol-only { display: none; } #nbfilters.dups .dup-only, #nbfilters.cls .cl-only, #nbfilters.ols .ol-only { display: flex; }
   .ol { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .ol .where { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .dash { display: flex; flex-direction: column; gap: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 0; }
+  .tile b { font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; } .tile span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c, var(--muted)); border-radius: 6px; padding: 6px 10px; text-align: left; display: flex; flex-direction: column; }
+  .lane b { font-size: 20px; line-height: 1.2; font-variant-numeric: tabular-nums; } .lane span { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .lane[aria-pressed="true"] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
+  .dsec { display: flex; flex-direction: column; gap: 6px; } .dsec > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 650; }
+  .dcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .dlist { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; }
+  .dlist > div { padding: 6px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 13px; } .dlist > div:first-child { border-top: 0; }
+  .dlist .r { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .chart, .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; } .chart svg, .strip svg { display: block; width: 100%; overflow: visible; }
+  .chart .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); padding-bottom: 4px; } .chart .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; background: var(--c); }
+  .pr { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px; gap: 2px 12px; padding: 9px 12px; border-top: 1px solid var(--line); align-items: start; } .pr:first-child { border-top: 0; }
+  .pr.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .pr .num { color: var(--muted); font: 12.5px ui-monospace, Menlo, monospace; text-decoration: none; }
+  .pr .flags { display: flex; flex-direction: column; gap: 1px; font-size: 12px; text-align: right; } .pr .flags .ok { color: var(--ok); } .pr .flags .bad { color: var(--bad); } .pr .flags .warn { color: var(--warn); } .pr .flags .dim { color: var(--muted); }
+  .pr .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; } .pr .sub b { color: var(--ink); font-weight: 600; }
+  .rd { font-size: 12px; font-weight: 600; color: var(--c); } .rd::before { content: "●"; margin-right: 5px; } .rd small { font-weight: 400; color: var(--muted); }
+  .chip { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; } .chip.me { border-color: var(--accent); color: var(--accent); } .chip.rng { border-color: var(--ok); color: var(--ok); }
+  @media (max-width: 640px) { .pr { grid-template-columns: 48px minmax(0, 1fr); } .pr .flags { grid-column: 2; flex-direction: row; gap: 10px; text-align: left; } }
   [hidden] { display: none !important; }
   .logo { display: inline-flex; color: var(--ink); margin-right: 6px; vertical-align: middle; } .logo svg { display: block; }
 </style>
@@ -116,7 +139,7 @@
   <a href="/admin" target="_blank" rel="noopener">Admin ↗</a>
 </header>
 <main>
-  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-duplicates" aria-selected="false">Duplicates</button><button role="tab" id="t-clusters" aria-selected="false">Clusters</button><button role="tab" id="t-outliers" aria-selected="false">Outliers</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
+  <nav class="tabs" role="tablist"><button role="tab" id="t-search" aria-selected="true">Search</button><button role="tab" id="t-duplicates" aria-selected="false">Duplicates</button><button role="tab" id="t-dashboard" aria-selected="false">Dashboard</button><button role="tab" id="t-clusters" aria-selected="false">Clusters</button><button role="tab" id="t-outliers" aria-selected="false">Outliers</button><button role="tab" id="t-status" aria-selected="false">Index status</button></nav>
   <div id="nbfilters" class="card" style="--c: var(--line)" hidden>
     <div class="row">
       <label><span id="nb-statelabel">state</span> <select id="nb-state"></select></label>
@@ -133,6 +156,19 @@
       <label title="An old import created copies of tickets with adjacent numbers; pairs like that are hidden when one is closed"><input type="checkbox" id="nb-import"> keep adjacent-number copies from the old import</label>
       <label title="Release procedures and dependency bumps look alike by construction"><input type="checkbox" id="nb-templ"> keep release procedures and bumps</label>
     </div>
+  </div>
+  <div id="tab-dashboard" hidden style="display:none;flex-direction:column;gap:12px">
+    <div class="card" style="--c: var(--line)">
+      <div class="row">
+        <span class="meta">range</span><div class="chips" id="dash-days"></div>
+        <label title="Overrides the range chips; at most a year, and the end day is not included">from <input type="date" id="dash-since"></label>
+        <label>before <input type="date" id="dash-until"></label>
+        <label title="Your GitHub handle: adds a 'my move' lane and marks your PRs; remembered in this browser">I am <select id="dash-me"></select></label>
+      </div>
+      <div class="row"><span class="meta">repos</span><div class="chips" id="dash-projects" title="Pick any to limit to those repos; none picked is all of them"></div></div>
+    </div>
+    <div class="meta" id="dash-meta"></div>
+    <div id="dash" class="dash"></div>
   </div>
   <div id="tab-duplicates" hidden style="display:none;flex-direction:column;gap:12px">
     <div class="meta" id="dupmeta"></div>
@@ -646,11 +682,12 @@ async function pollStatus(force = false) {
   } catch (e) { $("run").replaceChildren(el("div", "", `status unavailable: ${e.message}`)); }
 }
 function tab(name) {
-  const tabs = ["search", "duplicates", "clusters", "outliers", "status"];
+  const tabs = ["search", "duplicates", "dashboard", "clusters", "outliers", "status"];
   for (const t of tabs) { $(`tab-${t}`).hidden = t !== name; $(`tab-${t}`).style.display = t === name ? "flex" : "none"; $(`t-${t}`).setAttribute("aria-selected", t === name); }
   $("nbfilters").hidden = !["duplicates", "clusters", "outliers"].includes(name);
   clearInterval(pollTimer);
   if (name === "status") { samples.length = 0; pollStatus(true); pollTimer = setInterval(pollStatus, 2000); history.replaceState(null, "", "#status"); }
+  else if (name === "dashboard") { history.replaceState(null, "", "#dashboard"); dashSetup(); }
   else if (name === "duplicates" || name === "clusters" || name === "outliers") { history.replaceState(null, "", `#${name}`); nbSetup(name); }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("tab-status").hidden) { samples.length = 0; pollStatus(true); } });
@@ -816,10 +853,164 @@ async function loadOutliers(more) {
 }
 $("olmore").onclick = () => loadOutliers(true);
 
-$("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-clusters").onclick = () => tab("clusters"); $("t-outliers").onclick = () => tab("outliers"); $("t-status").onclick = () => tab("status");
+
+// ---- dashboard: what happened in the chosen repos over a range (at most a year), and every open PR to triage. Facts only here (SQL over the indexes,
+// well under a second); the GitHub state of open PRs was stored by the last sync, so it is as old as that, and said to be. ----
+const DASH = { picked: new Set((store.get("search.dash.projects") || "").split(",").filter(Boolean)), days: +(store.get("search.dash.days") || 30), lane: null, q: "",
+               me: store.get("search.dash.me") || "", data: null, seq: 0, ready: false };
+const DASH_DAYS = [[7, "7 days"], [30, "30 days"], [90, "90 days"], [365, "1 year"]];
+const READY = { "ready to merge": "--ok", "needs author": "--bad", "needs review": "--warn", "in review": "--accent", "draft": "--muted", "stale": "--muted" };
+const READY_TIP = { "ready to merge": "approved, CI green, no conflicts", "needs author": "conflicts, failing CI or changes requested", "needs review": "no reviews or comments yet",
+                    "in review": "being discussed", "draft": "marked as a draft", "stale": "no activity for six months" };
+const dayStr = d => d.toISOString().slice(0, 10);
+function dashParams() {
+  const p = new URLSearchParams(), u = $("universe").value;
+  if (u && !$("unilabel").hidden) p.set("universe", u);
+  const since = $("dash-since").value, until = $("dash-until").value;
+  if (since || until) { if (since) p.set("since", since); if (until) p.set("until", until); }
+  else p.set("since", dayStr(new Date(Date.now() - (DASH.days - 1) * 864e5)));
+  for (const x of DASH.picked) p.append("projects", x);
+  return p;
+}
+function dashSetup() {
+  if (!DASH.ready) {
+    DASH.ready = true;
+    $("dash-days").replaceChildren(...DASH_DAYS.map(([n, t]) => { const b = Object.assign(el("button", "", t), { type: "button" }); b.dataset.n = n;
+      b.onclick = () => { DASH.days = n; $("dash-since").value = $("dash-until").value = ""; store.set("search.dash.days", n); dashChips(); loadDashboard(); }; return b; }));
+    for (const id of ["dash-since", "dash-until"]) $(id).addEventListener("change", () => { dashChips(); loadDashboard(); });
+    $("dash-me").addEventListener("change", () => { DASH.me = $("dash-me").value; store.set("search.dash.me", DASH.me); renderDash(); });
+  }
+  const projects = (loadedUniverse?.projects || []).map(p => ({ id: p.id, title: p.title }));
+  for (const k of [...DASH.picked]) if (!projects.some(p => p.id === k)) DASH.picked.delete(k);
+  $("dash-projects").replaceChildren(...projects.map(p => {
+    const b = Object.assign(el("button", "", p.title), { type: "button" }); b.setAttribute("aria-pressed", DASH.picked.has(p.id));
+    b.onclick = () => { DASH.picked.has(p.id) ? DASH.picked.delete(p.id) : DASH.picked.add(p.id); b.setAttribute("aria-pressed", DASH.picked.has(p.id)); store.set("search.dash.projects", [...DASH.picked].join(",")); loadDashboard(); };
+    return b;
+  }));
+  dashChips(); loadDashboard();
+}
+function dashChips() { const custom = $("dash-since").value || $("dash-until").value; for (const b of $("dash-days").children) b.setAttribute("aria-pressed", !custom && +b.dataset.n === DASH.days); }
+async function loadDashboard() {
+  const seq = ++DASH.seq;
+  $("dash-meta").textContent = "loading…";
+  try {
+    const d = await nbFetch("/api/search/dashboard", dashParams());
+    if (seq !== DASH.seq) return;
+    if (d.available === false) { $("dash").replaceChildren(el("div", "", "No search index.")); $("dash-meta").textContent = ""; return; }
+    DASH.data = d;
+    const mine = new Set([...(d.me || [])].map(x => x.toLowerCase())), handles = [...new Set([...d.open_prs.map(p => p.author), ...d.authors.map(a => a.author)])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+    if (!DASH.me) DASH.me = handles.find(h => mine.has(h.toLowerCase())) || "";
+    $("dash-me").replaceChildren(Object.assign(el("option", "", "I am…"), { value: "" }), ...handles.map(h => Object.assign(el("option", "", h), { value: h }))); $("dash-me").value = DASH.me;
+    renderDash();
+  } catch (e) { if (seq === DASH.seq) { $("dash-meta").textContent = e.message; $("dash").replaceChildren(); } }
+}
+const dashSec = (title, ...kids) => { const s = el("section", "dsec"); s.append(el("h2", "", title), ...kids); return s; };
+const dashTile = (n, label) => { const t = el("div", "tile"); t.append(el("b", "", (n || 0).toLocaleString()), el("span", "", label)); return t; };
+const daysSince = iso => (Date.now() - Date.parse(iso)) / 864e5;
+function dashChart(d) {
+  const W = 920, H = 120, pad = 22, n = d.series.length, bw = (W - 2 * pad) / n;
+  const max = Math.max(1, ...d.series.map(x => Math.max(x.prs_opened || 0, x.prs_merged || 0, x.commits || 0)));
+  const ns = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const svg = mk("svg", { viewBox: `0 0 ${W} ${H + 16}`, role: "img", "aria-label": `Pull requests opened and merged and commits per ${d.bucket}` });
+  for (const [i, x] of d.series.entries()) {
+    const x0 = pad + i * bw;
+    for (const [j, key, col] of [[0, "prs_opened", "--accent"], [1, "prs_merged", "--ok"]]) {
+      const h = (x[key] || 0) / max * (H - 8), r = mk("rect", { x: x0 + 1 + j * (bw - 2) / 2, y: H - h, width: Math.max(1, (bw - 2) / 2 - 0.5), height: h, fill: `var(${col})` });
+      const t = mk("title", {}); t.textContent = `${x.date}: ${x.prs_opened || 0} PRs opened, ${x.prs_merged || 0} merged, ${x.commits || 0} commits, ${x.issues_opened || 0} issues opened`; r.append(t); svg.append(r);
+    }
+  }
+  svg.append(mk("polyline", { fill: "none", stroke: "var(--muted)", "stroke-width": 1.5, points: d.series.map((x, i) => `${pad + (i + .5) * bw},${H - (x.commits || 0) / max * (H - 8)}`).join(" ") }));
+  for (const i of [0, Math.floor(n / 2), n - 1]) { const t = mk("text", { x: pad + (i + .5) * bw, y: H + 13, "text-anchor": i === 0 ? "start" : i === n - 1 ? "end" : "middle", fill: "var(--muted)", "font-size": 11 }); t.textContent = d.series[i].date; svg.append(t); }
+  const box = el("div", "chart"), lg = el("div", "legend");
+  for (const [c, t] of [["--accent", "PRs opened"], ["--ok", "PRs merged"], ["--muted", "commits"]]) { const s = el("span", "", t); s.prepend(Object.assign(el("i"), {})); s.firstChild.style.setProperty("--c", `var(${c})`); lg.append(s); }
+  box.append(lg, svg); return box;
+}
+function dashStrip(prs, onPick) {
+  const W = 920, H = 74, pad = 14, svgNS = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(svgNS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const lo = Math.log(0.5), hi = Math.log(Math.max(800, ...prs.map(p => daysSince(p.updated))) * 1.1), x = dd => pad + (Math.log(Math.max(0.5, dd)) - lo) / (hi - lo) * (W - 2 * pad);
+  const svg = mk("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Each dot is an open PR, placed by days since its last update on a log scale" });
+  for (const [dd, l] of [[1, "1d"], [7, "1w"], [30, "1mo"], [91, "3mo"], [365, "1y"], [730, "2y"], [1825, "5y"]]) if (x(dd) < W - pad) {
+    svg.append(mk("line", { x1: x(dd), x2: x(dd), y1: 4, y2: H - 18, stroke: "var(--line)" })); const t = mk("text", { x: x(dd), y: H - 4, "text-anchor": "middle", fill: "var(--muted)", "font-size": 10.5 }); t.textContent = l; svg.append(t);
+  }
+  const placed = [];
+  for (const p of [...prs].sort((a, b) => daysSince(a.updated) - daysSince(b.updated))) {
+    const cx = x(daysSince(p.updated)); let cy = H - 30;
+    while (placed.some(q => Math.abs(q[0] - cx) < 11 && Math.abs(q[1] - cy) < 11)) cy -= 11;
+    placed.push([cx, cy]);
+    const c = mk("circle", { cx, cy, r: 5, fill: `var(${READY[p.readiness]})`, stroke: "var(--panel)", "stroke-width": 1.5, style: "cursor:pointer" });
+    const t = mk("title", {}); t.textContent = `${p.repo}#${p.number} ${p.title}: ${p.readiness}, updated ${relTime(p.updated)}`; c.append(t); c.onclick = () => onPick(p); svg.append(c);
+  }
+  const box = el("div", "strip"); box.append(svg); return box;
+}
+const prKey = p => `${p.repo}#${p.number}`;
+function prRow(p, multi) {
+  const r = el("div", "pr"); r.id = "pr-" + prKey(p).replace(/\W/g, "-");
+  const s = p.state, me = DASH.me;
+  r.append(ghLink("num", `#${p.number}`, p.url));
+  const mid = el("div"), rd = el("div", "rd"); rd.style.setProperty("--c", `var(${READY[p.readiness]})`); rd.title = READY_TIP[p.readiness];
+  rd.append(p.readiness, " ", Object.assign(el("small", "", `· ${p.reason}`), {})); mid.append(ghLink("title", p.title, p.url), rd);
+  const sub = el("div", "sub"), by = el("span"); by.append(el("b", "", p.author || "?")); if (me && p.author === me) by.append(" ", el("span", "chip me", "me")); sub.append(by);
+  if (multi) sub.append(el("span", "chip", p.repo));
+  if (p.touched) sub.append(Object.assign(el("span", "chip rng", "active in range"), { title: "updated within the selected range" }));
+  for (const l of p.labels) sub.append(el("span", "chip", l));
+  if (s?.milestone) sub.append(el("span", "", s.milestone));
+  if (s?.base && !/^(main|master|2\.13\.x)$/.test(s.base)) sub.append(el("span", "", `→ ${s.base}`));
+  if (s?.requested?.length) sub.append(el("span", "", "requested: " + s.requested.join(", ")));
+  if (s?.reviews?.length) sub.append(el("span", "", "reviewed: " + s.reviews.map(x => `${x.who} ${{ APPROVED: "✓", CHANGES_REQUESTED: "✕" }[x.state] || "·"}`).join(", ")));
+  if (p.comments) sub.append(el("span", "", `${p.comments} comment${p.comments > 1 ? "s" : ""}`));
+  if (p.closes.length) sub.append(el("span", "", "closes " + p.closes.join(", ")));
+  mid.append(sub); r.append(mid);
+  const fl = el("div", "flags");
+  if (s) {
+    const ci = { pass: ["ok", "✓ CI passing"], fail: ["bad", "✕ CI failing"], pending: ["warn", "● CI running"], none: ["dim", "– no CI"] }[s.ci] || ["dim", s.ci];
+    const mg = { MERGEABLE: ["ok", "✓ mergeable"], CONFLICTING: ["bad", "✕ conflicts"] }[s.mergeable] || ["dim", "? mergeability"];
+    fl.append(el("span", ci[0], ci[1]), el("span", mg[0], mg[1]), el("span", "dim", `+${s.add} −${s.del} · ${s.files}f`));
+  } else fl.append(Object.assign(el("span", "dim", "GitHub state not fetched yet"), { title: "the next sync stores CI, mergeability, reviews and size" }));
+  fl.append(Object.assign(el("span", "dim", `upd ${relTime(p.updated)}`), { title: `opened ${p.created.slice(0, 10)}` })); r.append(fl);
+  return r;
+}
+function renderDash() {
+  const d = DASH.data, root = $("dash"); if (!d) return;
+  const parts = [`${d.since} to ${d.until} (${d.bucket}ly)`, `${d.projects.length} repos`, `${d.elapsed_s} s`];
+  parts.push(d.state_oldest ? `PR state from GitHub, up to ${relTime(d.state_oldest)} old${d.state_missing ? ` (${d.state_missing} PRs without)` : ""}` : "no GitHub state for open PRs yet (the next sync fetches it)");
+  $("dash-meta").textContent = parts.join(" · ");
+  const t = d.totals, kids = [];
+  const tiles = el("div", "tiles"); tiles.append(dashTile(t.prs_merged, "PRs merged"), dashTile(t.prs_opened, "PRs opened"), dashTile(t.prs_closed, "PRs closed"), dashTile(t.issues_opened, "issues opened"),
+    dashTile(t.issues_closed, "issues closed"), dashTile(t.commits, "commits"), dashTile(t.comments, "comments"), dashTile(d.releases.length, "releases"));
+  kids.push(tiles, dashChart(d));
+  // open PRs: lanes (a filter), staleness strip, list
+  const prs = d.open_prs, me = DASH.me, multi = new Set(prs.map(p => p.repo)).size > 1;
+  const laneDefs = [["all", "All open", "--muted", () => true], ...Object.keys(READY).map(k => [k, k[0].toUpperCase() + k.slice(1), READY[k], p => p.readiness === k]),
+                    ["ci", "CI failing", "--bad", p => p.state?.ci === "fail"], ["conflict", "Conflicts", "--warn", p => p.state?.mergeable === "CONFLICTING"],
+                    ["range", "Active in range", "--ok", p => p.touched]];
+  if (me) laneDefs.push(["mine", `${me}'s PRs`, "--accent", p => p.author === me], ["asked", "Review requested from me", "--accent", p => p.state?.requested?.includes(me)]);
+  const lane = laneDefs.find(l => l[0] === DASH.lane) || laneDefs[0], q = DASH.q.trim().toLowerCase();
+  const shown = prs.filter(lane[3]).filter(p => !q || q.split(/\s+/).every(w => [p.title, p.author, p.repo, "#" + p.number, p.readiness, p.reason, ...p.labels].join(" ").toLowerCase().includes(w)));
+  const lanes = el("div", "lanes");
+  for (const [k, label, col, f] of laneDefs) { const b = Object.assign(el("button", "lane"), { type: "button" }); b.style.setProperty("--c", `var(${col})`); b.setAttribute("aria-pressed", k === lane[0]);
+    b.append(el("b", "", prs.filter(f).length), el("span", "", label)); b.onclick = () => { DASH.lane = k === "all" ? null : k; renderDash(); }; lanes.append(b); }
+  const search = Object.assign(el("input"), { type: "search", placeholder: "Filter by title, author, label, #number…", value: DASH.q }); search.style.cssText = "width:100%";
+  search.oninput = () => { DASH.q = search.value; renderDash(); const s2 = $("dash").querySelector("input[type=search]"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); };
+  const list = el("div", "dlist"); list.append(...(shown.length ? shown.map(p => prRow(p, multi)) : [el("div", "", "No open PRs match.")]));
+  kids.push(dashSec(`Open PRs · ${shown.length} of ${prs.length}`, lanes, dashStrip(prs, p => { const r = document.getElementById("pr-" + prKey(p).replace(/\W/g, "-")); if (r) { r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } }), search, list));
+  // what happened
+  const cols = el("div", "dcols"), li = (rows) => { const l = el("div", "dlist"); l.append(...(rows.length ? rows : [el("div", "", "Nothing in this range.")])); return l; };
+  cols.append(dashSec("Hottest threads", li(d.hot_threads.map(h => { const r = el("div"); r.append(el("span", `badge ${h.state === "open" ? "open" : "closed"}`, h.state), ghLink("title", `${h.repo}#${h.number} ${h.title}`, h.url), el("span", "r", `${h.comments} comments`)); return r; }))),
+              dashSec("Releases and tags", li(d.releases.slice(0, 12).map(x => { const r = el("div"); r.append(ghLink("title", x.title, x.url), el("span", "r", x.date)); return r; }))),
+              dashSec(`New issues (${t.issues_opened || 0})`, li(d.new_issues.slice(0, 15).map(n => { const r = el("div"); r.append(el("span", `badge ${n.state === "open" ? "open" : "closed"}`, n.state), ghLink("title", `${n.repo}#${n.number} ${n.title}`, n.url), el("span", "r", n.author || "")); return r; }))),
+              dashSec("Most active", li(d.authors.map(a => { const r = el("div"); r.append(el("b", "", a.author), el("span", "r", [a.prs_merged && `${a.prs_merged} merged`, a.prs_opened && `${a.prs_opened} opened`, a.commits && `${a.commits} commits`, a.comments && `${a.comments} comments`].filter(Boolean).join(" · "))); return r; }))));
+  kids.push(cols);
+  const byp = Object.entries(d.by_project);
+  if (byp.length > 1) kids.push(dashSec("By repo", li(byp.map(([id, x]) => { const r = el("div"); r.append(el("b", "", x.title), el("span", "r", `${x.prs_merged || 0} merged · ${x.prs_opened || 0} opened · ${x.issues_opened || 0} issues · ${x.commits || 0} commits · ${x.open_prs} open PRs`)); return r; }))));
+  const keep = DASH.q && document.activeElement?.type === "search";
+  root.replaceChildren(...kids);
+  if (keep) { const s2 = root.querySelector("input[type=search]"); s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); }
+}
+
+$("t-search").onclick = () => tab("search"); $("t-duplicates").onclick = () => tab("duplicates"); $("t-dashboard").onclick = () => tab("dashboard"); $("t-clusters").onclick = () => tab("clusters"); $("t-outliers").onclick = () => tab("outliers"); $("t-status").onclick = () => tab("status");
 function fromHash() {                                                      // #status, #duplicates and #clusters are tabs; any other hash is a query
   const h = decodeURIComponent(location.hash.slice(1));
-  if (["status", "duplicates", "clusters", "outliers"].includes(h)) loadedUniversePromise.then(() => tab(h));
+  if (["status", "duplicates", "dashboard", "clusters", "outliers"].includes(h)) loadedUniversePromise.then(() => tab(h));
   else { tab("search"); if (h && h !== "search") { $("q").value = h; go(); } }
 }
 window.addEventListener("hashchange", fromHash);

@@ -23,7 +23,7 @@ from . import auth
 from .catalog import Catalog
 from . import discovery, modelinfo
 from .profiles import apply_defaults
-from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_ask, run_interpret, run_search, run_translate, search_clusters, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
+from .core import COLD_HEADER_THRESHOLD_S, ApiError, map_errors, run_embed, run_look, run_narrate, run_ask, run_interpret, run_search, run_translate, search_clusters, search_dashboard, search_duplicates, search_get, search_links, search_outliers, search_stats, vision_models, vision_target, voices_listing, op_policy, op_start, op_stop, resolve as core_resolve, resolve_target as core_resolve_target, status_payload
 from .mcp_server import build_mcp
 from . import vision
 from .supervisor import Supervisor
@@ -419,6 +419,13 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         f = neighbour_filters(request, {**common, "by": str, "templated": flag, **paging})
         return JSONResponse(search_outliers(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
 
+    async def search_dashboard_view(request: Request):
+        """The dashboard's facts layer. Query: universe, projects (repeatable; default all of the universe), since / until (YYYY-MM-DD, until exclusive; default
+        the last 30 days; at most 366 days apart). Returns totals, a daily (weekly beyond 92 days) series, releases, hot threads, new issues, authors, and every
+        open PR with its stored GitHub state and a rule-based readiness (labels and summaries from the models are separate)."""
+        f = neighbour_filters(request, {"since": str, "until": str, "projects": str})
+        return JSONResponse(search_dashboard(catalog, request.query_params.get("model"), request.query_params.get("universe"), **f))
+
     async def embeddings(request: Request):
         """OpenAI-compatible embeddings: {"input": str | [str], "model"?} -> {data: [{embedding, index}], model, usage}. Documents are
         embedded as-is; add "kind": "query" for the retrieval-instruction form used for search queries."""
@@ -600,6 +607,7 @@ def create_app(catalog: Catalog, supervisor: Supervisor | None = None, *, read_t
         Route("/api/search/duplicates", handler(search_duplicates_view), methods=["GET"]),
         Route("/api/search/clusters", handler(search_clusters_view), methods=["GET"]),
         Route("/api/search/outliers", handler(search_outliers_view), methods=["GET"]),
+        Route("/api/search/dashboard", handler(search_dashboard_view), methods=["GET"]),
         Route("/api/rerank", handler(rerank), methods=["POST"]),
         Route("/v1/embeddings", handler(embeddings), methods=["POST"]),
         Route("/api/look/expand", handler(look_expand), methods=["POST"]),

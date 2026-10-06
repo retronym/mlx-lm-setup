@@ -307,12 +307,14 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             search_stats(cat, universe="nope")
 
     async def test_duplicates_and_clusters_routes_parse_their_query_and_report_missing_data(self):
-        for path in ("/api/search/duplicates", "/api/search/clusters", "/api/search/outliers"):
+        for path in ("/api/search/duplicates", "/api/search/clusters", "/api/search/outliers", "/api/search/dashboard"):
             r = await self.http.get(path)
             self.assertEqual((r.status_code, r.json()["available"]), (200, False))                       # the test backend has no index, so nothing is computed
         r = await self.http.get("/api/search/duplicates?state=open&kind=mixed&since=2024&until=2025-06&projects=a&projects=b&min_sim=0.85&adjacent=0&templated=1&limit=10&offset=5")
         self.assertEqual(r.status_code, 200)
         r = await self.http.get("/api/search/clusters?state=closed&kind=pr&cluster=3&limit=9999")
+        self.assertEqual(r.status_code, 200)
+        r = await self.http.get("/api/search/dashboard?since=2026-09-01&until=2026-10-01&projects=a&projects=b&universe=u")
         self.assertEqual(r.status_code, 200)
         r = await self.http.get("/api/search/outliers?by=ctr&state=open&kind=issue&since=2020&until=2024-06&projects=a&templated=1&limit=20&offset=40")
         self.assertEqual(r.status_code, 200)
