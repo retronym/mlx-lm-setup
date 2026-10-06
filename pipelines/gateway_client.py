@@ -7,10 +7,11 @@ import json, os, time, urllib.error, urllib.request
 BASE = os.environ.get("GATEWAY_URL", "http://127.0.0.1:8090")
 
 
-def post(path, body, timeout=900, retries=30):
+def post(path, body, timeout=900, retries=30, base=None):
+    """POST JSON to the gateway (or to `base`, another gateway: a draft one for a checkout's search index)."""
     data = json.dumps(body).encode()
     for attempt in range(retries + 1):
-        req = urllib.request.Request(BASE + path, data=data, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request((base or BASE) + path, data=data, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.load(r)
@@ -21,7 +22,7 @@ def post(path, body, timeout=900, retries=30):
                 continue
             raise RuntimeError(f"POST {path}: {e.code} {msg}") from None
         except urllib.error.URLError as e:
-            raise RuntimeError(f"POST {path}: gateway not reachable at {BASE} ({e.reason}); start it with: .venv/bin/python -m gateway") from None
+            raise RuntimeError(f"POST {path}: gateway not reachable at {base or BASE} ({e.reason}); start it with: .venv/bin/python -m gateway") from None
 
 
 def _model(body, model):
