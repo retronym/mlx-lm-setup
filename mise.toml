@@ -78,3 +78,7 @@ run = ".venv/bin/python -m gateway admin"
 description = "Show the admin token"
 depends = ["setup"]
 run = ".venv/bin/python -m gateway token"
+
+[tasks.export-demo]
+description = "Snapshot the search dashboard from the running gateway into one self-contained HTML file (pipelines/search/data/demo/search-dashboard.html) to publish as an artifact"
+run = "python3 pipelines/search/export_demo.py"
