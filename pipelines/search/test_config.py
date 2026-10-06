@@ -43,8 +43,9 @@ class ConfigTests(unittest.TestCase):
         cfg = config.load()
         u = cfg.default_universe()
         self.assertEqual(u.id, "scala-zinc")
-        self.assertEqual(set(u.projects), {"scala2", "scala3", "scala-dev", "zinc", "scala-asm"})
+        self.assertEqual(set(u.projects), {"scala2", "scala3", "scala-dev", "zinc", "scala-asm", "scala-contributors"})
         srcs = {s.key: s for s in cfg.universe_sources()}
+        self.assertEqual((srcs["scala-contributors/forum"].repo, srcs["scala-contributors/forum"].kinds), ("contributors.scala-lang.org", ("topic", "post")))
         self.assertEqual(srcs["scala3/issues"].priority, 8)                     # the big trackers are the lowest priority
         self.assertIsNotNone(srcs["scala3/issues"].max_items_per_run)
         self.assertEqual(srcs["scala-asm/code"].ref, "main")
@@ -52,6 +53,16 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(all(any(s.type == "git_log" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm")))     # commit messages are indexed
         self.assertGreater(srcs["scala3/commits"].priority, srcs["zinc/commits"].priority)
         self.assertEqual(cfg.project_db("zinc").name, "index.db")
+
+    def test_discourse_source_is_named_by_its_site(self):
+        p = {"id": "f", "title": "F", "sources": [{"id": "forum", "type": "discourse", "label": "Forum", "site": "forum.example.org"}]}
+        cfg = self.load(projects=[p], universes=[uni(projects=["f"])])
+        s = cfg.projects["f"].sources[0]
+        self.assertEqual((s.repo, s.since, cfg.search["discourse"]["delay_s"]), ("forum.example.org", "2000-01-01T00:00:00Z", 1.0))
+        errs = self.errors(search={"discourse": {"delay_s": 0}}, projects=[{**p, "sources": [{"id": "forum", "type": "discourse", "label": "Forum", "repo": "o/r"}]}], universes=[uni(projects=["f"])])
+        self.assertTrue(any("site" in e and "required" in e for e in errs), errs)
+        self.assertTrue(any("repo" in e and "unknown key" in e for e in errs), errs)
+        self.assertTrue(any("discourse.delay_s" in e for e in errs), errs)
 
     def test_related_settings(self):
         cfg = self.load(search={"related": {"limit": 3, "weights": {"closes": 2}}}, projects=[proj()], universes=[uni()])

@@ -1,7 +1,7 @@
 {
   "id": "scala-zinc",
   "title": "Scala / Zinc",
-  "description": "The Scala 2 and Scala 3 compilers, the Scala team's dev tracker, Zinc and the ASM fork: everything a Scala compiler or build tool developer asks questions about.",
+  "description": "The Scala 2 and Scala 3 compilers, the Scala team's dev tracker, Zinc, the ASM fork and the Contributors forum: everything a Scala compiler or build tool developer asks questions about.",
   "default": true,
-  "projects": ["scala2", "scala3", "scala-dev", "zinc", "scala-asm"]
+  "projects": ["scala2", "scala3", "scala-dev", "zinc", "scala-asm", "scala-contributors"]
 }

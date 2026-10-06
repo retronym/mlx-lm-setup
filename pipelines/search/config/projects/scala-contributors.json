@@ -1,0 +1,9 @@
+{
+  "id": "scala-contributors",
+  "title": "Scala Contributors forum",
+  "description": "contributors.scala-lang.org (Discourse): language design, SIP and Pre-SIP discussions, compiler and standard library evolution, tooling, Core team meeting notes and announcements, since 2016.",
+  "sources": [
+    {"id": "forum", "type": "discourse", "label": "Contributors forum", "color": "#dc2626", "priority": 4,
+     "site": "contributors.scala-lang.org", "since": "2016-01-01T00:00:00Z", "max_items_per_run": 2500}
+  ]
+}

@@ -11,7 +11,7 @@ sys.path.insert(0, __import__("os").path.dirname(__file__))
 import config, repos, runstate
 from embed import targets
 from store import Store
-from sources import ghissues, ghlinks
+from sources import discourse, ghissues, ghlinks
 from sources.ghreleases import GhReleases
 from sources.gitlog import GitLog
 from sources.gitsrc import GitSource
@@ -27,6 +27,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
     source is started; the one running finishes. `meta_only` refreshes the metadata of chunks that already exist (GitHub items and commits are re-read
     from the part of history that is indexed; nothing new is ingested, no cursor moves, no minimum interval applies; git sources are skipped)."""
     ghissues.configure(cfg.search["github"])
+    discourse.configure(cfg.search["discourse"])
     max_chars, pack_chars = cfg.search["chunking"]["max_chars"], cfg.search["chunking"]["pack_chars"]
     fetched, failed, gh_done, skipped = set(), 0, set(), 0
     for s in srcs:
@@ -58,7 +59,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
                 print(f"{g.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
                 run.error(f"{g.key}: {type(e).__name__}: {e}")
             continue
-        if meta_only and s.type == "git":
+        if meta_only and s.type in ("git", "discourse"):
             continue
         if not meta_only and not due(st, s, force):
             run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
@@ -73,6 +74,9 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)
                 fetched.add(s.repo)
                 GitLog(s, d, max_chars).sync(st, limit=limit, log=run.log, meta_only=meta_only)
+            elif s.type == "discourse":
+                d = discourse.Discourse(s, max_chars)
+                d.reconcile(st, log=run.log) if reconcile else d.sync(st, limit=limit, since=since, log=run.log)
             elif s.type == "github_releases":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched) if s.tag_messages else None
                 fetched.add(s.repo) if d else None

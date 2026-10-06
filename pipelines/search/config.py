@@ -18,14 +18,15 @@ from pathlib import Path
 HERE = Path(__file__).parent
 CONFIG_DIR = HERE / "config"
 CHUNKERS = ("scala", "java", "markdown", "plain", "scala_ts", "java_ts")
-SOURCE_TYPES = ("git", "git_log", "github", "github_releases")
+SOURCE_TYPES = ("git", "git_log", "github", "github_releases", "discourse")
 DEFAULT_SKIP_AUTHORS = ["scala-steward", "dependabot[bot]", "github-actions[bot]", "renovate[bot]"]
 GITHUB_INCLUDE = ("issues", "prs", "comments", "reviews")
 # What a search hit can be, finer than its source: a chunk of a file in a git tree (code, docs, spec), an issue or PR body, a comment, a review
-# comment on a diff, an LLM summary of a long thread, a commit message, release notes, an annotated tag's message.
-KINDS = ("file", "issue", "pr", "comment", "review", "summary", "commit", "release", "tag")
+# comment on a diff, an LLM summary of a long thread, a commit message, release notes, an annotated tag's message, a forum topic's opening post, a reply in it.
+KINDS = ("file", "issue", "pr", "comment", "review", "summary", "commit", "release", "tag", "topic", "post")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SITE_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -158,7 +159,7 @@ class Source:
     enabled: bool
     min_interval_hours: float
     max_items_per_run: int | None
-    repo: str
+    repo: str                # owner/name; for a discourse source, the site's host name (what links and node ids are keyed by)
     # git
     ref: str | None = None
     paths: tuple = ()
@@ -183,7 +184,7 @@ class Source:
         if self.type == "github":
             inc = set(self.include)
             return tuple(k for k, i in (("issue", "issues"), ("pr", "prs"), ("comment", "comments"), ("review", "reviews"), ("summary", "comments")) if i in inc)
-        return {"git": ("file",), "git_log": ("commit",), "github_releases": ("release", "tag") if self.tag_messages else ("release",)}[self.type]
+        return {"git": ("file",), "git_log": ("commit",), "github_releases": ("release", "tag") if self.tag_messages else ("release",), "discourse": ("topic", "post")}[self.type]
 
 
 @dataclass(frozen=True)
@@ -245,7 +246,7 @@ SEARCH_FIELDS = {
     "data_dir": (t_str, "data"), "repos_dir": (t_str, "repos"),
     "me": (t_list(t_str), []),                       # who `authors: ["me"]` is: the asker's GitHub login and git author name
     "embedder": (lambda v: None, {}), "reranker": (lambda v: None, {}), "chunking": (lambda v: None, {}),
-    "github": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}), "related": (lambda v: None, {}),
+    "github": (lambda v: None, {}), "discourse": (lambda v: None, {}), "fusion": (lambda v: None, {}), "cache": (lambda v: None, {}), "refresh": (lambda v: None, {}), "llm": (lambda v: None, {}), "neighbours": (lambda v: None, {}), "links": (lambda v: None, {}), "related": (lambda v: None, {}),
 }
 
 
@@ -271,6 +272,8 @@ def _search(d, errors):
     s["chunking"] = v.obj(d.get("chunking", {}), "chunking", {"max_chars": (t_int(200, 20000), 2400), "min_chars": (t_int(0, 2000), 20), "pack_chars": (t_int(100, 20000), 1000)}) if isinstance(d, dict) else {}
     s["github"] = v.obj(d.get("github", {}), "github", {"min_remaining": (t_int(0), 300), "page_delay_s": (t_num(0), 0.2), "page_limit": (t_int(1, 100), 90),
                                                         "default_since": (t_re(DATE_RE, "an ISO timestamp like 2000-01-01T00:00:00Z"), "2000-01-01T00:00:00Z")}) if isinstance(d, dict) else {}
+    s["discourse"] = v.obj(d.get("discourse", {}), "discourse", {"delay_s": (t_num(0.2), 1.0), "max_retries": (t_int(1, 20), 6), "timeout_s": (t_num(1), 60),
+                                                              "user_agent": (t_str, "scala-search-indexer (local research index; https://github.com/retronym)")}) if isinstance(d, dict) else {}
     s["neighbours"] = v.obj(d.get("neighbours", {}), "neighbours", {"enabled": (t_bool, True), "neighbours": (t_int(1, 50), 5), "min_similarity": (t_num(0), 0.8),
                                                                   "clusters": (t_int(1, 1000), 80)}) if isinstance(d, dict) else {}
     s["links"] = v.obj(d.get("links", {}), "links", {"enabled": (t_bool, True), "max_refs_per_chunk": (t_int(1, 5000), 200),
@@ -319,15 +322,21 @@ def _source(project, d, v, i, default_since):
     base = {"id": (t_re(ID_RE, "a lowercase id (letters, digits, dashes)"), REQUIRED), "type": (t_in(*SOURCE_TYPES), REQUIRED), "label": (t_str, REQUIRED),
             "color": (t_re(COLOR_RE, "a #rrggbb colour"), "#78716c"), "priority": (t_int(1, 9), 5), "enabled": (t_bool, True),
             "min_interval_hours": (t_num(0), 0), "max_items_per_run": (t_int(1, nullable=True), None), "repo": (t_re(REPO_RE, "owner/name"), REQUIRED)}
+    if typ == "discourse":                                       # a forum is named by its host, not a repo
+        del base["repo"]
     extra = {"git": {"ref": (t_str, REQUIRED), "paths": (t_list(t_str, 1), REQUIRED), "exclude": (t_list(t_str), []),
                      "chunkers": (t_map(lambda k: None if isinstance(k, str) and k.startswith(".") else "suffix keys start with a dot", t_in(*CHUNKERS)), REQUIRED)},
              "github": {"include": (t_list(t_str, 1, GITHUB_INCLUDE), REQUIRED), "since": (t_re(DATE_RE, "an ISO timestamp like 2020-01-01T00:00:00Z"), default_since)},
              "github_releases": {"tag_messages": (t_bool, False)},
              "git_log": {"ref": (t_str, REQUIRED), "paths": (t_list(t_str), []), "since": (t_re(DATE_RE, "an ISO timestamp like 2018-01-01T00:00:00Z"), default_since),
-                         "merges": (t_bool, False), "skip_authors": (t_list(t_str), DEFAULT_SKIP_AUTHORS)}}.get(typ, {})
+                         "merges": (t_bool, False), "skip_authors": (t_list(t_str), DEFAULT_SKIP_AUTHORS)},
+             "discourse": {"site": (t_re(SITE_RE, "a host name like contributors.scala-lang.org"), REQUIRED),
+                           "since": (t_re(DATE_RE, "an ISO timestamp like 2016-01-01T00:00:00Z"), default_since)}}.get(typ, {})
     s = v.obj(d, path, {**base, **extra})
     if typ == "github" and isinstance(d.get("include"), list) and {"comments"} & set(d["include"]) and not {"issues", "prs"} & set(d["include"]):
         v.err(f"{path}.include", "comments need issues and/or prs (they are filtered by what they belong to)")
+    if typ == "discourse":
+        s["repo"] = s["site"]
     if typ not in SOURCE_TYPES or None in (s["id"], s["repo"]):
         return None
     return Source(project=project, id=s["id"], type=typ, label=s["label"] or s["id"], color=s["color"], priority=s["priority"], enabled=s["enabled"],
@@ -415,7 +424,8 @@ def _tree(cfg, only=None):
             print(f"  project {p.id}  \"{p.title}\"   db: {cfg.project_db(p.id).relative_to(HERE)}")
             for s in sorted(p.sources, key=lambda s: (s.priority, s.id)):
                 what = {"git": f"{s.repo}@{s.ref} {','.join(s.paths)} [{','.join(sorted(set(s.chunkers.values())))}]",
-                        "github": f"{s.repo} {'+'.join(s.include)} since {(s.since or '')[:10]}", "git_log": f"{s.repo}@{s.ref} commit messages since {(s.since or '')[:10]}{' ' + ','.join(s.paths) if s.paths else ''}", "github_releases": f"{s.repo} releases{' + tag messages' if s.tag_messages else ''}"}[s.type]
+                        "github": f"{s.repo} {'+'.join(s.include)} since {(s.since or '')[:10]}", "git_log": f"{s.repo}@{s.ref} commit messages since {(s.since or '')[:10]}{' ' + ','.join(s.paths) if s.paths else ''}", "github_releases": f"{s.repo} releases{' + tag messages' if s.tag_messages else ''}",
+                        "discourse": f"{s.repo} forum topics and posts since {(s.since or '')[:10]}"}[s.type]
                 caps = ", ".join(x for x in (f"max {s.max_items_per_run}/run" if s.max_items_per_run else "", f"every >= {s.min_interval_hours:g} h" if s.min_interval_hours else "",
                                              "DISABLED" if not s.enabled else "") if x)
                 print(f"    p{s.priority} {s.id:9} {s.type:15} {what}{'   (' + caps + ')' if caps else ''}")
