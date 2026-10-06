@@ -120,16 +120,16 @@
   .dlist > .pr { display: grid; }
   .chart, .strip { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; } .chart svg, .strip svg { display: block; width: 100%; overflow: visible; }
   .chart .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); padding-bottom: 4px; } .chart .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; background: var(--c); }
-  .pr { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px; gap: 2px 12px; padding: 9px 12px; border-top: 1px solid var(--line); align-items: start; } .pr:first-child { border-top: 0; }
+  .pr { display: grid; grid-template-columns: 56px minmax(0, 1fr) max-content; gap: 2px 12px; padding: 9px 12px; border-top: 1px solid var(--line); align-items: start; } .pr:first-child { border-top: 0; }
   .pr.flash { background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .pr .num { color: var(--muted); font: 12.5px ui-monospace, Menlo, monospace; text-decoration: none; }
-  .pr .flags { white-space: nowrap; display: flex; flex-direction: column; gap: 1px; font-size: 12px; text-align: right; } .pr .flags .ok { color: var(--ok); } .pr .flags .bad { color: var(--bad); } .pr .flags .warn { color: var(--warn); } .pr .flags .dim { color: var(--muted); }
+  .pr .flags { white-space: nowrap; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 12px; text-align: right; } .pr .flags .ok { color: var(--ok); } .pr .flags .bad { color: var(--bad); } .pr .flags .warn { color: var(--warn); } .pr .flags .dim { color: var(--muted); }
   .pr .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--muted); margin-top: 2px; } .pr .sub b { color: var(--ink); font-weight: 600; }
   .rd { font-size: 12px; font-weight: 600; color: var(--c); } .rd::before { content: "●"; margin-right: 5px; } .rd small { font-weight: 400; color: var(--muted); }
   .chip { font: 11px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; white-space: nowrap; } .chip.me { border-color: var(--accent); color: var(--accent); } .chip.rng { border-color: var(--ok); color: var(--ok); }
   .chip.fo { text-decoration: none; color: var(--muted); border-style: dashed; } .chip.fo:hover { color: var(--accent); }
   .chip.jd { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); } .chip.tw { text-decoration: none; color: var(--muted); } .chip.tw:hover { color: var(--accent); } .jdbox { display: inline-flex; gap: 4px; margin-left: 8px; }
-  @media (max-width: 640px) { .pr { grid-template-columns: 48px minmax(0, 1fr); } .pr .flags { grid-column: 2; flex-direction: row; gap: 10px; text-align: left; } }
+  @media (max-width: 640px) { .pr { grid-template-columns: 48px minmax(0, 1fr); } .pr .flags { grid-column: 2; flex-direction: row; align-items: baseline; gap: 10px; text-align: left; } }
   [hidden] { display: none !important; }
   .logo { display: inline-flex; color: var(--ink); margin-right: 6px; vertical-align: middle; } .logo svg { display: block; }
 </style>
