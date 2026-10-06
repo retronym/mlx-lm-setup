@@ -15,7 +15,7 @@ import datetime, json, re
 from llm import chat
 from store import check_where
 
-KINDS = ["file", "issue", "pr", "comment", "review", "summary", "commit", "release", "tag"]
+KINDS = ["file", "issue", "pr", "comment", "review", "summary", "commit", "release", "tag", "topic", "post"]
 RECENT_DAYS = 180
 PROMPT = """Turn a question about the Scala compiler, standard library or the Zinc incremental compiler into a search plan. Today is {today}.
 
@@ -27,7 +27,8 @@ Answer with JSON only, these keys:
   "topic" for an ordinary question or keyword search ("where is eta expansion handled", "typedApply").
 - "criterion": one sentence: what a document must be to answer the question, e.g. "the pull request that fixes <the problem>".
 - "kinds": what the answer is, from {kinds}; [] when any kind will do ("anything", "everything", no kind named). "the PR that ..." is ["pr"]; "the issue / bug report / ticket" is ["issue"];
-  "the commit" is ["commit"]; "where in the code / which class" is ["file"].
+  "the commit" is ["commit"]; "where in the code / which class" is ["file"]; a forum discussion (contributors forum, Pre-SIP thread, "where was X
+  discussed") is ["topic", "post"] (topic: the opening post, post: a reply).
 - "queries": 1 to 3 search texts. The first: the question's technical content without filler ("find the PR that fixed"). Others: a rewording with the
   terms a developer would use in a title, or identifiers, error messages or flags the question names. Short, no dates, no names of people.
   For a "list" with no topic ("anything by me this year") write [].

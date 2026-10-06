@@ -6,7 +6,7 @@
 
 Phases, in order (LLM work runs before embedding so the big LLM and the embedder do not evict each other from the gateway's memory budget):
   sync       git fetch + sync every source, in priority order (GitHub: forward walk, then the capped newest-first backfill)
-  reconcile  drop issues and PRs deleted upstream (weekly, `refresh.reconcile_every_days`; or --only reconcile)
+  reconcile  drop issues, PRs and forum topics deleted upstream (weekly, `refresh.reconcile_every_days`; or --only reconcile)
   enrich     local-LLM thread summaries for long threads, checked against the thread by the NLI model (off unless llm.thread_summaries.enabled)
   digest     a local-LLM digest of what changed since the last refresh, checked against the facts (llm.digest.enabled)
   embed      vectors for everything new, through the gateway's embedder (--local: in this process)
@@ -114,7 +114,7 @@ def main(argv):
                 t0, info, ok = time.time(), {}, True
                 try:
                     if ph in ("sync", "reconcile"):
-                        gh_or_git = [s for s in srcs if s.type == "github"] if ph == "reconcile" else srcs
+                        gh_or_git = [s for s in srcs if s.type in ("github", "discourse")] if ph == "reconcile" else srcs
                         n = run_sync(cfg, gh_or_git, run, force=force, reconcile=(ph == "reconcile"), deadline=deadline)
                         ok, info = n == 0, {"failed_sources": n}
                         if ph == "reconcile" and ok:

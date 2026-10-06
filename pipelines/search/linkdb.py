@@ -21,7 +21,7 @@ INV = {"closes": "closed_by", "closed_by": "closes", "merged_as": "merge_of", "m
 
 def node_id(repo, kind, meta, doc):
     """The links node a chunk belongs to, or None: `owner/repo#N` for an issue, PR, comment or review, `commit:owner/repo@sha`, `release:owner/repo@tag`,
-    `file:owner/repo:path`. `kind` is the chunk's kind ("file" for a chunk of a git tree), `meta` its metadata, `doc` its document."""
+    `file:owner/repo:path`, `topic:host/id` for a forum topic or a reply in it. `kind` is the chunk's kind ("file" for a chunk of a git tree), `meta` its metadata, `doc` its document."""
     if kind in ("issue", "pr", "comment", "review"):
         return f"{repo}#{meta['number']}" if meta.get("number") is not None else None
     if kind == "commit":
@@ -30,18 +30,21 @@ def node_id(repo, kind, meta, doc):
         return f"release:{repo}@{meta['tag']}" if meta.get("tag") else None
     if kind == "file":
         return f"file:{repo}:{doc}"
+    if kind in ("topic", "post"):
+        return f"topic:{repo}/{meta['topic']}" if meta.get("topic") is not None else None
     return None
 
 
 def doc_names(kind, ref):
     """The `doc` values chunks of a node carry (a release or tag node: both spellings)."""
-    return {"issue": [f"issue:{ref}"], "pr": [f"issue:{ref}"], "commit": [f"commit:{ref}"], "release": [f"release:{ref}", f"tag:{ref}"], "file": [ref]}.get(kind, [])
+    return {"issue": [f"issue:{ref}"], "pr": [f"issue:{ref}"], "commit": [f"commit:{ref}"], "release": [f"release:{ref}", f"tag:{ref}"], "file": [ref], "topic": [f"topic:{ref}"]}.get(kind, [])
 
 
 def short(n):
-    """A short label for a node row dict: `o/r#12`, `commit abcdef12`, `release v1.0`, a file's path."""
+    """A short label for a node row dict: `o/r#12`, `commit abcdef12`, `release v1.0`, a file's path, `topic 4702`."""
     k = n["kind"]
-    return {"commit": f"commit {(n['ref'] or '')[:8]}", "release": f"release {n['ref']}", "file": f"file {n['ref']}"}.get(k, n["id"])
+    return {"commit": f"commit {(n['ref'] or '')[:8]}", "release": f"release {n['ref']}", "file": f"file {n['ref']}",
+            "topic": f"topic {n['ref'] or n['id'].rsplit('/', 1)[-1]}"}.get(k, n["id"])
 
 
 class LinkDB:
@@ -53,7 +56,7 @@ class LinkDB:
         self.cfg = cfg
         self.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
         self.alias = cfg.search["links"]["repo_aliases"]
-        self.parse = make_parser(cfg.search["links"]["legacy_prefixes"])
+        self.parse = make_parser(cfg.search["links"]["legacy_prefixes"], cfg.forums())
 
     @classmethod
     def open(cls, cfg, universe_id=None):
@@ -95,7 +98,10 @@ class LinkDB:
             return [self._node(r) for r in self.db.execute(f"SELECT {self.COLS} FROM nodes WHERE kind = 'commit' AND ref LIKE ? AND indexed = 1 LIMIT 5", (t + "%",))]
         out = []
         for ref in self.parse(t):
-            if ref.kind == "issue" and ref.repo:
+            if ref.kind == "topic":
+                n = self.node(f"topic:{ref.repo}/{ref.key}")
+                out += [n] if n else []
+            elif ref.kind == "issue" and ref.repo:
                 n = self.node(f"{self.alias.get(ref.repo, ref.repo)}#{ref.key}")
                 out += [n] if n else []
             elif ref.kind == "issue":
@@ -253,6 +259,8 @@ def _spell(ref):
     """A reference as text `resolve` understands."""
     if ref.kind == "commit":
         return f"https://github.com/{ref.repo}/commit/{ref.key}" if ref.repo else ref.key
+    if ref.kind == "topic":
+        return f"topic:{ref.repo}/{ref.key}"
     return f"{ref.repo}#{ref.key}" if ref.repo else f"#{ref.key}"
 
 

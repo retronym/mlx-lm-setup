@@ -432,7 +432,7 @@ Retrieval over the Scala compiler, docs and issue history is the first thing a l
 - Initial scalac sync (37k chunks) 18 s, scala/bug since 2020 75 s, incremental issue sync 1.5 s; embedding is the slow step (~17 min for everything, once, ~50 chunks/s on MPS).
 - Reranking helps "where is X implemented" queries clearly and can demote a good hit (`EtaExpansion.expand` left the top 5 for the eta-expansion query); six hand-picked queries judged by eye is not an evaluation.
 - Comments inherit their issue's state, so `open_only` filters comments too.
-- **Not done:** an evaluation set for fusion and rerank defaults; sbt/zinc, SIPs and Discourse sources; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
+- **Not done:** an evaluation set for fusion and rerank defaults; the SIPs repository; exact chunk boundaries from a parser (chunking is indentation and keyword heuristics); vectors keyed by content hash (a rename re-embeds); catching deleted comments.
 
 ### Search after the first day (2026-10-05 and 06)
 
@@ -447,7 +447,7 @@ Also written after the fact. The step-by-step plan for this stretch is [pipeline
 - **Typed links** between issues, PRs, commits, releases and files (`refs.py`, `links.py`, GitHub closing references and merge commits through GraphQL, `shipped_in` from the first containing tag): links on hits, `linked_to` / `link_type` / `has_link` filters, a reference in the query, `related` results and a boost (0.5, chosen with `eval_links.py`), a `links` tool. Design in [LINKS.md](pipelines/search/LINKS.md).
 - **Operations.** `SEARCH_DATA_DIR`, `promote_data.sh` (APFS-clone data between checkouts), `draft.sh` (a draft gateway from a worktree on its own port).
 - **In progress (uncommitted).** `reconcile` lists issues updated-ascending from a real `since` date so it can re-anchor past GitHub's 10,000-item page cap (HTTP 422 on big repos), and refuses to delete when the listing is implausibly short (more than 20 documents and over half the index), so a broken listing cannot wipe an index. Two tests added.
-- **Still not done:** the evaluation set for fusion, rerank and the LLM steps (step 7 of the search plan); SIPs and Discourse sources; the `noise_filter`; decide-model reranking; vectors keyed by content hash.
+- **Still not done:** the evaluation set for fusion, rerank and the LLM steps (step 7 of the search plan); the SIPs repository; the `noise_filter`; decide-model reranking; vectors keyed by content hash.
 
 ## Image generation (phase 13)
 
@@ -480,5 +480,5 @@ Not started; each would get its own design pass first.
 - **Calibrated PR triage on a schedule.** The NLI questions rank PRs well (AUROC 0.80 to 0.99) but the default threshold is badly calibrated. Fit a calibration per question on the 300 maintainer-labelled PRs, then triage new scala/scala issues and PRs on a schedule and suggest labels, without posting anything.
 - **Log and CI digestion.** `iterate` summaries of failing builds, bisect output and partest logs, gated so the summary quotes lines that really occur in the log.
 - **A film kit.** Pull the shared Remotion parts of `examples/showcase` and `examples/safe-scala` (`useCue`, `useWord`, captions, stills) into one package, so a PR or SIP walkthrough is a script plus scenes.
-- **Search follow-ups:** the evaluation set (step 7 of the search plan), SIPs and Discourse sources, and decide-model reranking of results. Duplicate detection shipped as the Duplicates tab.
+- **Search follow-ups:** the evaluation set (step 7 of the search plan), the SIPs repository (the Contributors forum is indexed, see [DISCOURSE.md](pipelines/search/DISCOURSE.md)), and decide-model reranking of results. Duplicate detection shipped as the Duplicates tab.
 - **New kinds of model:** a draft model for speculative decoding in front of Qwen3-Coder; LoRA fine-tunes (`mlx_lm.lora`) of a scorer on the scala/scala labels; music generation for the films (images shipped in phase 13).

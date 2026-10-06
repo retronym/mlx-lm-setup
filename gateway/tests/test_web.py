@@ -176,8 +176,11 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
                        'id="nb-import"', "function itemRow(", "function fromHash("):
             self.assertIn(needle, html)
         body = html[html.index("// ---- duplicates and clusters"):html.index('$("t-search").onclick')]
-        self.assertNotIn("innerHTML", body)                                            # titles come from GitHub: text nodes, and links only to github.com
-        self.assertIn("github\\.com", body)
+        self.assertNotIn("innerHTML", body)                                            # titles come from GitHub: text nodes, and links only to allowed hosts
+        self.assertIn("if (outbound(url)) a.href = url", body)
+        self.assertIn('u.protocol === "https:" && OUTBOUND.has(u.host)', html)         # GitHub and the configured forums, https only
+        for line in re.findall(r".*\.href = \w+\.url.*", html):
+            self.assertIn("if (outbound(", line)                                        # no hit URL bypasses the check
 
     async def test_pages_load_nothing_from_other_origins(self):
         for name in ("chat.html", "admin.html", "jev.html", "speech.html", "translate.html", "search.html", "home.html"):

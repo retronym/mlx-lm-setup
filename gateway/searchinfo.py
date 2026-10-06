@@ -36,7 +36,8 @@ def run_state(index_dir: str, cfg) -> dict | None:
 def universes(cfg) -> list[dict]:
     return [{"id": u.id, "title": u.title, "description": u.description, "default": u.default or u is cfg.default_universe(),
              "projects": [{"id": p, "title": cfg.projects[p].title,
-                           "sources": [{"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "kinds": list(s.kinds), "enabled": s.enabled}
+                           "sources": [{"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "kinds": list(s.kinds), "enabled": s.enabled,
+                            **({"site": s.repo} if s.type == "discourse" else {})}
                                        for s in cfg.projects[p].sources]} for p in u.projects]} for u in cfg.universes.values()]
 
 
@@ -90,8 +91,8 @@ def _github_progress(src, state: dict, now: float) -> dict:
             "frac": min((x["frac"] for x in streams), default=1.0)}
 
 
-def _commits_progress(src, state, now: float) -> dict:
-    """How far the newest-first commit backfill has come: (top - back) / (top - horizon), complete when it reached the horizon or the root."""
+def _commits_progress(src, state, now: float, name: str = "commits") -> dict:
+    """How far the newest-first backfill of commits (or forum topics) has come: (top - back) / (top - horizon), complete when it reached the horizon or the end."""
     top, back, horizon = _epoch(state.get((src.id, "top_date"))), _epoch(state.get((src.id, "back_date"))), _epoch(src.since) or 0.0
     if state.get((src.id, "bf_done")) == "1":
         frac, at, mode = 1.0, src.since, "done"
@@ -100,7 +101,7 @@ def _commits_progress(src, state, now: float) -> dict:
     else:
         frac, at, mode = 0.0, None, None
     frac = max(0.0, min(1.0, frac))
-    return {"kind": "timeline", "horizon": (src.since or "")[:10], "streams": [{"name": "commits", "frac": frac, "at": at, "mode": mode}], "frac": frac}
+    return {"kind": "timeline", "horizon": (src.since or "")[:10], "streams": [{"name": name, "frac": frac, "at": at, "mode": mode}], "frac": frac}
 
 
 def stats(cfg, universe_id: str | None = None, run: dict | None = None) -> dict:
@@ -133,11 +134,13 @@ def stats(cfg, universe_id: str | None = None, run: dict | None = None) -> dict:
                 sync = _github_progress(s, state, now)
             elif s.type == "git_log":
                 sync = _commits_progress(s, state, now)
+            elif s.type == "discourse":
+                sync = _commits_progress(s, state, now, "topics")
             else:
                 sync = {"kind": "snapshot", "frac": 1.0 if chunks else 0.0}
             out.append({"key": s.key, "id": s.id, "label": s.label, "color": s.color, "priority": s.priority, "type": s.type, "enabled": s.enabled,
                         "chunks": chunks, "embedded": embedded, "updated": updated, "sync": sync, "active": s.key == working,
-                        "position": (state.get((s.id, "head")) or "")[:10] or state.get((s.id, "since_issues")) or state.get((s.id, "last_release"))})
+                        "position": (state.get((s.id, "head")) or "")[:10] or state.get((s.id, "since_issues")) or state.get((s.id, "last_release")) or (state.get((s.id, "fwd")) or "")[:10] or None})
         projects.append({"id": pid, "title": proj.title, "indexed": db.exists(), "sources": out})
     return {"universe": {"id": uni.id, "title": uni.title}, "projects": projects}
 

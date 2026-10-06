@@ -5,6 +5,7 @@
   https://github.com/o/r/issues/1, .../pull/1, .../commit/<sha>
   SI-1234                           a legacy tracker prefix (Trac), mapped to a repo by the caller's `legacy_prefixes`
   <40 hex>, `commit abc1234`, `@abc1234`   commit shas; short ones only after a cue word, and the caller drops those that match no indexed commit
+  https://<forum>/t/<slug>/<id>[/<post>]   a Discourse topic, on one of the caller's `forums` (host names); kind "topic", repo = the host
 
 A reference is *closing* when a closing keyword leads it (`fixes`, `closes`, `resolves`, in any tense, also a list: `Fixes #1, #2 and #3`), which is how GitHub reads
 a PR body or commit message. Whether a closing keyword counts is up to the caller (in an issue or a comment it is only a mention)."""
@@ -28,8 +29,8 @@ _LINE_COMMENT = re.compile(r"(?<!:)//(.*)")
 
 @dataclass(frozen=True)
 class Ref:
-    kind: str                # "issue" (an issue or PR: one number space) or "commit"
-    repo: str | None         # None: the repo of the document that mentions it
+    kind: str                # "issue" (an issue or PR: one number space), "commit" or "topic" (a forum topic)
+    repo: str | None         # None: the repo of the document that mentions it; a forum's host for a topic
     key: str                 # the number, or the sha
     via: str                 # bare | qual | url | legacy | sha
     closing: bool
@@ -40,10 +41,12 @@ def _snip(text, a, b):
     return " ".join(text[max(0, a - 36):b + 36].split())[:100]
 
 
-def make_parser(legacy_prefixes=None):
-    """parse(text) -> [Ref], each distinct target once (closing wins), in order of first appearance."""
+def make_parser(legacy_prefixes=None, forums=()):
+    """parse(text) -> [Ref], each distinct target once (closing wins), in order of first appearance. `forums`: Discourse host names whose topic URLs are references."""
     legacy = {k.upper(): v for k, v in (legacy_prefixes or {}).items()}
     legacy_rx = re.compile(rf"(?<![\w-])({'|'.join(map(re.escape, legacy))})-(\d{{1,6}})\b") if legacy else None
+    # /t/<slug>/<id>, /t/<id>, /t/<id>/<post>: a slug is never all digits, so `/t/12/3` is topic 12 (post 3), not topic 3
+    forum_rx = re.compile(rf"https?://(?:www\.)?({'|'.join(map(re.escape, forums))})/t/(?:(?!\d+(?:[/?#\s)\]>\"']|$))[^/\s?#)\]>\"']+/)?(\d{{1,7}})\b", re.I) if forums else None
 
     def parse(text, lists=True):
         """`lists`: `Fixes #1, #2 and #3` closes all three (how commit messages of the Trac era meant it); False is GitHub's reading, where only #1 closes."""
@@ -71,6 +74,9 @@ def make_parser(legacy_prefixes=None):
             for m in legacy_rx.finditer(text):
                 if not _BYTECODE.search(text[text.rfind("\n", 0, m.start()) + 1:(text.find("\n", m.end()) + 1 or len(text))]):
                     add(m, "issue", legacy[m.group(1).upper()], m.group(2), "legacy")
+        if forum_rx:
+            for m in forum_rx.finditer(text):
+                add(m, "topic", m.group(1).lower(), m.group(2), "url")
         for m in _SHA40.finditer(text):
             add(m, "commit", None, m.group(0), "sha")
         for m in _SHA_CUE.finditer(text):

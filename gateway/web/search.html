@@ -204,7 +204,8 @@ for (const id of ["mode", "k"]) { const v = store.get(`search.${id}`); if (v && 
 for (const id of ["rerank", "open"]) { const v = store.get(`search.${id}`); if (v) $(id).checked = v === "1"; $(id).addEventListener("change", () => store.set(`search.${id}`, $(id).checked ? "1" : "0")); }
 
 // ---- kinds of hit, finer than a source: offered when some source of the universe holds them; none picked = everything ----
-const KIND_NAMES = { file: "code & docs", issue: "issues", pr: "PRs", comment: "comments", review: "review comments", summary: "thread summaries", commit: "commits", release: "releases", tag: "tags" };
+const KIND_NAMES = { file: "code & docs", issue: "issues", pr: "PRs", comment: "comments", review: "review comments", summary: "thread summaries", commit: "commits", release: "releases", tag: "tags",
+                     topic: "forum topics", post: "forum replies" };
 const pickedKinds = new Set((store.get("search.kinds") || "").split(",").filter(Boolean));
 function renderKinds(universe) {
   const have = new Set((universe?.projects || []).flatMap(p => p.sources.flatMap(s => s.kinds || [])));
@@ -239,6 +240,7 @@ async function loadUniverse(id) {
     $("universe").value = d.universe.id;
   }
   renderKinds(d.universes.find(u => u.id === d.universe.id));
+  for (const u of d.universes) for (const p of u.projects) for (const s of p.sources) if (s.site) OUTBOUND.add(s.site);
   const prev = $("source").value;
   const opts = [Object.assign(el("option", "", "everything"), { value: "" })];
   for (const p of d.projects) {
@@ -268,8 +270,14 @@ function relTime(iso) {
   return u ? (u.length === 2 ? u[1] : `${Math.floor(s / u[1])} ${u[2]} ago`) : `${(s / (365 * 86400)).toFixed(s < 3 * 365 * 86400 ? 1 : 0).replace(/\.0$/, "")} y ago`;
 }
 const GITHUB = "https://github.com/";                                          // an outbound link, never a resource the page loads
-function whoEl(login, name) {
-  if (login) { const a = el("a", "", "@" + login); a.href = GITHUB + encodeURIComponent(login); a.target = "_blank"; a.rel = "noopener noreferrer"; return a; }
+const OUTBOUND = new Set(["github.com"]);                                        // hosts a hit may link to: GitHub and the indexed forums (from the config)
+function outbound(url) {                                                         // the index is data, never a javascript: URL
+  try { const u = new URL(url); return u.protocol === "https:" && OUTBOUND.has(u.host); } catch { return false; }
+}
+const FORUM_KINDS = new Set(["topic", "post"]);
+function whoEl(login, name, h) {                                                 // a forum author is a forum user, not a GitHub login
+  const forum = h && FORUM_KINDS.has(h.kind) && outbound(h.url);
+  if (login) { const a = el("a", "", "@" + login); a.href = forum ? `https://${new URL(h.url).host}/u/${encodeURIComponent(login)}` : GITHUB + encodeURIComponent(login); a.target = "_blank"; a.rel = "noopener noreferrer"; if (name) a.title = name; return a; }
   return name ? el("span", "", name) : null;
 }
 function timeEl(iso) { const t = el("time", "", relTime(iso)); t.dateTime = iso; t.title = new Date(iso).toISOString().replace("T", " ").slice(0, 16) + " UTC"; return t; }
@@ -284,6 +292,14 @@ function whom(h) {
     add(...[whoEl(h.author, h.author_name) || "someone", h.kind === "review" ? " reviewed " : " commented ", h.created ? timeEl(h.created) : ""]);
     if (h.thread) add(`on ${kindName[h.thread.kind] || "thread"} #${h.thread.number}${h.thread.author || h.thread.created ? " opened " : ""}`, h.thread.author ? "by " : null, whoEl(h.thread.author), h.thread.created ? " " : null, h.thread.created ? timeEl(h.thread.created) : null);
     if (h.created && h.updated && Date.parse(h.updated) - Date.parse(h.created) > 60e3) add("edited ", timeEl(h.updated));
+  } else if (h.kind === "topic") {
+    add("opened by ", whoEl(h.author, h.author_name, h), h.created ? " " : null, h.created ? timeEl(h.created) : null);
+    if (h.labels?.length) add("in " + h.labels.join(", "));
+  } else if (h.kind === "post") {
+    add(whoEl(h.author, h.author_name, h) || "someone", " replied ", h.created ? timeEl(h.created) : "");
+    if (h.thread) add("in a topic opened ", h.thread.author ? "by " : null, whoEl(h.thread.author, null, h), h.thread.created ? " " : null, h.thread.created ? timeEl(h.thread.created) : null);
+    if (h.labels?.length) add("in " + h.labels.join(", "));
+    if (h.created && h.updated && Date.parse(h.updated) - Date.parse(h.created) > 3600e3) add("edited ", timeEl(h.updated));
   } else if (h.kind === "commit") {
     add("committed by ", whoEl(h.author, h.author_name) || "unknown", h.created ? " " : null, h.created ? timeEl(h.created) : null);
   } else if (h.kind === "release" || h.kind === "tag") {
@@ -312,8 +328,9 @@ function linksRow(h) {
   l.top.slice(0, 4).forEach((t, i) => {
     const span = el("span", i ? "sep" : ""), say = { closes: "closes", closed_by: "closed by", merged_as: "merged as", merge_of: "merge of", shipped_in: "shipped in", mentions: "mentions",
                                                      mentioned_by: "mentioned by", defines: "references", defined_by: "referenced by code" }[t.rel] || t.rel;
-    const name = t.kind === "commit" ? "commit " + t.id.split("@")[1].slice(0, 8) : t.kind === "release" ? t.id.split("@")[1] : t.kind === "file" ? t.id.split(":").slice(2).join(":") : t.id;
-    span.append(document.createTextNode(say + " "), t.url && /^https:\/\/github\.com\//.test(t.url) ? ghLink("", name, t.url) : document.createTextNode(name));
+    const name = t.kind === "commit" ? "commit " + t.id.split("@")[1].slice(0, 8) : t.kind === "release" ? t.id.split("@")[1] : t.kind === "file" ? t.id.split(":").slice(2).join(":")
+               : t.kind === "topic" ? "topic " + (t.title ? `“${t.title.slice(0, 50)}”` : t.id.split("/").pop()) : t.id;
+    span.append(document.createTextNode(say + " "), t.url && outbound(t.url) ? ghLink("", name, t.url) : document.createTextNode(name));
     span.title = t.title || ""; row.append(span);
   });
   const n = Object.values(l.counts).reduce((a, b) => a + b, 0);
@@ -353,7 +370,7 @@ function render(d) {
     top.append(el("span", "n", i + 1), el("span", "badge", h.label));
     if (h.state === "closed" || h.state === "merged") top.append(el("span", "badge closed", h.state));
     const a = el("a", "title", h.title); a.rel = "noopener noreferrer"; a.target = "_blank";
-    if (/^https:\/\/github\.com\//.test(h.url)) a.href = h.url;           // the index is data, never a javascript: URL
+    if (outbound(h.url)) a.href = h.url;
     top.append(a);
     const sc = [h.rerank != null ? `rerank ${h.rerank.toFixed(2)}` : null, h.bm25 ? `keyword #${h.bm25}` : null, h.vec ? `vector #${h.vec}` : null].filter(Boolean).join(" · ");
     const scEl = el("span", "scores", sc), x = h.explain;
@@ -491,7 +508,7 @@ function renderAsk(d) {
     top.append(el("span", "n", i + 1), el("span", `badge ${cls}`, say), el("span", "badge closed", a.kind));
     if (a.state) top.append(el("span", a.state === "open" ? "badge open" : "badge closed", a.state));
     const t = el("a", "title", a.title); t.rel = "noopener noreferrer"; t.target = "_blank";
-    if (/^https:\/\/github\.com\//.test(a.url || "")) t.href = a.url;            // the index is data, never a javascript: URL
+    if (outbound(a.url || "")) t.href = a.url;
     top.append(t);
     box.append(top);
     if (a.via) box.append(el("div", "meta", `reached through the issue it closes: ${a.via.replace(/^closes /, "")}`));
@@ -637,7 +654,7 @@ const NB_VIEWS = { duplicates: "dups", clusters: "cls", outliers: "ols" };
 const NB_STATES = { outliers: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]], duplicates: [["any", "any"], ["open", "one is open"], ["closed", "both closed"]], clusters: [["any", "any"], ["open", "open"], ["closed", "closed or merged"]] };
 const NB_KINDS = { outliers: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]], duplicates: [["issue", "issue ↔ issue"], ["pr", "PR ↔ PR"], ["mixed", "issue ↔ PR"], ["any", "any"]], clusters: [["any", "issues and PRs"], ["issue", "issues"], ["pr", "PRs"]] };
 const fill = (sel, opts, value) => { sel.replaceChildren(...opts.map(([v, t]) => Object.assign(el("option", "", t), { value: v }))); sel.value = opts.some(o => o[0] === value) ? value : opts[0][0]; };
-const ghLink = (cls, text, url) => { const a = el("a", cls, text); a.rel = "noopener noreferrer"; a.target = "_blank"; if (/^https:\/\/github\.com\//.test(url)) a.href = url; return a; };
+const ghLink = (cls, text, url) => { const a = el("a", cls, text); a.rel = "noopener noreferrer"; a.target = "_blank"; if (outbound(url)) a.href = url; return a; };
 function itemRow(it) {
   const row = el("div", "item");
   row.append(el("span", "badge", it.project), el("span", "badge", it.kind === "pr" ? "PR" : "issue"));

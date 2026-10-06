@@ -1,6 +1,6 @@
 # Semantic search over Scala compiler and build sources
 
-Projects are indexed independently, one SQLite file each (chunks, an FTS5 keyword index, embeddings), and composed into **universes** that are searched together: BM25 and vector hits from every member database are merged by score, fused by reciprocal rank, and optionally reranked. Everything runs locally; the only network use is `git` and `gh api` for syncing and the one-time model download. See [PLAN.md](PLAN.md) for the design decisions and what is still to do.
+Projects are indexed independently, one SQLite file each (chunks, an FTS5 keyword index, embeddings), and composed into **universes** that are searched together: BM25 and vector hits from every member database are merged by score, fused by reciprocal rank, and optionally reranked. Everything runs locally; the only network use is `git`, `gh api` and a Discourse forum's public JSON API for syncing, and the one-time model download. See [PLAN.md](PLAN.md) for the design decisions and what is still to do.
 
 ## Configuration (JSON)
 
@@ -15,11 +15,12 @@ config/universes/<id>.json  a universe: a named list of projects
 | `git` | `repo`, `ref`, `paths`, `exclude` (globs), `chunkers` (suffix to `scala_ts` / `java_ts` (tree-sitter, [below](#chunking-code)), `scala` / `java` (heuristic, kept for fallback and comparison) or `markdown`; `plain` not yet) | files of that ref from a managed bare clone under `data/repos/`; one chunk per definition or heading section |
 | `git_log` | `repo`, `ref`, `paths` (optional), `since`, `merges` (default false), `skip_authors` (default: dependency-bump bots) | commit messages, one chunk per commit: the full message plus the paths it changed, with `#123` / `scala/bug#123` references in the metadata. History is walked newest-first from the ref under `max_items_per_run` (a forward walk first picks up new commits), like the GitHub sources; merges and bots are left out; a rewritten branch is re-walked |
 | `github` | `repo`, `include` (`issues`, `prs`, `comments`, `reviews`), `since` | issues and PRs (state open / merged / closed), conversation comments, inline review comments with the diff hunk; bots and `/rebuild`-style comments skipped. All the sources of a project on one repo share one pass over its streams; two sources may not index the same kind of item (the config says so) |
+| `discourse` | `site` (a host name, in place of `repo`), `since` | a Discourse forum's public topics ([DISCOURSE.md](DISCOURSE.md)): kind `topic` for the opening post, `post` for each reply, quotes cut to who and their first words; the post's links (from Discourse's HTML, made absolute) in the metadata for the links phase. Newest-bumped first under the same two cursors and per-run cap as the GitHub sources, one request a second, rate limits waited out (`search.json` `discourse`) |
 | `github_releases` | `repo`, `tag_messages` | GitHub release notes (a header chunk, then one chunk per heading for long notes; `#123` and `/pull/123` references go into the chunk metadata) plus annotated tag messages for tags without a release |
 
 Every source also takes `id`, `label`, `color`, `priority` (1 highest .. 9), `enabled`, `min_interval_hours`, `max_items_per_run`. Labels and colours are what the web page shows, so adding a project needs no code change. `python config.py check` validates everything (all problems at once, with file and key path) and prints the tree; `python config.py show <universe>`.
 
-The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
+The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm, and the Scala Contributors forum). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
 
 ```bash
 PY=/path/to/.venv-jev/bin/python                  # numpy, torch, transformers
@@ -45,10 +46,9 @@ $PY pipelines/search/test_config.py; $PY pipelines/search/test_search.py; $PY pi
 
 - A rename re-embeds the moved file's chunks (vectors are keyed by chunk id, not content hash; keying by hash would reuse them).
 - Issue deletions and transfers are only caught by `sync.py reconcile`. Comment deletions are not caught at all.
-- The issue backfill starts at 2023-01-01 unless `--since` says otherwise; GitHub PRs, Discourse and the SIPs repository are not wired in (each is an adapter that yields chunks and is written like `ghissues.py`).
+- The issue backfill starts at 2023-01-01 unless `--since` says otherwise; the SIPs repository is not wired in (its discussions are, through the Contributors forum).
 - Markdown chunking is heuristic (headings), and the `plain` chunker does not exist. Code is chunked by tree-sitter ([below](#chunking-code)).
 - The query CLI loads the embedder (and reranker) per call, 4 s hybrid and 7 s with `--rerank`. That disappears when this becomes a gateway backend (`/v1/embeddings`, `/v1/rerank` and a `search` MCP tool).
-- sbt/zinc, the SIPs and Discourse are not indexed yet, so e.g. Zinc invalidation questions only find scala/bug issues.
 
 ## Chunking code
 
@@ -107,7 +107,7 @@ For clusters, `trend` is the share of a cluster's items created in the last two 
 
 ## Links between documents
 
-`links.py` (the refresh's `links` phase, or `links.py [universe] [--force]`) derives typed edges between issues, PRs, commits, releases and files from the references in what is already indexed, into `data/links/<universe>.db` (no model, no network, about 10 s for everything). Edge types: `closes` (GitHub's closing references of a PR, fetched with GraphQL at the end of the PR source's sync and kept in the PR chunk's metadata; or a closing keyword in a PR or commit), `merged_as` (PR to its merge commit), `mentions`, `shipped_in` (release notes name it, or its release is the first tag that contains the commit), `touches` (commit to an indexed file), `defines` (a reference in a code comment). Every edge has a confidence and the words it was found in; targets not indexed yet are kept as dangling nodes. Search reads it: every hit has `links`, the `linked_to` / `link_type` / `has_link` restrictions, a reference in the query comes first with what links to it, the top hits' linked documents come back apart as `related` (`related` in `search.json`: seeds, limit, weights, hub guard, and `boost`, 0.5: a hit linked to the top ones moves up; `eval_links.py` measured it), and the `links` tool shows a neighbourhood or a story (below). Design, decisions and the rest of the plan: [LINKS.md](LINKS.md).
+`links.py` (the refresh's `links` phase, or `links.py [universe] [--force]`) derives typed edges between issues, PRs, commits, releases and files from the references in what is already indexed, into `data/links/<universe>.db` (no model, no network, about 10 s for everything). Forum topics are nodes too (`topic:<host>/<id>`): a topic mentions the GitHub items, commits and other topics its posts link to, and anything whose text links to a topic (a PR citing its Pre-SIP thread) mentions it; topic URLs of `links.forums` hosts that are not indexed (users.scala-lang.org) are kept as dangling nodes. Edge types: `closes` (GitHub's closing references of a PR, fetched with GraphQL at the end of the PR source's sync and kept in the PR chunk's metadata; or a closing keyword in a PR or commit), `merged_as` (PR to its merge commit), `mentions`, `shipped_in` (release notes name it, or its release is the first tag that contains the commit), `touches` (commit to an indexed file), `defines` (a reference in a code comment). Every edge has a confidence and the words it was found in; targets not indexed yet are kept as dangling nodes. Search reads it: every hit has `links`, the `linked_to` / `link_type` / `has_link` restrictions, a reference in the query comes first with what links to it, the top hits' linked documents come back apart as `related` (`related` in `search.json`: seeds, limit, weights, hub guard, and `boost`, 0.5: a hit linked to the top ones moves up; `eval_links.py` measured it), and the `links` tool shows a neighbourhood or a story (below). Design, decisions and the rest of the plan: [LINKS.md](LINKS.md).
 
 ```bash
 $PY pipelines/search/links.py stats                  # edges per type, dangling share, biggest hubs
