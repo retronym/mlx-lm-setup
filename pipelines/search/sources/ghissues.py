@@ -78,6 +78,11 @@ def configure(github):
     LOW_WATER, PAGE_DELAY, PAGE_LIMIT = github["min_remaining"], github["page_delay_s"], github["page_limit"]
 
 
+def _login(item):
+    """The author's login; GitHub sends `user: null` for a deleted account (shown as @ghost on the site)."""
+    return (item.get("user") or {}).get("login") or "ghost"
+
+
 def _iso(ts):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
 
@@ -145,9 +150,9 @@ class GhRepo:
                     return None
                 n = int(c["issue_url"].rsplit("/", 1)[1])
                 t = titles.get(n) or self._title(store, n)
-                return m.id, list(self._chunks(m, f"comment:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (comment by {c['user']['login']})", c["body"],
+                return m.id, list(self._chunks(m, f"comment:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (comment by {_login(c)})", c["body"],
                                                c["html_url"], {"kind": "comment", "number": n, "updated": c["updated_at"], "created": c.get("created_at"),
-                                                               "author": c["user"]["login"]}))
+                                                               "author": _login(c)}))
         else:
             def route(c):
                 m = self.member("reviews")
@@ -156,9 +161,9 @@ class GhRepo:
                 n = int(c["pull_request_url"].rsplit("/", 1)[1])
                 t = titles.get(n) or self._title(store, n)
                 hunk = "\n".join((c.get("diff_hunk") or "").splitlines()[-6:])
-                return m.id, list(self._chunks(m, f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {c['user']['login']})",
+                return m.id, list(self._chunks(m, f"review:{c['id']}", f"issue:{n}", f"{self.repo}#{n} {t}  (review comment on {c['path']} by {_login(c)})",
                                                f"{hunk}\n\n{c['body']}" if hunk else c["body"], c["html_url"], {"kind": "review", "number": n, "updated": c["updated_at"], "created": c.get("created_at"),
-                                               "author": c["user"]["login"]}))
+                                               "author": _login(c)}))
         return route
 
     def _ingest(self, store, route, items, tot, existing_only=False):

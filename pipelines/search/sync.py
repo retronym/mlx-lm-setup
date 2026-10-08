@@ -58,6 +58,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
                 st.commit()
             except Exception as e:                               # noqa: BLE001  one source failing must not stop the rest
                 failed += 1
+                st.db.rollback()                                 # release the write lock: the next source opens its own connection
                 print(f"{g.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
                 run.error(f"{g.key}: {type(e).__name__}: {e}")
             continue
@@ -89,6 +90,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
             st.put(s.id, "last_sync", str(time.time())); st.commit()
         except Exception as e:                                           # noqa: BLE001
             failed += 1
+            st.db.rollback()
             print(f"{s.key}: FAILED: {type(e).__name__}: {e}", file=sys.stderr)
             run.error(f"{s.key}: {type(e).__name__}: {e}")
     if skipped:

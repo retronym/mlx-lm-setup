@@ -107,6 +107,13 @@ class MetaTests(Case):
         self.assertEqual((m["s:comment:10"]["author"], m["s:comment:10"]["created"]), ("someone", "2025-12-02T00:00:00Z"))
         self.assertEqual((m["s:review:20"]["author"], m["s:review:20"]["created"]), ("someone", "2025-12-03T00:00:00Z"))
 
+    def test_a_deleted_account_is_the_ghost(self):
+        r = dict(review(21, 2, "2026-02-07T00:00:00Z"), user=None)                                  # GitHub sends user: null for deleted accounts
+        gh = FakeGitHub(self.GH.data["issues"], [comment(14, 1, "2026-02-07T00:00:00Z", user=None)], [r])
+        self.run_sync(gh, [src("s", ["issues", "prs", "comments", "reviews"])])
+        m = self.metas()
+        self.assertEqual((m["s:comment:14"]["author"], m["s:review:21"]["author"]), ("ghost", "ghost"))
+
     def test_meta_only_fills_in_existing_chunks_and_ingests_nothing_new_nor_moves_a_cursor(self):
         members = [src("s", ["issues", "prs", "comments", "reviews"])]
         self.run_sync(self.GH, members)
