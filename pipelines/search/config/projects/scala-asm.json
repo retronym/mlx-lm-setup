@@ -13,6 +13,6 @@
     {"id": "releases", "type": "github_releases", "label": "scala-asm releases", "color": "#ca8a04", "priority": 3,
      "repo": "scala/scala-asm", "tag_messages": true},
     {"id": "commits", "type": "git_log", "label": "scala-asm commits", "color": "#92400e", "priority": 4,
-     "repo": "scala/scala-asm", "ref": "main"}
+     "repo": "scala/scala-asm", "ref": "main", "merges": true}
   ]
 }

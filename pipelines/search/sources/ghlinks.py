@@ -23,9 +23,15 @@ def _query(owner, name, numbers, first):
     return f'query {{ repository(owner: "{owner}", name: "{name}") {{ {body} }} rateLimit {{ remaining resetAt }} }}'
 
 
+class Overloaded(RuntimeError):
+    """GitHub answered 502/503/504 (or timed out) on every retry: the query is too heavy for it right now; a smaller batch usually goes through."""
+
+
 def run_query(repo, query, log=print):
     """The `repository` object of a GraphQL query over one repo's PRs (`p<N>: pullRequest(number: N) {...}` aliases), retrying a rate limit and sleeping to
-    the reset when few points are left. A PR GitHub no longer has comes back null; any other error is raised."""
+    the reset when few points are left, and retrying a 5xx a few times before raising `Overloaded`. A PR GitHub no longer has comes back null; any other
+    error is raised."""
+    busy = 0
     for attempt in range(6):
         r = _graphql(query)
         try:
@@ -38,6 +44,11 @@ def run_query(repo, query, log=print):
         text = (r.stderr + " " + json.dumps(errors)).lower()
         if "rate limit" in text or "http 403" in text or "http 429" in text or "secondary" in text:
             log(f"  {repo} graphql: rate limited, waiting"); time.sleep(60 * (attempt + 1))
+        elif any(c in text for c in ("http 502", "http 503", "http 504", "timeout", "timed out")):
+            busy += 1
+            if busy > 2:
+                raise Overloaded(f"gh api graphql {repo}: {r.stderr.strip()[:200]}")
+            log(f"  {repo} graphql: {r.stderr.strip()[:60]}, retrying"); time.sleep(10 * busy)
         else:
             raise RuntimeError(f"gh api graphql {repo}: {(r.stderr or json.dumps(errors)).strip()[:300]}")
     else:
@@ -49,10 +60,22 @@ def run_query(repo, query, log=print):
     return d["data"]["repository"]
 
 
+def run_split(repo, make_query, numbers, log=print):
+    """`run_query` over the PRs `numbers`, halving the batch while GitHub is `Overloaded` (down to a single PR, whose failure is raised)."""
+    try:
+        return run_query(repo, make_query(numbers), log)
+    except Overloaded:
+        if len(numbers) <= 1:
+            raise
+        h = len(numbers) // 2
+        log(f"  {repo} graphql: overloaded, splitting a batch of {len(numbers)}")
+        return {**run_split(repo, make_query, numbers[:h], log), **run_split(repo, make_query, numbers[h:], log)}
+
+
 def fetch(repo, numbers, first=10, log=print):
     """{number: {"closes": [...], "merge_sha": sha | None}} for the PR numbers that exist (a deleted or transferred PR is simply absent)."""
     owner, name = repo.split("/")
-    got = run_query(repo, _query(owner, name, numbers, first), log)
+    got = run_split(repo, lambda ns: _query(owner, name, ns, first), list(numbers), log)
     out = {}
     for n in numbers:
         pr = got.get(f"p{n}")

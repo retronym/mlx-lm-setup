@@ -20,7 +20,7 @@
   },
   "llm": {
     "noise_filter": {"enabled": false, "model": "jevstyle-2b"},
-    "thread_summaries": {"enabled": false, "model": "qwen3-coder", "min_comments": 8, "max_per_run": 200},
+    "thread_summaries": {"enabled": true, "model": "qwen3-coder", "min_comments": 8, "max_per_run": 200},
     "digest": {"enabled": true, "model": "qwen3-coder"},
     "eval_questions": {"model": "qwen3-coder", "per_project": 40}
   }

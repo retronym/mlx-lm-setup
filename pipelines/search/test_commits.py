@@ -105,6 +105,30 @@ class Backfill(Case):
             GitLog(source(merges=True), self.repo.path).sync(st2, log=lambda *_: None)
             self.assertIn("Merge pull request #5 from feature", [r[0] for r in st2.db.execute("SELECT substr(title, instr(title, ' commit ') + 17) FROM chunks")])
 
+    def test_a_merge_is_titled_by_the_pr_and_lists_what_the_pr_changed(self):
+        self.repo.commit("base")
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.commit("work on the feature", files=("src/f.scala",))
+        self.repo.git("checkout", "-q", "main")
+        self.repo.git("merge", "-q", "--no-ff", "-m", "Merge pull request #5 from dev/feature\n\nAdd the feature", "feature")
+        self.sync(merges=True)
+        self.assertIn("Add the feature", self.subjects())
+        text, meta = self.st.db.execute("SELECT text, meta FROM chunks WHERE title LIKE '%Add the feature'").fetchone()
+        self.assertIn("Files changed: src/f.scala", text)
+        self.assertEqual(json.loads(meta)["refs"], [5])
+
+    def test_turning_merges_on_rewalks_a_finished_history(self):
+        self.repo.commit("base")
+        self.repo.git("checkout", "-q", "-b", "feature")
+        self.repo.commit("work on the feature")
+        self.repo.git("checkout", "-q", "main")
+        self.repo.git("merge", "-q", "--no-ff", "-m", "Merge pull request #5 from dev/feature\n\nAdd the feature", "feature")
+        self.sync()
+        self.assertEqual(self.state("bf_done"), "1")
+        self.assertNotIn("Add the feature", self.subjects())
+        self.sync(merges=True)
+        self.assertEqual(self.subjects(), ["Add the feature", "base", "work on the feature"])
+
     def test_the_github_handle_comes_from_a_noreply_email(self):
         self.repo.commit("by a github user", email="12345+octocat@users.noreply.github.com", author="The Octocat")
         self.sync()

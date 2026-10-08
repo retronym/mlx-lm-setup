@@ -271,9 +271,9 @@ class ThreadSummaries(Case):
         self.assertEqual(self.run_enrich()[:2], (0, 1))
         self.assertEqual(st.db.execute("SELECT count(*) FROM chunks WHERE id LIKE '%summary%'").fetchone()[0], 0)
 
-    def test_disabled_by_default_in_the_shipped_config(self):
+    def test_enabled_in_the_shipped_config(self):
         real = config.load(config.CONFIG_DIR)
-        self.assertFalse(real.search["llm"]["thread_summaries"]["enabled"])
+        self.assertTrue(real.search["llm"]["thread_summaries"]["enabled"])
         self.assertTrue(real.search["llm"]["digest"]["enabled"])
 
 

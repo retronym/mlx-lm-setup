@@ -101,6 +101,16 @@ class EnrichTests(unittest.TestCase):
         with mock.patch.object(ghlinks, "_graphql", run):
             self.assertEqual(ghlinks.enrich(self.st, "issues", "o/r", log=lambda *_: None), 7)
 
+    def test_a_batch_github_keeps_timing_out_on_is_split_in_half(self):
+        ok = graphql_for({n: ([], "a" * 40) for n in range(1, 8)}, self.calls)
+        def run(q):                                                      # a 502 for any batch of more than two PRs
+            return subprocess.CompletedProcess([], 1, "", "gh: HTTP 502") if q.count("pullRequest(") > 2 else ok(q)
+        with mock.patch.object(ghlinks, "_graphql", run):
+            self.assertEqual(ghlinks.enrich(self.st, "issues", "o/r", log=lambda *_: None), 7)
+        self.assertEqual(sorted(n for c in self.calls for n in c), list(range(1, 8)))
+        self.assertTrue(all(len(c) <= 2 for c in self.calls))
+        self.assertEqual(self.meta(5)["merge_sha"], "a" * 40)
+
 
 def git(repo, *a, env=None):
     return subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True, env={**os.environ, "GIT_AUTHOR_DATE": "2024-01-01T00:00:00", "GIT_COMMITTER_DATE": "2024-01-01T00:00:00", **(env or {})}).stdout.strip()

@@ -42,7 +42,7 @@ def refresh(store, source_id, repo, max_age_hours=6, batch=50, log=print):
     done = 0
     for i in range(0, len(rows), batch):
         part = rows[i:i + batch]
-        got = ghlinks.run_query(repo, _query(owner, name, [n for _, n in part]), log)
+        got = ghlinks.run_split(repo, lambda ns: _query(owner, name, ns), [n for _, n in part], log)
         now = time.time()
         for rowid, n in part:
             pr = got.get(f"p{n}")

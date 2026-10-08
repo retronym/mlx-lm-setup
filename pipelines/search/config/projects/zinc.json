@@ -14,6 +14,6 @@
     {"id": "releases", "type": "github_releases", "label": "zinc releases", "color": "#ca8a04", "priority": 2,
      "repo": "sbt/zinc", "tag_messages": true},
     {"id": "commits", "type": "git_log", "label": "zinc commits", "color": "#047857", "priority": 3,
-     "repo": "sbt/zinc", "ref": "develop"}
+     "repo": "sbt/zinc", "ref": "develop", "merges": true}
   ]
 }

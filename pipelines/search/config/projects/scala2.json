@@ -9,10 +9,10 @@
     {"id": "issues", "type": "github", "label": "scala/bug issues", "color": "#be185d", "priority": 3,
      "repo": "scala/bug", "include": ["issues", "comments"]},
     {"id": "prs", "type": "github", "label": "scala/scala PRs", "color": "#0369a1", "priority": 4,
-     "repo": "scala/scala", "include": ["prs", "comments", "reviews"], "since": "2020-01-01T00:00:00Z"},
+     "repo": "scala/scala", "include": ["prs", "comments", "reviews"]},
     {"id": "releases", "type": "github_releases", "label": "scala/scala releases", "color": "#ca8a04", "priority": 2,
      "repo": "scala/scala", "tag_messages": true},
     {"id": "commits", "type": "git_log", "label": "scala/scala commits", "color": "#a16207", "priority": 5,
-     "repo": "scala/scala", "ref": "2.13.x", "max_items_per_run": 4000}
+     "repo": "scala/scala", "ref": "2.13.x", "merges": true, "max_items_per_run": 4000}
   ]
 }

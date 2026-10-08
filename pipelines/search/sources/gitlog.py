@@ -1,18 +1,21 @@
 """Commit messages: the "why" behind the code. One chunk per commit of a ref in the managed bare clone: the full message (subject, body, trailers)
 plus the paths it changed, so a query can match what was said or where. Merge commits are left out (their message is just a PR title that the PR
-source already has) unless the source asks for them, and so are bots (`skip_authors`: dependency-bump commits).
+source already has) unless the source asks for them, and so are bots (`skip_authors`: dependency-bump commits). A merge commit is titled with the PR
+title rather than "Merge pull request #N from ...", lists the files the PR changed (the diff against the first parent), and is what a PR's `merged_as`
+link points at.
 
 History is walked newest-first with two cursors kept in the project database, like the GitHub sources:
   head       the commit the ref pointed at last time: each run first ingests `head..ref`, so new commits arrive at once (a rewritten branch, where
              `head` is no longer an ancestor, is handled by re-walking: chunks are keyed by sha, so nothing is stored twice);
   back       the oldest commit ingested so far: the backfill continues from its parent, newest-first, until the `since` horizon or the root, under the
              per-run cap (`max_items_per_run`). `top_date`, `back_date`, `bf_done` and `horizon` feed the progress bar.
-Widening `since` re-opens the backfill. Commits that have since disappeared from the branch (a force-push) stay indexed; they are still real history."""
+Widening `since`, or turning `merges` on or off, re-opens the backfill. Commits that have since disappeared from the branch (a force-push) stay indexed; they are still real history."""
 import re, subprocess, time
 from store import Chunk
 from sources.gitsrc import _split_big, MAX
 
 _REF = re.compile(r"(?<!\w)(?:[\w.-]+/[\w.-]+)?#(\d{1,6})\b")           # #123, (#123), scala/bug#123, Fixes sbt/zinc#123
+_MERGE_PR = re.compile(r"^Merge pull request #\d+ from \S+$")
 _NOREPLY = re.compile(r"^(?:\d+\+)?([A-Za-z0-9][A-Za-z0-9-]*)@users\.noreply\.github\.com$", re.I)
 MAX_FILES = 20
 BATCH = 500
@@ -43,7 +46,7 @@ class GitLog:
 
     def _log(self, rev, *extra):
         """Commits reachable from `rev` (newest first) as [(sha, author, email, epoch, message, [paths])]."""
-        args = ["log", "--name-only", "--format=%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%B%x1f", f"--since={self.src.since}"] + ([] if self.src.merges else ["--no-merges"]) + list(extra) + [rev]
+        args = ["log", "--name-only", "--format=%x1e%H%x1f%an%x1f%ae%x1f%at%x1f%B%x1f", f"--since={self.src.since}"] + (["--diff-merges=first-parent"] if self.src.merges else ["--no-merges"]) + list(extra) + [rev]
         if self.src.paths:
             args += ["--", *self.src.paths]
         out = _git(self.repo, *args).stdout
@@ -59,7 +62,11 @@ class GitLog:
     def _chunks(self, sha, author, email, at, msg, files):
         if author.lower() in self.skip or not msg:
             return []
-        subject = msg.splitlines()[0][:120]
+        lines = msg.splitlines()
+        subject = lines[0]
+        if _MERGE_PR.match(subject):                                   # "Merge pull request #123 from a/b" + blank + the PR title
+            subject = next((l for l in lines[1:] if l.strip()), subject)
+        subject = subject[:120]
         fl = ", ".join(files[:MAX_FILES]) + (f" and {len(files) - MAX_FILES} more" if len(files) > MAX_FILES else "")
         title = f"{self.src.repo} commit {sha[:8]} {subject}"
         meta = {"kind": "commit", "sha": sha, "author_name": author, "author": handle_from_email(email), "updated": _iso(at), "created": _iso(at),
@@ -93,6 +100,11 @@ class GitLog:
         put("horizon", self.src.since)
         head = g("head")
         restart = not head                                             # first run, or the branch was rewritten: walk down from the ref
+        merges = "1" if self.src.merges else "0"
+        if head and (g("merges") or "0") != merges:                   # merges turned on (or off): re-walk; unchanged commits cost no write
+            log(f"  {self.src.key}: merges {'on' if self.src.merges else 'off'}, walking down from {ref[:8]} again")
+            restart = True
+        put("merges", merges)
         # 1. forward: everything new since the last run (uncapped: it is the recent past)
         if head and head != ref:
             if _git(self.repo, "merge-base", "--is-ancestor", head, ref, check=False).returncode == 0:
