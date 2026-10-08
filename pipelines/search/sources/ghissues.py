@@ -11,12 +11,15 @@ Each stream keeps two cursors in the project database (under the pseudo-source `
 Widening a source's `since` in the config re-opens the backfill. Paging is explicit so it is polite and resumable: every page is committed
 and the cursors saved, the rate limit is checked every few pages (sleeping to the reset when little is left), a 403/429 is waited out, and
 long lists are re-anchored before GitHub's 10,000-item `page=` cap. Deletions are invisible to `since`; `reconcile()` lists all live numbers."""
-import calendar, json, subprocess, time
+import calendar, json, re, subprocess, time
 from store import Chunk
 from sources.gitsrc import _split_big, MAX
 
 LOW_WATER = 300               # sleep until the reset when fewer requests than this remain (search.json github.min_remaining)
 PAGE_DELAY = 0.2
+
+
+TRANSIENT = re.compile(r"timed out|timeout|connection reset|EOF|broken pipe|HTTP 50[0234]|TLS handshake|no such host", re.I)
 
 
 def _gh(args):
@@ -52,6 +55,8 @@ def pages(path, log=print, **params):
                 break
             if "rate limit" in r.stderr.lower() or "HTTP 403" in r.stderr or "HTTP 429" in r.stderr:
                 log(f"  {path} page {page}: rate limited, waiting"); wait_for_quota(log); time.sleep(30 * (attempt + 1))
+            elif TRANSIENT.search(r.stderr) and attempt < 3:              # a dropped connection or a 5xx: worth another try
+                log(f"  {path} page {page}: {r.stderr.strip()[-80:]}, retrying"); time.sleep(10 * (attempt + 1))
             else:
                 raise RuntimeError(f"gh api {path}: {r.stderr.strip()[:300]}")
         else:

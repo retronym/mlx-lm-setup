@@ -221,6 +221,12 @@ class Paging(unittest.TestCase):
         self.assertEqual([c[0] for c in calls], [1, 2, 3, 1, 2, 3, 1, 2])                           # pages restart at 1 instead of passing the cap
         self.assertTrue(all(calls[i][1] != calls[i - 1][1] for i in (3, 6)))                        # ... re-anchored at the last item's updated_at
 
+    def test_a_dropped_connection_is_retried(self):
+        answers = [mock.Mock(returncode=1, stdout="", stderr='Get "https://api.github.com/x": read tcp: read: operation timed out')]
+        ok = mock.Mock(returncode=0, stdout=json.dumps([{"updated_at": "2020-01-01T00:00:00Z"}]), stderr="")
+        with mock.patch.object(ghissues, "_gh", lambda args: answers.pop(0) if answers else ok), mock.patch.object(ghissues.time, "sleep"):
+            self.assertEqual(sum(len(p) for p in ghissues.pages("repos/o/r/issues", log=lambda *_: None)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
