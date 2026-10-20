@@ -41,17 +41,20 @@ def faithful(source, text, min_entailment=0.5, max_contradiction=0.5):
     return not bad, bad
 
 
-def grounded(messages, source, model, attempts=3, max_chars=None, **kw):
+def grounded(messages, source, model, attempts=3, max_chars=None, checks=None, **kw):
     """Ask the LLM, check the answer against `source`, retry with the problems. Returns (text, ok, tries). A last unfaithful answer is returned
-    with ok=False: the caller decides whether to keep it (the indexer does not)."""
+    with ok=False: the caller decides whether to keep it (the indexer does not). `checks(text) -> [problem]` adds mechanical gates, run before
+    the NLI model (a failed gate skips the NLI call for that try)."""
     convo, text, tries = list(messages), "", 0
     for tries in range(1, attempts + 1):
         text = chat(convo, model, **kw)
         problems = []
         if max_chars and len(text) > max_chars:
             problems.append(f"the answer is {len(text)} characters; keep it under {max_chars}")
-        ok, bad = faithful(source, text)
-        problems += bad
+        if checks:
+            problems += checks(text)
+        if not problems:
+            problems += faithful(source, text)[1]
         if not problems:
             return text, True, tries
         convo += [{"role": "assistant", "content": text},
@@ -80,6 +83,6 @@ def grounded_pruned(messages, source, model, **kw):
     if ok:
         return text, True, tries, 0
     pruned, removed = prune(source, text)
-    if pruned and removed and faithful(source, pruned)[0]:
+    if pruned and removed and faithful(source, pruned)[0] and not (kw.get("checks") and kw["checks"](pruned)):
         return pruned, True, tries, removed
     return text, False, tries, 0

@@ -19,7 +19,7 @@ class FakeGateway:
     """Just enough of the gateway: /v1/embeddings, /v1/chat/completions, /api/entail, /api/search."""
 
     def __init__(self):
-        self.chat_calls, self.embed_calls, self.unfaithful_first, self.partly_unfaithful = [], 0, 0, False
+        self.chat_calls, self.embed_calls, self.unfaithful_first, self.partly_unfaithful, self.overviews = [], 0, 0, False, []
         gw = self
 
         class H(BaseHTTPRequestHandler):
@@ -58,9 +58,11 @@ class FakeGateway:
             self.unfaithful_first -= 1
             text = "The maintainers decided to rewrite the whole compiler in Rust, which is UNFAITHFUL to the source text."
         elif self.partly_unfaithful and "<facts>" in prompt:
-            text = "## Proj\n- PR sbt/zinc#1500 was merged after a long discussion between the maintainers.\n- The maintainers decided to rewrite everything in Rust, which is UNFAITHFUL to the facts.\n"
+            text = "The PR o/gh#7 was discussed at length by the maintainers.\nThe maintainers decided to rewrite everything in Rust, which is UNFAITHFUL to the facts."
+        elif self.overviews and "<facts>" in prompt:
+            text = self.overviews.pop(0)
         elif "<facts>" in prompt:
-            text = "Zinc saw activity this week. PR sbt/zinc#1500 was merged after discussion. Release v1.11.0 was published."
+            text = "Proj saw activity this week. The issue o/gh#1500 was discussed. Release v1.11.0 was published."
         else:
             text = "The thread reports a crash in the typer. The reporter and the maintainers discussed it at length. It was fixed in a later release."
         return {"choices": [{"message": {"content": text}}]}
@@ -218,18 +220,43 @@ class Digest(Case):
         line = next(l for l in lines if "commits landed" in l)
         self.assertIn("5 commits landed", line); self.assertIn("Fix the typer", line); self.assertNotIn("An old one", line)
 
+    def test_overview_gates_and_context(self):
+        st = self.store()
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.thread(st, 1500, 4, issue_updated=now)
+        st.apply("issues", [Chunk("issues:summary:1500", "issue:1500", "o/gh#1500 title (thread summary)", "The typer crashes on nested implicits and a fix was agreed.", "u",
+                                  {"kind": "summary", "number": 1500, "updated": now})])
+        st.commit()
+        self.gw.overviews = ["Busy week: o/gh#1500 drew 4 new comments.",                                   # a count
+                             "The typer crash (o/gh/1500) and o/gh#9999 were discussed.",                        # malformed and unknown references
+                             "One. Two is here. Three is here. Four is here. Five is too many",                   # too long, cut off
+                             "Work continued on a typer crash with nested implicits (o/gh#1500)."]
+        d = digest.make_digest(self.cfg, "u", time.time() - 3600)
+        self.assertEqual((d["overview"], d["attempts"]), (True, 4))
+        self.assertTrue(d["text"].startswith("Work continued"))
+        self.assertIn("o/gh#1500: The typer crashes on nested implicits", d["context"])               # the thread summary is the context
+        fb = " ".join(self.gw.chat_calls[1:])
+        for msg in ("do not count comments", "o/gh#9999", "owner/repo#number, not", "at most 4 sentences", "cut off"):
+            self.assertIn(msg, fb)
+
+    def test_gist_skips_templates(self):
+        self.assertEqual(digest._gist("<!-- template -->\n## Description\n- [x] tests\n\nThis fixes the crash when a sealed Java class is completed."),
+                         "This fixes the crash when a sealed Java class is completed.")
+        self.assertEqual(digest._gist("Fixes #1\n\n## Have you relied on LLM-based tools?\n\nYes, and a human reviewed every single line.\n\nBenchmarks with pipelining on:\n\n"
+                                      "The warm build of the whole project is now five times faster."), "The warm build of the whole project is now five times faster.")
+
     def test_unsupported_lines_are_pruned_after_the_retries(self):
         self.thread(self.store(), 7, 1, issue_updated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         self.gw.partly_unfaithful = True
         d = digest.make_digest(self.cfg, "u", time.time() - 3600)
-        self.assertEqual((d["checked"], d["overview"], d["attempts"], d["pruned"]), (True, True, 3, 1))     # the bad line went, the good one stayed
-        self.assertNotIn("Rust", d["text"]); self.assertIn("merged after a long discussion", d["text"])
+        self.assertEqual((d["checked"], d["overview"], d["attempts"], d["pruned"]), (True, True, 4, 1))     # the bad line went, the good one stayed
+        self.assertNotIn("Rust", d["text"]); self.assertIn("discussed at length", d["text"])
 
     def test_an_overview_that_cannot_be_made_faithful_is_left_out_but_the_facts_remain(self):
         st = self.store(); self.thread(st, 7, 1, issue_updated=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
         self.gw.unfaithful_first = 99
         d = digest.make_digest(self.cfg, "u", time.time() - 3600)
-        self.assertEqual((d["overview"], d["attempts"]), (False, 3))
+        self.assertEqual((d["overview"], d["attempts"]), (False, 4))
         self.assertNotIn("Rust", d["text"]); self.assertIn("o/gh#7", d["text"])                    # nothing invented reaches the page; the exact facts do
 
     def test_nothing_changed_means_no_model_call(self):
