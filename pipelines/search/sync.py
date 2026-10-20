@@ -43,7 +43,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
             if not (reconcile or meta_only) and not any(due(st, m, force) for m in members):      # a reconcile or metadata repair ignores the minimum interval
                 run.log(f"{members[0].key}: synced recently, skipped")
                 continue
-            run.source("+".join(m.key for m in members), "sync")
+            run.source("+".join(m.key for m in members), "reconcile" if reconcile else "sync")
             g = ghissues.GhRepo(members, max_chars)
             try:
                 (g.reconcile(st, log=run.log) if reconcile else g.sync(st, since=since, limit=limit, log=run.log, meta_only=meta_only))
@@ -67,7 +67,7 @@ def run_sync(cfg, srcs, run, *, limit=None, since=None, force=False, no_fetch=Fa
         if not meta_only and not due(st, s, force):
             run.log(f"{s.key}: synced less than {s.min_interval_hours:g} h ago, skipped")
             continue
-        run.source(s.key, "sync")
+        run.source(s.key, "reconcile" if reconcile else "sync")
         try:
             if s.type == "git":
                 d = repos.ensure(cfg, s.repo, fetch=not no_fetch and s.repo not in fetched)

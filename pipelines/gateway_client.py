@@ -2,7 +2,7 @@
 The gateway starts the backend on first use and keeps it inside the memory budget; a 503 (backend starting, or no room yet)
 is retried after the Retry-After the gateway sends.  GATEWAY_URL overrides http://127.0.0.1:8090.
 """
-import json, os, time, urllib.error, urllib.request
+import json, re, os, time, urllib.error, urllib.request
 
 BASE = os.environ.get("GATEWAY_URL", "http://127.0.0.1:8090")
 
@@ -19,6 +19,9 @@ def post(path, body, timeout=900, retries=30, base=None):
             msg = e.read().decode(errors="replace")
             if e.code == 503 and attempt < retries:
                 time.sleep(float(e.headers.get("Retry-After") or 5))
+                continue
+            if e.code == 502 and re.search(r"Connect(Timeout|Error)", msg) and attempt < 3:      # the backend was not accepting connections (starting, or swapping): try again
+                time.sleep(15 * (attempt + 1))
                 continue
             raise RuntimeError(f"POST {path}: {e.code} {msg}") from None
         except urllib.error.URLError as e:

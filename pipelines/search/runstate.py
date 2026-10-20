@@ -34,15 +34,29 @@ class Run:
         self.s["phases"] = list(names)
         self._write(force=True)
 
+    def _done(self):
+        """The current source is finished: count each plan entry once per phase (a GitHub group "a+b" finishes both)."""
+        for k in (self.s["source"] or "").split("+"):
+            if k and k not in self.s["done"]:
+                self.s["done"].append(k)
+
+    def _enter(self, name):
+        """Switch to phase `name`: the previous one is done, and `done` counts the sources of the new one."""
+        if self.s["phase"] != name:
+            if self.s["phase"] in self.s["phases"] and self.s["phase"] not in self.s["phases_done"]:
+                self.s["phases_done"].append(self.s["phase"])
+            self.s["done"] = []
+
     def phase(self, name, message=""):
-        if self.s["phase"] in self.s["phases"] and self.s["phase"] != name and self.s["phase"] not in self.s["phases_done"]:
-            self.s["phases_done"].append(self.s["phase"])
+        self._enter(name)
         self.s.update(phase=name, source=None, message=message)
         self._write(force=True)
 
     def source(self, key, phase=None):
-        if self.s["source"] and self.s["source"] != key:
-            self.s["done"].append(self.s["source"])
+        if self.s["source"] != key:
+            self._done()
+        if phase:
+            self._enter(phase)
         self.s.update(source=key, message="", **({"phase": phase} if phase else {}))
         self._write(force=True)
 
@@ -57,8 +71,7 @@ class Run:
         self._write(force=True)
 
     def finish(self, ok=True):
-        if self.s["source"]:
-            self.s["done"].append(self.s["source"])
+        self._done()
         if self.s["phase"] in self.s["phases"] and self.s["phase"] not in self.s["phases_done"]:
             self.s["phases_done"].append(self.s["phase"])
         self.s.update(source=None, phase="finished", finished=time.time(), ok=ok and not self.s["errors"])

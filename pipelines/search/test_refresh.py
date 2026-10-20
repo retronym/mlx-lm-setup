@@ -129,6 +129,16 @@ class RunState(Case):
         s = runstate.read(self.cfg)
         self.assertEqual((s["phases"], s["phases_done"], s["ok"], s["running"]), (["sync", "embed"], ["sync", "embed"], True, False))
 
+    def test_sources_are_counted_per_phase(self):
+        run = runstate.Run(self.cfg, "refresh", ["p/a", "p/b", "p/c"])
+        run.phases(["sync", "reconcile", "embed"]); run.phase("sync")
+        run.source("p/a+p/b", "sync"); run.source("p/c", "sync")
+        run.source("p/a+p/b", "reconcile")                                        # a source tagged with the next phase moves the run into it
+        self.assertEqual((run.s["phases_done"], run.s["done"]), (["sync"], []))
+        run.phase("embed"); run.source("p/a", "embed"); run.source("p/b", "embed"); run.source("p/c", "embed"); run.finish()
+        s = runstate.read(self.cfg)
+        self.assertEqual((s["phases_done"], s["done"]), (["sync", "reconcile", "embed"], ["p/a", "p/b", "p/c"]))
+
     def test_a_dead_unfinished_run_is_stale(self):
         run = runstate.Run(self.cfg, "sync")
         run.s["pid"] = 2 ** 22 + 12345; run._write(force=True)                    # no such process

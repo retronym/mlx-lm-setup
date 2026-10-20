@@ -8,6 +8,19 @@ import ask, gate, plan
 TODAY = datetime.date(2026, 10, 6)
 
 
+
+_SAVED = []
+
+
+def setUpModule():
+    """The tests swap the gateway client and the chat functions on the shared modules: put them back, or later test modules talk to these fakes."""
+    _SAVED[:] = [(m, a, getattr(m, a)) for m, a in ((gate.gw, "post"), (ask, "chat"), (gate, "chat"), (plan, "chat"))]
+
+
+def tearDownModule():
+    for m, a, v in _SAVED:
+        setattr(m, a, v)
+
 class Fake:
     """A gateway: search results per (query, kinds), documents per ref, a decision model scoring by word overlap, an LLM answering from a script."""
 
