@@ -1,0 +1,19 @@
+{
+  "id": "mima",
+  "title": "MiMa",
+  "description": "The Migration Manager for Scala: binary-compatibility checks between library versions (mima-core, the sbt plugin, the CLI and the functional tests): code, issues, pull requests and release notes.",
+  "sources": [
+    {"id": "code", "type": "git", "label": "mima code", "color": "#7c3aed", "priority": 3,
+     "repo": "scala-garden/mima", "ref": "main", "paths": ["core", "sbtplugin", "cli", "functional-tests", "README.md"],
+     "exclude": ["**/target/**"],
+     "chunkers": {".scala": "scala_ts", ".java": "java_ts", ".md": "markdown"}},
+    {"id": "issues", "type": "github", "label": "mima issues", "color": "#8b5cf6", "priority": 4,
+     "repo": "scala-garden/mima", "include": ["issues", "comments"]},
+    {"id": "prs", "type": "github", "label": "mima PRs", "color": "#a78bfa", "priority": 5,
+     "repo": "scala-garden/mima", "include": ["prs", "comments", "reviews"]},
+    {"id": "releases", "type": "github_releases", "label": "mima releases", "color": "#ca8a04", "priority": 3,
+     "repo": "scala-garden/mima", "tag_messages": true},
+    {"id": "commits", "type": "git_log", "label": "mima commits", "color": "#5b21b6", "priority": 4,
+     "repo": "scala-garden/mima", "ref": "main", "merges": true}
+  ]
+}

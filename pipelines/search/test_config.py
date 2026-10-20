@@ -43,14 +43,14 @@ class ConfigTests(unittest.TestCase):
         cfg = config.load()
         u = cfg.default_universe()
         self.assertEqual(u.id, "scala-zinc")
-        self.assertEqual(set(u.projects), {"scala2", "scala3", "scala-dev", "zinc", "scala-asm", "scala-contributors"})
+        self.assertEqual(set(u.projects), {"scala2", "scala3", "scala-dev", "zinc", "scala-asm", "mima", "scala-contributors"})
         srcs = {s.key: s for s in cfg.universe_sources()}
         self.assertEqual((srcs["scala-contributors/forum"].repo, srcs["scala-contributors/forum"].kinds), ("contributors.scala-lang.org", ("topic", "post")))
         self.assertEqual(srcs["scala3/issues"].priority, 8)                     # the big trackers are the lowest priority
         self.assertIsNotNone(srcs["scala3/issues"].max_items_per_run)
         self.assertEqual(srcs["scala-asm/code"].ref, "main")
-        self.assertTrue(all(any(s.type == "github_releases" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm")))
-        self.assertTrue(all(any(s.type == "git_log" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm")))     # commit messages are indexed
+        self.assertTrue(all(any(s.type == "github_releases" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm", "mima")))
+        self.assertTrue(all(any(s.type == "git_log" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm", "mima")))     # commit messages are indexed
         self.assertGreater(srcs["scala3/commits"].priority, srcs["zinc/commits"].priority)
         self.assertEqual(cfg.project_db("zinc").name, "index.db")
 

@@ -20,7 +20,7 @@ config/universes/<id>.json  a universe: a named list of projects
 
 Every source also takes `id`, `label`, `color`, `priority` (1 highest .. 9), `enabled`, `min_interval_hours`, `max_items_per_run`. Labels and colours are what the web page shows, so adding a project needs no code change. `python config.py check` validates everything (all problems at once, with file and key path) and prints the tree; `python config.py show <universe>`.
 
-The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm, and the Scala Contributors forum). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
+The shipped universe is `scala-zinc` (Scala 2, Scala 3, scala-dev, Zinc, scala-asm, MiMa, and the Scala Contributors forum). A project belongs to as many universes as list it; all members of a universe must use the same embedding model.
 
 ```bash
 PY=/path/to/.venv-jev/bin/python                  # numpy, torch, transformers

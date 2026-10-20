@@ -212,7 +212,7 @@ ttl_s = 600
 
 [backends.scala-search]
 adapter = "search"
-description = "Search over a universe of indexed projects (Scala 2 and 3, scala-dev, Zinc, scala-asm): code, docs, issues, PRs and release notes. BM25 plus Qwen3-Embedding vectors, reranked by Qwen3-Reranker. Returns passages with links, not answers."
+description = "Search over a universe of indexed projects (Scala 2 and 3, scala-dev, Zinc, scala-asm, MiMa): code, docs, issues, PRs and release notes. BM25 plus Qwen3-Embedding vectors, reranked by Qwen3-Reranker. Returns passages with links, not answers."
 python = ".venv-jev/bin/python"
 index_dir = "pipelines/search"
 aliases = ["search", "scala-search"]
