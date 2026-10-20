@@ -47,7 +47,7 @@ class ConfigTests(unittest.TestCase):
         srcs = {s.key: s for s in cfg.universe_sources()}
         self.assertEqual((srcs["scala-contributors/forum"].repo, srcs["scala-contributors/forum"].kinds), ("contributors.scala-lang.org", ("topic", "post")))
         self.assertEqual(srcs["scala3/issues"].priority, 8)                     # the big trackers are the lowest priority
-        self.assertIsNotNone(srcs["scala3/issues"].max_items_per_run)
+        self.assertIsNone(srcs["scala3/issues"].max_items_per_run)                # full history, like scala/bug and scala/scala
         self.assertEqual(srcs["scala-asm/code"].ref, "main")
         self.assertTrue(all(any(s.type == "github_releases" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm", "mima")))
         self.assertTrue(all(any(s.type == "git_log" for s in cfg.projects[p].sources) for p in ("scala2", "scala3", "zinc", "scala-asm", "mima")))     # commit messages are indexed

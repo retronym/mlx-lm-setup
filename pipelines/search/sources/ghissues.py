@@ -10,7 +10,8 @@ Each stream keeps two cursors in the project database (under the pseudo-source `
   top_<s>, horizon_<s>, bf_done_<s>, win_<s>  where the backfill started, how far it goes, whether it finished, the window size.
 Widening a source's `since` in the config re-opens the backfill. Paging is explicit so it is polite and resumable: every page is committed
 and the cursors saved, the rate limit is checked every few pages (sleeping to the reset when little is left), a 403/429 is waited out, and
-long lists are re-anchored before GitHub's 10,000-item `page=` cap. Deletions are invisible to `since`; `reconcile()` lists all live numbers."""
+long lists are re-anchored before GitHub's 10,000-item `page=` cap. Deletions are invisible to `since`; `reconcile()` lists all live numbers
+(also by an anchored `since` walk: an unanchored list past page 100 is a 422)."""
 import calendar, json, re, subprocess, time
 from store import Chunk
 from sources.gitsrc import _split_big, MAX
@@ -40,6 +41,7 @@ def wait_for_quota(log=print):
         time.sleep(wait)
 
 
+EPOCH = "2000-01-01T00:00:00Z"  # predates GitHub; `since=1970-01-01T00:00:00Z` silently returns an empty list
 PAGE_LIMIT = 90               # (search.json github.page_limit) GitHub refuses `page=` beyond about 100 pages (10,000 items) on big lists: re-anchor `since` before that
 
 
@@ -71,6 +73,8 @@ def pages(path, log=print, **params):
         if page % 25 == 0:
             wait_for_quota(log)
         if page >= PAGE_LIMIT and "since" in params and items[-1].get("updated_at"):
+            if items[-1]["updated_at"] == params["since"]:
+                raise RuntimeError(f"gh api {path}: over {PAGE_LIMIT} pages updated at {params['since']}, cannot re-anchor past them")
             params = {**params, "since": items[-1]["updated_at"]}
             page = 1
         else:
@@ -259,7 +263,7 @@ class GhRepo:
             log(f"{self.key} {what}: {n} touched -> +{t[0]} ~{t[1]} -{t[2]} ={t[3]} chunks")
 
     def reconcile(self, store, log=print):
-        live = {i["number"] for p in pages(f"repos/{self.repo}/issues", log, state="all") for i in p}
+        live = {i["number"] for p in pages(f"repos/{self.repo}/issues", log, state="all", sort="updated", direction="asc", since=EPOCH) for i in p}
         n = gone = 0
         for m in self.members:
             docs = [r[0] for r in store.db.execute("SELECT DISTINCT doc FROM chunks WHERE source=?", (m.id,)) if int(r[0].split(":")[1]) not in live]

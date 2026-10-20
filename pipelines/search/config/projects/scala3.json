@@ -13,10 +13,10 @@
      "repo": "scala/scala3", "tag_messages": false},
     {"id": "issues", "type": "github", "label": "scala/scala3 issues", "color": "#db2777", "priority": 8,
      "repo": "scala/scala3", "include": ["issues", "comments"],
-     "max_items_per_run": 2000, "min_interval_hours": 24},
+     "min_interval_hours": 24},
     {"id": "prs", "type": "github", "label": "scala/scala3 PRs", "color": "#0284c7", "priority": 8,
      "repo": "scala/scala3", "include": ["prs", "comments", "reviews"],
-     "max_items_per_run": 2000, "min_interval_hours": 24},
+     "min_interval_hours": 24},
     {"id": "commits", "type": "git_log", "label": "scala/scala3 commits", "color": "#c2410c", "priority": 6,
      "repo": "scala/scala3", "ref": "main", "merges": true, "max_items_per_run": 4000}
   ]

@@ -221,6 +221,21 @@ class Paging(unittest.TestCase):
         self.assertEqual([c[0] for c in calls], [1, 2, 3, 1, 2, 3, 1, 2])                           # pages restart at 1 instead of passing the cap
         self.assertTrue(all(calls[i][1] != calls[i - 1][1] for i in (3, 6)))                        # ... re-anchored at the last item's updated_at
 
+    def test_reconcile_walks_anchored_past_the_page_cap(self):
+        calls = []
+        def fake_gh(args):
+            q = dict(kv.split("=") for kv in args[0].split("?", 1)[1].split("&"))
+            calls.append(q)
+            n = len(calls)
+            items = [{"number": n * 100 + i, "updated_at": f"2020-01-01T{n:02d}:00:{i % 60:02d}Z"} for i in range(100 if n < 5 else 3)]
+            return mock.Mock(returncode=0, stdout=json.dumps(items), stderr="")
+        st = Store(Path(tempfile.mkdtemp()) / "t.db")
+        with mock.patch.object(ghissues, "_gh", fake_gh), mock.patch.object(ghissues, "PAGE_LIMIT", 3), mock.patch.object(ghissues, "PAGE_DELAY", 0), \
+                mock.patch.object(ghissues, "wait_for_quota"):
+            ghissues.GhRepo([src("s", ["issues"])]).reconcile(st, log=lambda *_: None)
+        self.assertEqual(calls[0]["since"], ghissues.EPOCH)
+        self.assertEqual([int(c["page"]) for c in calls], [1, 2, 3, 1, 2])                          # never past the cap: an unanchored list 422s at page 101
+
     def test_a_dropped_connection_is_retried(self):
         answers = [mock.Mock(returncode=1, stdout="", stderr='Get "https://api.github.com/x": read tcp: read: operation timed out')]
         ok = mock.Mock(returncode=0, stdout=json.dumps([{"updated_at": "2020-01-01T00:00:00Z"}]), stderr="")
