@@ -44,39 +44,50 @@ def thread_text(st, src, doc):
     return head, full
 
 
-def summarize_threads(cfg, srcs, run, *, deadline=None, force_enabled=False):
-    """Returns (written, failed, skipped_unfaithful)."""
+def summarize_threads(cfg, srcs, run, *, deadline=None, force_enabled=False, room=None):
+    """Returns (written, failed, skipped_unfaithful). All candidates go to the LLM as one batch (llm.grounded_many), so with
+    refresh.memory.serial_models the LLM and the NLI model take turns instead of sharing memory. `room()`: see grounded_many."""
     from store import Store
     conf = cfg.search["llm"]["thread_summaries"]
     if not (conf["enabled"] or force_enabled):
         return 0, 0, 0
-    written = failed = 0
-    budget = conf["max_per_run"]
     by_project = {}
     for s in srcs:
         if s.type == "github" and cfg.project_db(s.project).exists():
             by_project.setdefault(s.project, []).append(s)
+    todo = []                                                            # (project, members, store, src, doc, comments, head, text)
     for pid, members in by_project.items():
         st = Store(cfg.project_db(pid))
         for src, doc, n in candidates(st, [m.id for m in members], conf["min_comments"]):
-            if budget <= 0 or (deadline and time.time() > deadline):
-                return written, failed, 0
-            run.source(f"{pid}/{src}", "enrich")
-            head, text = thread_text(st, src, doc)
-            num = doc.split(":")[1]
-            summary, ok, tries = llm.grounded([{"role": "system", "content": SYSTEM}, {"role": "user", "content": PROMPT.format(thread=text)}],
-                                              text, conf["model"], attempts=3, max_chars=1000, max_tokens=400)
-            budget -= 1
-            if not ok:
-                failed += 1
-                run.log(f"{pid}/{src}#{num}: summary not faithful after {tries} tries, not indexed")
-                continue
-            repo = next(m.repo for m in members if m.id == src)
-            title = f"{head.split('  ')[0] if head else f'{repo}#{num}'}  (thread summary)"
-            ch = Chunk(f"{src}:summary:{num}", doc, title, summary, f"https://github.com/{repo}/issues/{num}",
-                       {"kind": "summary", "number": int(num), "comments": n, "model": conf["model"], "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-            st.apply(src, [ch])
-            st.commit()
-            written += 1
-            run.log(f"{pid}/{src}#{num}: summarised ({n} comments, {tries} tr{'y' if tries == 1 else 'ies'})")
+            if len(todo) >= conf["max_per_run"]:
+                break
+            todo.append((pid, members, st, src, doc, n, *thread_text(st, src, doc)))
+    if not todo:
+        return 0, 0, 0
+    serial = cfg.search["refresh"]["memory"]["serial_models"]
+    run.log(f"enrich: {len(todo)} threads to summarise with {conf['model']}" + (", the LLM and the NLI model taking turns" if serial else ""))
+    results = llm.grounded_many([([{"role": "system", "content": SYSTEM}, {"role": "user", "content": PROMPT.format(thread=text)}], text) for *_, text in todo],
+                                conf["model"], attempts=3, max_chars=1000, max_tokens=400, serial=serial, room=room,
+                                go=lambda: not deadline or time.time() <= deadline)
+    written = failed = 0
+    for (pid, members, st, src, doc, n, head, _), res in zip(todo, results):
+        if res is None:                                                  # out of time or memory: first in line next run
+            continue
+        summary, ok, tries = res
+        run.source(f"{pid}/{src}", "enrich")
+        num = doc.split(":")[1]
+        if not ok:
+            failed += 1
+            run.log(f"{pid}/{src}#{num}: summary not faithful after {tries} tries, not indexed")
+            continue
+        repo = next(m.repo for m in members if m.id == src)
+        title = f"{head.split('  ')[0] if head else f'{repo}#{num}'}  (thread summary)"
+        ch = Chunk(f"{src}:summary:{num}", doc, title, summary, f"https://github.com/{repo}/issues/{num}",
+                   {"kind": "summary", "number": int(num), "comments": n, "model": conf["model"], "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        st.apply(src, [ch])
+        st.commit()
+        written += 1
+        run.log(f"{pid}/{src}#{num}: summarised ({n} comments, {tries} tr{'y' if tries == 1 else 'ies'})")
+    if results.count(None):
+        run.log(f"enrich: {results.count(None)} threads left for the next run (" + ("time budget" if deadline and time.time() > deadline else "not enough free memory") + ")")
     return written, failed, 0

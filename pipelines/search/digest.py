@@ -132,7 +132,7 @@ def make_digest(cfg, universe_id, since_ts, run=None):
     overview, ok, tries, pruned = llm.grounded_pruned([{"role": "system", "content": SYSTEM},
                                                        {"role": "user", "content": PROMPT.format(since=since, facts=text_facts, context=text_ctx)}],
                                                       text_facts + "\n\n" + text_ctx, conf["model"], attempts=4, max_chars=900, max_tokens=500,
-                                                      checks=checks(text_facts))
+                                                      checks=checks(text_facts), serial=cfg.search["refresh"]["memory"]["serial_models"])
     overview = overview if ok else ""                                  # an overview that cannot be made faithful is left out, never shown
     text = (overview + "\n\n" if overview else "") + text_facts
     d = {"universe": universe_id, "generated": time.time(), "since": since, "model": conf["model"], "checked": True, "overview": bool(overview), "attempts": tries,

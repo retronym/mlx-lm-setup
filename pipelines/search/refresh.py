@@ -4,7 +4,9 @@
   refresh.py [universe | project | project/source ...] [--tier high|normal|low | --max-priority N] [--budget-hours H]
              [--only phase,...] [--skip phase,...] [--local] [--force] [--dry-run]
 
-Phases, in order (LLM work runs before embedding so the big LLM and the embedder do not evict each other from the gateway's memory budget):
+Phases, in order (LLM work runs before embedding so the big LLM and the embedder do not evict each other from the gateway's memory budget;
+before enrich and digest the refresh waits for refresh.memory.min_available_gb of free memory, or skips them, and in them the LLM and
+the NLI model take turns, refresh.memory.serial_models):
   sync       git fetch + sync every source, in priority order (GitHub: forward walk, then the capped newest-first backfill)
   reconcile  drop issues, PRs and forum topics deleted upstream (weekly, `refresh.reconcile_every_days`; or --only reconcile)
   enrich     local-LLM thread summaries for long threads, checked against the thread by the NLI model (off unless llm.thread_summaries.enabled)
@@ -19,11 +21,14 @@ rest comes first next time. One run at a time (a lock); what it is doing is in <
 <data>/refresh.json. Exit status: 0 ok, 1 something failed, 3 another run is active."""
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import config, runstate
+import config, llm, runstate
+import gateway_client as gw
 from embed import targets, run_embed, load as load_embedder
 from sync import run_sync
 
 PHASES = ["sync", "reconcile", "enrich", "digest", "embed", "neighbours", "links", "verify"]
+MODEL_PHASES = ("enrich", "digest")                                  # the ones that load a large LLM and the NLI model
+MODEL_KINDS = (*llm.LLM_KINDS, "nli")                                # gateway backends stopped around them
 DEFAULT_SINCE_S = 26 * 3600
 
 
@@ -68,6 +73,25 @@ def plan(cfg, universe, srcs, args, state, now):
     return out
 
 
+def wait_for_memory(cfg, run, deadline, *, poll_s=300, sleep=time.sleep):
+    """Before an LLM phase: is there `refresh.memory.min_available_gb` of memory free? Idle gateway models are stopped first (they are the
+    gateway's own memory), then it waits up to `wait_minutes`, polling. Returns (ok, available_gb). Unknown (not macOS) counts as ok.
+    Starting a 17.5 GB LLM beside an IDE and a handful of sbt and bloop JVMs is how the Mac ran out of memory and hung at night."""
+    mem = cfg.search["refresh"]["memory"]
+    gw.release(*MODEL_KINDS)
+    until = time.time() + mem["wait_minutes"] * 60
+    if deadline:
+        until = min(until, deadline)
+    while True:
+        avail = gw.available_gb()
+        if avail is None or avail >= mem["min_available_gb"]:
+            return True, avail
+        if time.time() + poll_s > until:
+            return False, avail
+        run.log(f"waiting for memory: {avail:g} GB available, the LLM phases need {mem['min_available_gb']:g} GB")
+        sleep(poll_s)
+
+
 def main(argv):
     a = list(argv)
     def opt(name, default=None):
@@ -97,6 +121,9 @@ def main(argv):
         print(f"refresh plan for {uid}: {len(srcs)} sources" + (f" (tier {tier}: priority <= {max_priority})" if tier or maxp else "") + (f", budget {budget} h" if budget else ""))
         for ph, on, why in steps:
             print(f"  {'run ' if on else 'skip'} {ph:10} {why}")
+        mem = cfg.search["refresh"]["memory"]
+        print(f"  memory: {gw.available_gb()} GB available now; {', '.join(MODEL_PHASES)} need {mem['min_available_gb']:g} GB (wait up to {mem['wait_minutes']:g} min, then skip)"
+              + ("; the LLM and the NLI model take turns" if mem["serial_models"] else ""))
         for s in srcs:
             print(f"    p{s.priority} {s.key:22} {s.type:16}" + (f" cap {s.max_items_per_run}/run" if s.max_items_per_run else "") + (f" every >= {s.min_interval_hours:g} h" if s.min_interval_hours else ""))
         return 0
@@ -112,6 +139,12 @@ def main(argv):
                     continue
                 run.phase(ph)
                 t0, info, ok = time.time(), {}, True
+                if ph in MODEL_PHASES:
+                    room, avail = wait_for_memory(cfg, run, deadline)
+                    if not room:
+                        run.log(f"{ph}: skipped, only {avail:g} GB of memory available (needs {cfg.search['refresh']['memory']['min_available_gb']:g} GB); next run")
+                        result["phases"][ph] = {"ok": True, "secs": round(time.time() - t0, 1), "skipped": f"memory: {avail:g} GB available"}
+                        continue
                 try:
                     if ph in ("sync", "reconcile"):
                         gh_or_git = [s for s in srcs if s.type in ("github", "discourse")] if ph == "reconcile" else srcs
@@ -121,7 +154,8 @@ def main(argv):
                             state["last_reconcile"] = time.time()
                     elif ph == "enrich":
                         import enrich
-                        w, f, _ = enrich.summarize_threads(cfg, srcs, run, deadline=deadline, force_enabled="enrich" in args["only"])
+                        w, f, _ = enrich.summarize_threads(cfg, srcs, run, deadline=deadline, force_enabled="enrich" in args["only"],
+                                                           room=lambda: (gw.available_gb() or 1e9) >= cfg.search["refresh"]["memory"]["min_available_gb"])
                         info = {"summaries": w, "unfaithful": f}
                     elif ph == "digest":
                         import digest
@@ -155,6 +189,8 @@ def main(argv):
                 except Exception as e:                           # noqa: BLE001  a failing phase must not stop the later ones
                     ok, info = False, {"error": f"{type(e).__name__}: {e}"}
                     run.error(f"{ph}: {type(e).__name__}: {e}")
+                if ph in MODEL_PHASES and cfg.search["refresh"]["memory"]["serial_models"]:
+                    gw.release(*MODEL_KINDS)                      # done with them: the embedder and the next phase get the memory
                 result["phases"][ph] = {"ok": ok, "secs": round(time.time() - t0, 1), **info}
                 failed = failed or not ok
             result.update(finished=time.time(), ok=not failed)

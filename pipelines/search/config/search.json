@@ -16,7 +16,8 @@
     "at": "03:00",
     "tiers": {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}},
     "reconcile_every_days": 7,
-    "budget_hours": null
+    "budget_hours": null,
+    "memory": {"min_available_gb": 24, "wait_minutes": 60, "serial_models": true}
   },
   "llm": {
     "noise_filter": {"enabled": false, "model": "jevstyle-2b"},

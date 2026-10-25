@@ -16,22 +16,33 @@ from test_github import FakeGitHub, issue, comment, NOW
 
 
 class FakeGateway:
-    """Just enough of the gateway: /v1/embeddings, /v1/chat/completions, /api/entail, /api/search."""
+    """Just enough of the gateway: /v1/embeddings, /v1/chat/completions, /api/entail, /api/search, and /api/backends with stop, which tracks
+    which of the two models is resident (a call loads its model) so a test can see whether they ever were together."""
 
     def __init__(self):
         self.chat_calls, self.embed_calls, self.unfaithful_first, self.partly_unfaithful, self.overviews = [], 0, 0, False, []
+        self.resident, self.together, self.stops = set(), 0, []
         gw = self
 
         class H(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
 
-            def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                out = getattr(gw, "h" + self.path.replace("/", "_").replace("-", "_"))(body)
+            def reply(self, out):
                 raw = json.dumps(out).encode()
                 self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(raw))); self.end_headers()
                 self.wfile.write(raw)
+
+            def do_GET(self):
+                self.reply({"backends": [{"name": n, "kind": n, "state": "ready", "busy": False, "pinned": False} for n in sorted(gw.resident)]})
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if self.path.startswith("/api/backends/"):
+                    name = self.path.split("/")[3]
+                    gw.stops.append(name); gw.resident.discard(name)
+                    return self.reply({"name": name, "state": "stopped"})
+                self.reply(getattr(gw, "h" + self.path.replace("/", "_").replace("-", "_"))(body))
 
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
         self.url = f"http://127.0.0.1:{self.srv.server_address[1]}"
@@ -51,7 +62,12 @@ class FakeGateway:
         texts = [b["input"]] if isinstance(b["input"], str) else b["input"]
         return {"object": "list", "model": "fake-embed", "data": [{"index": i, "embedding": self.vec(t)} for i, t in enumerate(texts)]}
 
+    def load(self, kind):
+        self.resident.add(kind)
+        self.together += self.resident >= {"llm", "nli"}
+
     def h_v1_chat_completions(self, b):
+        self.load("llm")
         prompt = " ".join(m["content"] for m in b["messages"])
         self.chat_calls.append(prompt)
         if self.unfaithful_first > 0:
@@ -68,6 +84,7 @@ class FakeGateway:
         return {"choices": [{"message": {"content": text}}]}
 
     def h_api_entail(self, b):
+        self.load("nli")
         return {"probs": [[0.9, 0.05, 0.05] if "UNFAITHFUL" in h else [0.01, 0.9, 0.09] for h in b["hypotheses"]]}
 
     def h_api_search(self, b):
@@ -94,9 +111,10 @@ class Case(unittest.TestCase):
         os.environ["SEARCH_CONFIG_DIR"] = str(self.root / "cfg")
         self.cfg = config.load()
         self.gw = FakeGateway()
-        p = mock.patch.object(gateway_client, "BASE", self.gw.url)
-        p.start()
-        self.addCleanup(p.stop)
+        for p in (mock.patch.object(gateway_client, "BASE", self.gw.url), mock.patch.object(gateway_client, "_token", lambda: "t"),
+                  mock.patch.object(gateway_client, "available_gb", lambda: 40.0)):
+            p.start()
+            self.addCleanup(p.stop)
         self.addCleanup(self.gw.close)
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(lambda: os.environ.pop("SEARCH_CONFIG_DIR", None))
@@ -308,6 +326,28 @@ class ThreadSummaries(Case):
         self.assertEqual(self.run_enrich()[:2], (0, 1))
         self.assertEqual(st.db.execute("SELECT count(*) FROM chunks WHERE id LIKE '%summary%'").fetchone()[0], 0)
 
+    def test_the_llm_and_the_nli_model_take_turns(self):
+        st = self.store()
+        for n in (20, 21):
+            self.thread(st, n, 4)
+        self.gw.unfaithful_first = 1                                                # one goes round again
+        self.assertEqual(self.run_enrich()[:2], (2, 0))
+        self.assertEqual(self.gw.together, 0)                                       # never both resident
+        self.assertEqual(len(self.gw.chat_calls), 3)                                # round 1: two drafts, round 2: the retry
+        self.assertEqual(self.gw.stops, ["llm", "nli", "llm"])                      # one swap per step, not per thread
+
+    def test_together_when_not_serial(self):
+        self.cfg.search["refresh"]["memory"]["serial_models"] = False
+        st = self.store(); self.thread(st, 22, 4)
+        self.assertEqual(self.run_enrich()[:2], (1, 0))
+        self.assertEqual((self.gw.together, self.gw.stops), (1, []))
+
+    def test_no_room_leaves_threads_for_the_next_run(self):
+        st = self.store(); self.thread(st, 23, 4)
+        self.assertEqual(self.run_enrich(room=lambda: False)[:2], (0, 0))
+        self.assertEqual(self.gw.chat_calls, [])
+        self.assertEqual(st.db.execute("SELECT count(*) FROM chunks WHERE id LIKE '%summary%'").fetchone()[0], 0)
+
     def test_enabled_in_the_shipped_config(self):
         real = config.load(config.CONFIG_DIR)
         self.assertTrue(real.search["llm"]["thread_summaries"]["enabled"])
@@ -367,6 +407,23 @@ class WholeRefresh(Case):
         self.assertTrue(self.cfg.data_path("digest.json").exists())                 # the recent issue made it into a digest
         rs = runstate.read(self.cfg)
         self.assertEqual((rs["kind"], rs["ok"], rs["running"], rs["phases_done"]), ("refresh", True, False, ["sync", "enrich", "digest", "embed", "neighbours", "links", "verify"]))
+
+    def test_llm_phases_are_skipped_when_memory_is_short(self):
+        conf = json.loads((self.root / "cfg" / "search.json").read_text())
+        (self.root / "cfg" / "search.json").write_text(json.dumps({**conf, "refresh": {"memory": {"min_available_gb": 24, "wait_minutes": 0}}}))
+        with mock.patch.object(gateway_client, "available_gb", lambda: 6.5):
+            rc = refresh.main(["--only", "enrich,digest,verify"])
+        self.assertEqual(rc, 0)
+        ph = refresh.load_state(self.cfg)["last_run"]["phases"]
+        self.assertEqual((ph["enrich"]["skipped"], ph["digest"]["skipped"], ph["verify"]["ok"]), ("memory: 6.5 GB available", "memory: 6.5 GB available", True))
+        self.assertEqual(self.gw.chat_calls, [])
+
+    def test_waits_for_memory_then_goes_ahead(self):
+        self.gw.resident.add("llm")                                                 # an idle model left over: stopped before measuring
+        seen, slept = iter([10.0, 12.0, 30.0]), []
+        with mock.patch.object(gateway_client, "available_gb", lambda: next(seen)):
+            ok, avail = refresh.wait_for_memory(self.cfg, runstate.Run(self.cfg, "refresh"), None, sleep=slept.append)
+        self.assertEqual((ok, avail, slept, self.gw.stops), (True, 30.0, [300, 300], ["llm"]))
 
     def test_a_second_run_while_one_is_active_exits_3(self):
         with runstate.lock(self.cfg):

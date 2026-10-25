@@ -303,12 +303,14 @@ def _search(d, errors):
             elif isinstance(x, bool) or not isinstance(x, (int, float)) or x < 0:
                 v.err(f"related.weights.{k}", "expected a number >= 0")
     r = d.get("refresh", {}) if isinstance(d, dict) else {}
-    s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}),
+    s["refresh"] = v.obj(r, "refresh", {"at": (t_re(re.compile(r"^([01]\d|2[0-3]):[0-5]\d$"), "HH:MM"), "03:00"), "tiers": (lambda x: None, {}), "memory": (lambda x: None, {}),
                                         "reconcile_every_days": (t_int(1), 7), "budget_hours": (t_num(0, nullable=True), None)})
     tiers = r.get("tiers", {"high": {"max_priority": 3}, "normal": {"max_priority": 6}, "low": {"max_priority": 9}}) if isinstance(r, dict) else {}
     for name, t in (tiers.items() if isinstance(tiers, dict) else []):
         v.obj(t, f"refresh.tiers.{name}", {"max_priority": (t_int(1, 9), REQUIRED)})
     s["refresh"]["tiers"] = tiers
+    s["refresh"]["memory"] = v.obj(r.get("memory", {}) if isinstance(r, dict) else {}, "refresh.memory",
+                                   {"min_available_gb": (t_num(0), 24), "wait_minutes": (t_num(0), 60), "serial_models": (t_bool, True)})
     llm = d.get("llm", {}) if isinstance(d, dict) else {}
     task = lambda name, model, extra: v.obj(llm.get(name, {}) if isinstance(llm, dict) else {}, f"llm.{name}", {"enabled": (t_bool, False), "model": (t_str, model), **extra})
     s["llm"] = {"noise_filter": task("noise_filter", "jevstyle-2b", {}),

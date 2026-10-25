@@ -28,6 +28,58 @@ def post(path, body, timeout=900, retries=30, base=None):
             raise RuntimeError(f"POST {path}: gateway not reachable at {base or BASE} ({e.reason}); start it with: .venv/bin/python -m gateway") from None
 
 
+def get(path, timeout=30, base=None):
+    with urllib.request.urlopen((base or BASE) + path, timeout=timeout) as r:
+        return json.load(r)
+
+
+def _token():
+    """The gateway token (stopping a backend needs it): GATEWAY_TOKEN, else <checkout>/.gateway/token. None when there is none."""
+    if os.environ.get("GATEWAY_TOKEN"):
+        return os.environ["GATEWAY_TOKEN"]
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".gateway", "token")) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def release(*kinds, base=None):
+    """Stop the running, idle backends of these kinds ("llm", "nli", ...) now instead of when their TTL runs out, so that the next model a
+    batch job needs has the memory to itself. Busy backends are left alone (another client is using them). Returns the names stopped; without
+    a token, or with the gateway unreachable, nothing is stopped and the TTL does the job as before."""
+    token = _token()
+    if not token:
+        return []
+    try:
+        running = [b["name"] for b in get("/api/backends", base=base)["backends"]
+                   if b["kind"] in kinds and b["state"] in ("ready", "starting") and not b["busy"] and not b["pinned"]]
+    except (OSError, ValueError, KeyError):
+        return []
+    stopped = []
+    for name in running:
+        req = urllib.request.Request(f"{base or BASE}/api/backends/{name}/stop", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=120):         # returns once the process has exited and its memory is back
+                stopped.append(name)
+        except (OSError, urllib.error.HTTPError):
+            pass
+    return stopped
+
+
+def available_gb():
+    """Memory macOS could hand out now (kern.memorystatus_level, the percentage the kernel's jetsam policy works from, of physical memory),
+    in GB; None off macOS."""
+    import subprocess
+    try:
+        r = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.memorystatus_level", "hw.memsize"], capture_output=True, text=True, timeout=5)
+        pct, total = (int(x) for x in r.stdout.split())
+        return round(pct / 100 * total / 2**30, 1)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
 def _model(body, model):
     return {**body, "model": model} if model else body
 

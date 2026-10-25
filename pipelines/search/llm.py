@@ -41,25 +41,57 @@ def faithful(source, text, min_entailment=0.5, max_contradiction=0.5):
     return not bad, bad
 
 
+LLM_KINDS = ("llm", "vision", "image", "score")         # the big ones: stopped before the NLI model is needed when the models take turns
+
+
 def grounded(messages, source, model, attempts=3, max_chars=None, checks=None, **kw):
     """Ask the LLM, check the answer against `source`, retry with the problems. Returns (text, ok, tries). A last unfaithful answer is returned
     with ok=False: the caller decides whether to keep it (the indexer does not). `checks(text) -> [problem]` adds mechanical gates, run before
-    the NLI model (a failed gate skips the NLI call for that try)."""
-    convo, text, tries = list(messages), "", 0
+    the NLI model (a failed gate skips the NLI call for that try). One job of `grounded_many`; `serial` and `room` as there."""
+    return grounded_many([(messages, source)], model, attempts=attempts, max_chars=max_chars, checks=checks, **kw)[0] or ("", False, 0)
+
+
+def grounded_many(jobs, model, attempts=3, max_chars=None, checks=None, serial=False, room=None, go=None, **kw):
+    """`grounded` over many (messages, source) jobs, in rounds: the LLM drafts every pending job, then the NLI model checks every draft, and
+    the failures go round again with their problems. serial=True stops the LLM before the NLI model starts and the NLI model before the LLM
+    starts again (gateway_client.release), so the two never hold memory at the same time: a few model loads per batch instead of both
+    resident throughout (with a 17.5 GB LLM and a 9.5 GB NLI model beside the IDE and the JVMs, that is what ran the Mac out of memory).
+    `room()` is asked at the start of each round, once the previous model is released, and `go()` before each draft (a deadline); when
+    either says no, the jobs not finished come back as None. Returns [(text, ok, tries) | None] in job order."""
+    convos, out, pending = [list(m) for m, _ in jobs], [None] * len(jobs), list(range(len(jobs)))
     for tries in range(1, attempts + 1):
-        text = chat(convo, model, **kw)
-        problems = []
-        if max_chars and len(text) > max_chars:
-            problems.append(f"the answer is {len(text)} characters; keep it under {max_chars}")
-        if checks:
-            problems += checks(text)
-        if not problems:
-            problems += faithful(source, text)[1]
-        if not problems:
-            return text, True, tries
-        convo += [{"role": "assistant", "content": text},
-                  {"role": "user", "content": "Fix these problems and answer again, using only facts from the source text: " + " | ".join(problems[:5])}]
-    return text, False, tries
+        if not pending:
+            break
+        if serial:
+            gw.release("nli")
+        if room and not room():
+            break
+        drafted = []
+        for i in pending:
+            if go and not go():
+                break
+            text = chat(convos[i], model, **kw)
+            problems = []
+            if max_chars and len(text) > max_chars:
+                problems.append(f"the answer is {len(text)} characters; keep it under {max_chars}")
+            if checks:
+                problems += checks(text)
+            drafted.append((i, text, problems))
+        if serial and any(not p for _, _, p in drafted):
+            gw.release(*LLM_KINDS)
+        pending = []
+        for i, text, problems in drafted:
+            if not problems:
+                problems = faithful(jobs[i][1], text)[1]
+            if not problems:
+                out[i] = (text, True, tries)
+            elif tries == attempts:
+                out[i] = (text, False, tries)
+            else:
+                convos[i] += [{"role": "assistant", "content": text},
+                              {"role": "user", "content": "Fix these problems and answer again, using only facts from the source text: " + " | ".join(problems[:5])}]
+                pending.append(i)
+    return out
 
 
 def prune(source, text, min_entailment=0.5, max_contradiction=0.5):
@@ -82,6 +114,8 @@ def grounded_pruned(messages, source, model, **kw):
     text, ok, tries = grounded(messages, source, model, **kw)
     if ok:
         return text, True, tries, 0
+    if kw.get("serial"):
+        gw.release(*LLM_KINDS)                                           # pruning is NLI work
     pruned, removed = prune(source, text)
     if pruned and removed and faithful(source, pruned)[0] and not (kw.get("checks") and kw["checks"](pruned)):
         return pruned, True, tries, removed
