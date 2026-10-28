@@ -157,7 +157,7 @@ def pending_idents(text: str, body_from: int, checked: set):
             pass
         else:
             return                                              # need to see what follows
-        if name in KEYWORDS or "//" in line or line.count('"') % 2 == 1:
+        if name in KEYWORDS or "//" in line or line.count('"') % 2 == 1 or rest.startswith('"'):   # rest: s"..." interpolator
             yield s, e, "skip"
             continue
         before = text[line_start:s].rstrip()

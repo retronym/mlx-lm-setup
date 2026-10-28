@@ -90,10 +90,13 @@ object Answer:
     var start = offset
     while start > 0 && (Character.isJavaIdentifierPart(content(start - 1))) do start -= 1
     val name = String(content, start, offset - start)
-    val typedOk = tpdPath match
-      case (id @ tpd.Ident(n)) :: _ => n.toString == name && id.symbol.exists
-      case _ => false
+    val typedIdent = tpdPath match
+      case (id @ tpd.Ident(n)) :: _ if n.toString == name && id.span.exists && id.span.end == offset => Some(id)
+      case _ => None
+    val typedOk = typedIdent.exists(_.symbol.exists)
     if name.isEmpty || !Character.isJavaIdentifierStart(name.head) then done("none", "", Nil)
+    // the typer never reached it (an erroneous enclosing call drops its arguments): its scope is unknown, so no verdict
+    else if typedIdent.isEmpty then done("none", name, Nil)
     else if typedOk then done("ok", name, Nil)                    // the common case, without building the scope
     else
       inContext(Interactive.contextOfPath(tpdPath).withPhase(dotty.tools.dotc.core.Phases.typerPhase)):
