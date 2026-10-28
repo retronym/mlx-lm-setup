@@ -15,9 +15,11 @@ Lesson from elsewhere: measure the ceiling before building. Phase 0 is a go/no-g
 |---|---|---|
 | 0a | Ceiling on drafts: share of Qwen3-Coder tokens inside a selected name after its first token, per hop of a chain; scala3 `compiler/src` and Qwen-written Scala | DONE: small (×1.046 oracle) |
 | 0b | Value of masking: Qwen3-Coder writes held-out method bodies in scala3; share of compile errors that are not-a-member / not-found | DONE: large (71% of errors) |
-| — | **Stop for Jason's go/no-go** | TODO |
-| 1 | Compiler service (JVM, stock `scala3-presentation-compiler`): completions at an offset in an edited buffer; members of a selection prefix's type; one interface so retronym/scala3#84 can back it later | TODO, pending go |
-| 2 | Decoding loop on mlx-lm: trie of completions, linear drafts verified in one pass with KV rollback; optional mask; chained hops from member info; measure acceptance, tok/s, errors per body on the 0b bodies | TODO, pending go |
+| — | Jason's go: mask first, against a typecheck-and-retry baseline | DONE |
+| 1 | Compiler service (JVM): `/complete` after a dot, `/members`, `/scope` at a bare identifier, `/check`; one `CompletionService` interface with a stock 3.10.1-RC1 back end and a retronym/scala3#84 back end (`MultiReaderService`, `readUpTo`, `-Yinteractive-body-edits`) | DONE |
+| 2 | Decoding loop on mlx-lm: selection mask (chained hops too), linear trie drafts with KV rollback, bare identifiers checked at their end and taken back when unresolved; eval of 5 arms; demo page | DONE on 62 of 100 bodies (paused for memory) |
+| — | Finish the eval on the remaining 38 bodies | TODO |
+| — | #84 body-edit findings: `spliceAll` assertion; per-edit typing 75–145 ms instead of single-digit ms | TODO (investigating) |
 
 ## Phase 0 method
 
@@ -72,6 +74,32 @@ These are upper bounds: a mask removes the bad name but cannot guarantee that th
 
 - Drafts: no-go as a speed-up (oracle ×1.04 on scala3, ×1.01 on Qwen-written code; member-based linear drafts ×1.007).
 - Mask: worth building. Phase 2 should lead with the selection mask (b) and measure errors per body, with drafts as a by-product of the same trie rather than the goal. The baseline it must beat is generate → typecheck → feed the error back → retry.
+
+### Phases 1–2: errors per body (62 held-out bodies, all arms done)
+
+Greedy decoding, same prompt in every arm (assistant turn pre-filled up to the def's `=`), arms interleaved per body; errors are distinct errors inside the body, typechecked with the stock compiler as in 0b. Compiler: the #84 back end.
+
+| Arm | Bodies with errors | Errors | Not a member | Not found (term) | Not found (type) | Other | Tokens | Forward passes | Wall s |
+|---|---|---|---|---|---|---|---|---|---|
+| plain | 35 | 194 | 32 | 54 | 12 | 96 | 7708 | 7646 | 143 |
+| mask (selections) | 30 | 172 | 6 | 57 | 10 | 99 | 7047 | 6985 | 163 |
+| mask + drafts | 32 | 181 | 10 | | | | 6994 | 6743 | 161 |
+| mask + identifiers | 30 | 151 | 6 | 21 | 12 | 112 | 7350 | 7345 | 204 |
+| typecheck and retry (≤2) | 32 | 135 | 28 | 28 | 10 | 69 | 20271 | 20143 | 378 |
+
+- The selection mask removes 81% of not-a-member errors (32 → 6) at 506 compiler calls (~0.4 s per body); identifier checks remove 61% of term not-found errors (54 → 21) with 1200 checks and 22 take-backs, none of them forward references. Neither reduces the number of bodies with errors much (35 → 30): what is left is type mismatches and wrong-but-existing names, and a forced name raises "other" errors (96 → 112).
+- Retry fixes more of the other errors (96 → 69) but leaves most name errors (82 of 86 not-a-member and term not-found remain at least once), costs 2.6× the tokens and 2.6× the wall time. Mask + identifiers is the cheaper way to clean names; the combination (mask + identifiers, then retry) is the obvious next arm.
+- Drafts: 189 of 223 drafted tokens accepted (85%), 3.5% fewer forward passes than mask, no wall-clock gain (verify passes of several tokens cost more on the MoE). Greedy mask + drafts should equal mask; it differs on some bodies because a batched verify pass is not bit-identical to sequential decoding (near-ties flip).
+- Runaways (greedy repetition loops, cut by the loop detector) are ~9 bodies in every arm.
+
+What the model sees: only the file header and the 150 lines before the def, no tools. Many name errors (`readBoolean` on a `PickleBuffer`, `Flags.Explicit`, `paramClauseOpt`) are what a model that can grep the code base would avoid; an agentic arm (grep/read tools over `compiler/src`) is the fair comparison for agents.
+
+### Lessons from building it
+
+- Close the half-written body's brackets in the compiler's buffer: otherwise the rest of the file mis-parses and typing costs ~3 s instead of ~0.4 s (stock) on a 1.2k-line file.
+- "Resolves?" must be name lookup, not the typed tree's symbol: an identifier that fails its expected type becomes an error tree without a symbol. And no verdict where the typer never reached the identifier (an erroneous call drops its arguments).
+- Qwen writes `.name` as one token, so the end of one name and the start of the next hop come in one token; the mask must re-trigger there.
+- Binders are decidable from text with a little lookahead: lambda parameters, `case ... =>` patterns (also mid-line), definition names, named arguments, `for` binders, `s"..."` interpolators.
 
 ## Future work
 
