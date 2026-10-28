@@ -105,7 +105,8 @@ object Answer:
           val terms = raw.toList.flatMap { (n, ds) =>
             ds.find(_.symbol.isTerm).map(d => Member(n.toString, if d.symbol.is(Flags.Method) then "method" else "value", true))
           }
-          if terms.exists(_.name == name) then done("ok", name, Nil) else done("unresolved", name, terms)
+          val rootPackage = defn.RootClass.info.member(dotty.tools.dotc.core.Names.termName(name)).exists   // `dotty.tools...`
+          if rootPackage || terms.exists(_.name == name) then done("ok", name, Nil) else done("unresolved", name, terms)
 
 /** Stock 3.10.1-RC1: every request types the whole buffer. */
 class StockService(classpath: String, options: List[String]) extends CompletionService:

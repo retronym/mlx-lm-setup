@@ -165,8 +165,9 @@ def pending_idents(text: str, body_from: int, checked: set):
         if prev_word and prev_word.group(1) in BINDERS:
             yield s, e, "skip"
             continue
-        if before.lstrip().startswith("case ") and "=>" not in text[line_start:]:
-            yield s, e, "skip"                              # inside a pattern
+        last_case = max((m2.end() for m2 in re.finditer(r"\bcase\b", text[line_start:s])), default=-1)
+        if last_case >= 0 and "=>" not in text[line_start + last_case:s]:
+            yield s, e, "skip"                              # between `case` and its `=>`: a pattern
             continue
         if stripped.startswith(("=>", "<-", "@")) or (stripped.startswith(":") and not stripped.startswith("::")) \
                 or (stripped.startswith("=") and not stripped.startswith(("==", "=>"))):
