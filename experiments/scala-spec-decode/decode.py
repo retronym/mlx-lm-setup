@@ -95,6 +95,11 @@ class NameTrie:
         self.e += t
         return bool(self.live())
 
+    def complete(self) -> bool:
+        """The text is a whole name (it may still go on to a longer one)."""
+        i = bisect.bisect_left(self.F, self.e)
+        return i < len(self.F) and self.F[i] == self.e
+
     def unique_rest(self):
         live = self.live()
         return live[0][len(self.e):] if len(live) == 1 else None
@@ -260,12 +265,17 @@ class Decoder:
         st["prefill_s"] = time.time() - t0
         t0 = time.time()
 
+        def dot_token(s):
+            return s.startswith(".") and not s.startswith("..") and (len(s) == 1 or IDENT.match(s[1]) is not None)
+
         def choose(logits):
-            nonlocal trie
+            nonlocal trie, forced
             raw = int(mx.argmax(logits).item())
+            if use_trie and trie is not None and trie.complete() and dot_token(self.vocab.strs[raw]):
+                trie, forced = None, False                      # `a.b.c`: the name is done and `.c` starts the next hop
             if use_trie and trie is None:
                 s = self.vocab.strs[raw]
-                if s.startswith(".") and not s.startswith("..") and (len(s) == 1 or IDENT.match(s[1])) and selection_context(text):
+                if dot_token(s) and selection_context(text):
                     buf = before + text + "."
                     c = compiler_client.complete(uri, buf + "\n" + "\n".join(closers(text)) + "\n" + after, len(buf))
                     st["triggers"] += 1
