@@ -19,7 +19,7 @@ Lesson from elsewhere: measure the ceiling before building. Phase 0 is a go/no-g
 | 1 | Compiler service (JVM): `/complete` after a dot, `/members`, `/scope` at a bare identifier, `/check`; one `CompletionService` interface with a stock 3.10.1-RC1 back end and a retronym/scala3#84 back end (`MultiReaderService`, `readUpTo`, `-Yinteractive-body-edits`) | DONE |
 | 2 | Decoding loop on mlx-lm: selection mask (chained hops too), linear trie drafts with KV rollback, bare identifiers checked at their end and taken back when unresolved; eval of 5 arms; demo page | DONE on 62 of 100 bodies (paused for memory) |
 | — | Finish the eval on the remaining 38 bodies | TODO |
-| — | #84 body-edit findings: `spliceAll` assertion; per-edit typing 75–145 ms instead of single-digit ms | TODO (investigating) |
+| — | #84 findings: 88% of requests served as body edits (median 34 ms, the typing of the growing body); refusals on indentation-syntax bodies (a line appended after the rhs's last token; a dangling dot's syntax error landing on the next member); `spliceAll` assertion seen once, not reproduced in a 9178-request replay | DONE, reported (PR comment, notes) |
 
 ## Phase 0 method
 
