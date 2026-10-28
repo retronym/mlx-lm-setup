@@ -76,26 +76,36 @@ object Answer:
           }.distinctBy(_.name)
           done("ok", qt.show, ms)
 
-  /** At the end of a bare identifier: "ok" if it resolves, "unresolved" if not (then the members are every name in scope,
-   *  for a mask), "none" if `offset` is not at the end of a term identifier. */
+  /** At the end of a bare identifier: "ok" if its name is in scope there, "unresolved" if not (then the members are every
+   *  term name in scope, for a mask), "none" if `offset` is not at the end of a term identifier. Decided by name lookup (scope
+   *  completions with an empty prefix), not by the typed tree: an identifier that fails its expected type is replaced by an
+   *  error tree without a symbol even though the name exists. */
   def scope(unit: dotty.tools.dotc.CompilationUnit, offset: Int, t0: Long, t1: Long)(using c0: Context): Completions =
     given ctx: Context = c0.fresh.setCompilationUnit(unit)
     val pos = SourcePosition(unit.source, Span(offset))
     val tpdPath = Interactive.pathTo(unit.tpdTree, pos.span)
     def done(status: String, q: String, ms: List[Member]) =
       Completions(status, q, ms, (t1 - t0) / 1000000, (System.nanoTime - t0) / 1000000)
-    tpdPath match
-      case (id @ tpd.Ident(name)) :: _ if name.isTermName && id.span.exists && id.span.end == offset =>
-        if id.symbol.exists then done("ok", name.toString, Nil)   // found, even if its type has errors (a bad initialiser)
+    val content = unit.source.content
+    var start = offset
+    while start > 0 && (Character.isJavaIdentifierPart(content(start - 1))) do start -= 1
+    val name = String(content, start, offset - start)
+    val typedOk = tpdPath match
+      case (id @ tpd.Ident(n)) :: _ => n.toString == name && id.symbol.exists
+      case _ => false
+    if name.isEmpty || !Character.isJavaIdentifierStart(name.head) then done("none", "", Nil)
+    else if typedOk then done("ok", name, Nil)                    // the common case, without building the scope
+    else
+      inContext(Interactive.contextOfPath(tpdPath).withPhase(dotty.tools.dotc.core.Phases.typerPhase)):
+        val untpdPath = Interactive.resolveTypedOrUntypedPath(tpdPath, pos)
+        val mode = Completion.completionMode(untpdPath, pos)
+        if !mode.is(Completion.Mode.Scope) || !mode.is(Completion.Mode.Term) then done("none", name, Nil)
         else
-          inContext(Interactive.contextOfPath(tpdPath).withPhase(dotty.tools.dotc.core.Phases.typerPhase)):
-            val untpdPath = Interactive.resolveTypedOrUntypedPath(tpdPath, pos)
-            val raw = Completion.rawCompletions(pos, Completion.completionMode(untpdPath, pos), "", tpdPath, untpdPath)
-            val ms = raw.toList.flatMap { (n, ds) =>
-              ds.headOption.filter(_.symbol.isTerm).map(d => Member(n.toString, if d.symbol.is(Flags.Method) then "method" else "value", true))
-            }
-            done("unresolved", name.toString, ms)
-      case _ => done("none", "", Nil)
+          val raw = Completion.rawCompletions(pos, mode, "", tpdPath, untpdPath)
+          val terms = raw.toList.flatMap { (n, ds) =>
+            ds.find(_.symbol.isTerm).map(d => Member(n.toString, if d.symbol.is(Flags.Method) then "method" else "value", true))
+          }
+          if terms.exists(_.name == name) then done("ok", name, Nil) else done("unresolved", name, terms)
 
 /** Stock 3.10.1-RC1: every request types the whole buffer. */
 class StockService(classpath: String, options: List[String]) extends CompletionService:
