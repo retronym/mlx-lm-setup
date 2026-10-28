@@ -5,6 +5,7 @@ Arms (all greedy, same prompt, the assistant turn pre-filled up to the def's `=`
   draft       trie drafts only (lossless: must equal plain, up to numerics of batched verification)
   mask        selection mask
   mask+draft  selection mask, with drafts
+  mask+idents selection mask, and bare identifiers resolved at their end, an unresolved one taken back and rewritten under a scope mask
   retry       plain, then up to 2 retries with the compiler's errors fed back (the baseline the mask must beat)
 
 Arms are interleaved per body, so machine load (other sessions' JVMs) hits them alike. Results: <work>/arms/<arm>.jsonl (resumable);
@@ -16,7 +17,8 @@ import argparse, collections, json, os, sys, time
 
 from phase0b import MASKABLE, SYNTAX, jsonl, splice, tool
 
-ARMS = {"plain": dict(), "draft": dict(draft=True), "mask": dict(mask=True), "mask+draft": dict(mask=True, draft=True), "retry": dict()}
+ARMS = {"plain": dict(), "draft": dict(draft=True), "mask": dict(mask=True), "mask+draft": dict(mask=True, draft=True), "retry": dict(),
+        "mask+idents": dict(mask=True, idents=True)}
 
 
 def body_errors(task, body, check):
@@ -39,14 +41,16 @@ def run_arm(D, task, arm, log):
             fb = [f"line {x['line'] - task['line']}: {x['msg'].splitlines()[0]}" for x in errs[:8]]
             body, st = D.generate(task, on_event=on, feedback=(body, fb))
             attempts.append(dict(st))
-    tot = {k: sum(a.get(k, 0) for a in attempts) for k in ("tokens", "steps", "triggers", "interventions", "drafted", "accepted", "compiler_ms", "decode_s", "prefill_s")}
+    tot = {k: sum(a.get(k, 0) for a in attempts) for k in ("tokens", "steps", "triggers", "interventions", "drafted", "accepted", "compiler_ms",
+                                                          "decode_s", "prefill_s", "ident_checks", "backtracks", "forward_refs")}
+    tot["rejected"] = [n for a in attempts for n in a.get("rejected", [])]
     return {"id": task["id"], "arm": arm, "body": body, "attempts": len(attempts), "hit_max": attempts[-1]["hit_max"], "wall_s": time.time() - t0, **tot}
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("work")
-    ap.add_argument("--arms", default="plain,mask,mask+draft,draft,retry")
+    ap.add_argument("--arms", default="plain,mask,mask+draft,mask+idents,retry")
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--only", default="")
     ap.add_argument("--report-only", action="store_true")

@@ -63,10 +63,11 @@ class Vocab:
 
 
 class NameTrie:
-    """The `.name` strings of a member list, and how far the text has got into them (`e`, starting before the dot)."""
+    """The strings a name may be written as (`.name` for a member, `<lead>name` for a scope name after a backtrack), and how far
+    the text has got into them (`e`)."""
 
-    def __init__(self, names):
-        self.F = sorted({"." + n for n in names})
+    def __init__(self, strings):
+        self.F = sorted(set(strings))
         self.e = ""
 
     def live(self):
@@ -131,6 +132,71 @@ def closers(text: str) -> str:
     return "".join(reversed(stack))
 
 
+KEYWORDS = set("""abstract case catch class def do else enum export extends false final finally for forSome given if implicit import
+lazy match new null object override package private protected return sealed super then this throw trait true try type val var while
+with yield end inline opaque open transparent using derives infix as _""".split())
+BINDERS = {"val", "var", "def", "given", "type", "class", "object", "trait", "enum", "case", "import", "export", "package", "for", "end"}
+IDENT_RUN = re.compile(r"(?<![A-Za-z0-9_$.])[A-Za-z_][A-Za-z0-9_$]*")
+
+
+def pending_idents(text: str, body_from: int, checked: set):
+    """Bare identifiers that have ended and whose role is now decidable: yields (start, end, verdict), verdict "check" for a
+    reference the compiler should resolve, "skip" for a binder or a non-reference, and stops at the first one that needs more
+    text. A lambda parameter (`x =>`, `(a, b) =>`), a pattern binder, a definition's name, a named argument and a `for` binder
+    are binders; forward references to local defs written later cannot be told apart and are checked (and counted)."""
+    for m in IDENT_RUN.finditer(text, max(body_from, len(text) - 200)):
+        s, e = m.span()
+        if s in checked or e >= len(text):
+            continue
+        name = m.group(0)
+        line_start = text.rfind("\n", 0, s) + 1
+        line = text[line_start:s]
+        rest = text[e:]
+        stripped = rest.lstrip(" \t")
+        if "\n" in rest[:len(rest) - len(stripped)] or len(stripped) >= 2:
+            pass
+        else:
+            return                                              # need to see what follows
+        if name in KEYWORDS or "//" in line or line.count('"') % 2 == 1:
+            yield s, e, "skip"
+            continue
+        before = text[line_start:s].rstrip()
+        prev_word = re.search(r"([A-Za-z_][A-Za-z0-9_$]*)\s*$", before)
+        if prev_word and prev_word.group(1) in BINDERS:
+            yield s, e, "skip"
+            continue
+        if before.lstrip().startswith("case ") and "=>" not in text[line_start:]:
+            yield s, e, "skip"                              # inside a pattern
+            continue
+        if stripped.startswith(("=>", "<-", "@")) or (stripped.startswith(":") and not stripped.startswith("::")) \
+                or (stripped.startswith("=") and not stripped.startswith(("==", "=>"))):
+            yield s, e, "skip"
+            continue
+        if before.endswith(("(", ",")) and stripped[:1] in (",", ")"):
+            close = matching_close(text, s)                  # `(a, b) =>` or arguments? decided after the `)`
+            if close is None:
+                return
+            after = text[close + 1:].lstrip(" \t")
+            if len(after) < 2:
+                return
+            if after.startswith("=>"):
+                yield s, e, "skip"
+                continue
+        yield s, e, "check"
+
+
+def matching_close(text: str, s: int):
+    depth = 0
+    for i in range(s, len(text)):
+        if text[i] in "([{":
+            depth += 1
+        elif text[i] in ")]}":
+            if depth == 0:
+                return i
+            depth -= 1
+    return None
+
+
 def selection_context(text: str) -> bool:
     """Is a `.` here a selection on an expression (not a comment, string, number or `..`)?"""
     line = text[text.rfind("\n") + 1:]
@@ -172,14 +238,17 @@ class Decoder:
         return p + "```scala\n" + task["header"]
 
     # ---- generation ---------------------------------------------------------------------------------------------------
-    def generate(self, task, mask=False, draft=False, max_tokens=600, on_event=lambda e: None, feedback=None):
-        """Greedy decode of one body. Returns (body, stats)."""
+    def generate(self, task, mask=False, draft=False, idents=False, max_tokens=600, on_event=lambda e: None, feedback=None):
+        """Greedy decode of one body. Returns (body, stats). With `idents`, each bare identifier that ends in a reference
+        position is resolved by the compiler; an unresolved one is taken back (KV cache trimmed to the token where it starts)
+        and written again under a mask of the names in scope."""
         src, uri = task["src"], task["uri"]
         before, after = src[:task["eq"] + 1], src[task["rhsEnd"]:]
         use_trie = mask or draft
         st = dict(tokens=0, steps=0, triggers=0, guessing=0, none=0, compiler_ms=0.0, interventions=0, drafted=0, accepted=0,
-                  hit_max=False, decode_s=0.0)
-        text, trie = "", None
+                  hit_max=False, decode_s=0.0, ident_checks=0, backtracks=0, scope_ms=0.0)
+        text, trie, forced = "", None, False                  # forced: the trie came from a backtrack, so it masks
+        ids, starts, checked, rejected = [], [], set(), []
         prompt_ids = self.tok.encode(self.prompt(task, feedback), add_special_tokens=False)
         on_event({"type": "prompt", "tokens": len(prompt_ids), "header": task["header"]})
         cache = make_prompt_cache(self.model)
@@ -204,10 +273,10 @@ class Decoder:
                     on_event({"type": "trigger", "at": len(text), "status": c["status"], "qualifier": c["qualifier"],
                               "members": len(names), "ms": c["totalMs"], "sample": names[:40]})
                     if c["status"] == "ok" and names:
-                        trie = NameTrie(names)
+                        trie = NameTrie("." + n for n in names)
                     else:
                         st[c["status"]] = st.get(c["status"], 0) + 1
-            if mask and trie is not None:
+            if (mask or forced) and trie is not None:
                 m = trie.allowed(self.vocab)
                 if m.any():
                     choice = int(mx.argmax(mx.where(mx.array(m), logits, -mx.inf)).item())
@@ -219,13 +288,56 @@ class Decoder:
             return raw
 
         def accept(y, drafted=False):
-            nonlocal text, trie
+            nonlocal text, trie, forced
             s = self.vocab.strs[y]
+            ids.append(y)
+            starts.append(len(text))
             text += s
             st["tokens"] += 1
             if trie is not None and not trie.advance(s):
-                trie = None
+                trie, forced = None, False
             on_event({"type": "token", "text": s, "drafted": drafted, "constrained": trie is not None})
+
+        def check_idents():
+            """Resolve the bare identifiers that have ended; on the first unresolved one, rewind and return the token to
+            accept in its place (chosen under the scope mask), else None. The cache holds every accepted token but the last."""
+            nonlocal text, trie, forced
+            for s0, e0, verdict in list(pending_idents(text, 0, checked)):
+                checked.add(s0)
+                if verdict != "check":
+                    continue
+                buf = before + text[:e0]
+                c = compiler_client.scope(uri, buf + "\n" + "\n".join(closers(text[:e0])) + "\n" + after, len(buf))
+                st["ident_checks"] += 1
+                st["scope_ms"] += c["totalMs"]
+                st["compiler_ms"] += c["totalMs"]
+                if c["status"] != "unresolved":
+                    continue
+                names = [m["name"] for m in c["members"] if NAME.match(m["name"]) and "$" not in m["name"]]
+                if not names:
+                    continue
+                k = bisect.bisect_right(starts, s0) - 1          # the token the identifier starts in
+                lead = text[starts[k]:s0]
+                n = len(ids)
+                trim_prompt_cache(cache, n - k)
+                seq_k = ids[k - 1] if k > 0 else prompt_ids[-1]
+                cut = starts[k]
+                dropped = text[cut:]
+                rejected.append({"name": c["qualifier"], "at": s0})
+                del ids[k:], starts[k:]
+                text = text[:cut]
+                st["backtracks"] += 1
+                st["tokens"] -= n - k
+                on_event({"type": "backtrack", "name": c["qualifier"], "drop_tokens": n - k, "dropped": dropped, "scope": len(names),
+                          "ms": c["totalMs"]})
+                trie, forced = NameTrie(lead + nm for nm in names), True
+                logits = self.model(mx.array([[seq_k]]), cache=cache)[0, -1]
+                return choose_masked(logits)
+            return None
+
+        def choose_masked(logits):
+            m = trie.allowed(self.vocab)
+            return int(mx.argmax(mx.where(mx.array(m), logits, -mx.inf)).item()) if m.any() else int(mx.argmax(logits).item())
 
         y = prompt_ids[-1]
         logits = self.model(mx.array([[y]]), cache=cache)[0, -1]
@@ -235,9 +347,14 @@ class Decoder:
                 break
             accept(y)
             body, stop = cut_body(text, task["indent"])
-            if stop or st["tokens"] >= max_tokens:
+            if stop or st["tokens"] >= max_tokens or looping(text):
                 st["hit_max"] = not stop
                 break
+            if idents and trie is None:
+                back = check_idents()
+                if back is not None:
+                    y = back
+                    continue
             d = []
             if draft and trie is not None:
                 rest = trie.unique_rest()
@@ -265,8 +382,17 @@ class Decoder:
                 break
         st["decode_s"] = time.time() - t0
         body, _ = cut_body(text, task["indent"])
+        # a rejected name the body defines later was a forward reference: the check was wrong there
+        st["forward_refs"] = sum(1 for r in rejected if re.search(r"\b(def|val|var|lazy val)\s+" + re.escape(r["name"]) + r"\b", body))
+        st["rejected"] = [r["name"] for r in rejected]
         on_event({"type": "done", "stats": st, "body": body})
         return body, st
+
+
+def looping(text: str, n=6) -> bool:
+    """Greedy decoding falls into cycles (the same `case` arm again and again): a block of 2..n complete lines, three times."""
+    lines = [l for l in text.split("\n")[:-1] if l.strip()]
+    return any(len(lines) >= 3 * k and lines[-k:] == lines[-2 * k:-k] == lines[-3 * k:-2 * k] for k in range(2, n + 1))
 
 
 def cut_body(text: str, indent: int):

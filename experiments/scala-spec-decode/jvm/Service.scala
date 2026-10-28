@@ -2,6 +2,7 @@
 //
 //   POST /complete {"uri", "text", "offset"}  members selectable at `offset`, which sits right after a `.` in `text`
 //   POST /members  {"uri", "text", "offset"}  members of the type of the expression that ends at `offset` (no `.` needed)
+//   POST /scope    {"uri", "text", "offset"}  at the end of a bare identifier: does it resolve, and every name in scope there
 //   POST /check    {"uri", "text"}            errors after typer: [{id, offset, line, msg}], for the typecheck-and-retry baseline
 //   GET  /healthz
 //
@@ -29,6 +30,7 @@ trait CompletionService:
   def members(uri: String, text: String, offset: Int): Completions =
     complete(uri, text.substring(0, offset) + "." + text.substring(offset), offset + 1)
   def check(uri: String, text: String): List[Error]
+  def scope(uri: String, text: String, offset: Int): Completions
 
 case class Error(id: String, offset: Int, line: Int, msg: String)
 
@@ -74,6 +76,27 @@ object Answer:
           }.distinctBy(_.name)
           done("ok", qt.show, ms)
 
+  /** At the end of a bare identifier: "ok" if it resolves, "unresolved" if not (then the members are every name in scope,
+   *  for a mask), "none" if `offset` is not at the end of a term identifier. */
+  def scope(unit: dotty.tools.dotc.CompilationUnit, offset: Int, t0: Long, t1: Long)(using c0: Context): Completions =
+    given ctx: Context = c0.fresh.setCompilationUnit(unit)
+    val pos = SourcePosition(unit.source, Span(offset))
+    val tpdPath = Interactive.pathTo(unit.tpdTree, pos.span)
+    def done(status: String, q: String, ms: List[Member]) =
+      Completions(status, q, ms, (t1 - t0) / 1000000, (System.nanoTime - t0) / 1000000)
+    tpdPath match
+      case (id @ tpd.Ident(name)) :: _ if name.isTermName && id.span.exists && id.span.end == offset =>
+        if id.symbol.exists then done("ok", name.toString, Nil)   // found, even if its type has errors (a bad initialiser)
+        else
+          inContext(Interactive.contextOfPath(tpdPath).withPhase(dotty.tools.dotc.core.Phases.typerPhase)):
+            val untpdPath = Interactive.resolveTypedOrUntypedPath(tpdPath, pos)
+            val raw = Completion.rawCompletions(pos, Completion.completionMode(untpdPath, pos), "", tpdPath, untpdPath)
+            val ms = raw.toList.flatMap { (n, ds) =>
+              ds.headOption.filter(_.symbol.isTerm).map(d => Member(n.toString, if d.symbol.is(Flags.Method) then "method" else "value", true))
+            }
+            done("unresolved", name.toString, ms)
+      case _ => done("none", "", Nil)
+
 /** Stock 3.10.1-RC1: every request types the whole buffer. */
 class StockService(classpath: String, options: List[String]) extends CompletionService:
   private val driver = InteractiveDriver(List("-classpath", classpath, "-color:never") ++ options, CachedLogicalPackage.none)
@@ -88,6 +111,12 @@ class StockService(classpath: String, options: List[String]) extends CompletionS
     driver.run(u, text)
     val t1 = System.nanoTime
     Answer(driver.compilationUnits(u), offset, t0, t1)(using driver.currentCtx)
+
+  def scope(uri: String, text: String, offset: Int): Completions =
+    val t0 = System.nanoTime
+    val u = URI.create(uri)
+    driver.run(u, text)
+    Answer.scope(driver.compilationUnits(u), offset, t0, System.nanoTime)(using driver.currentCtx)
 
 object Service:
   def main(args: Array[String]): Unit =
@@ -115,6 +144,7 @@ object Service:
         reply(ex, 500, ujson.Obj("error" -> e.toString).render())
     server.createContext("/complete", ex => endpoint(svc.complete)(ex))
     server.createContext("/members", ex => endpoint(svc.members)(ex))
+    server.createContext("/scope", ex => endpoint(svc.scope)(ex))
     server.createContext("/check", ex =>
       try
         val req = ujson.read(ex.getRequestBody.readAllBytes())

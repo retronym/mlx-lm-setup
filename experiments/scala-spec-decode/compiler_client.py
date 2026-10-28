@@ -24,3 +24,8 @@ def members(uri: str, text: str, offset: int) -> dict:
 def check(uri: str, text: str) -> list:
     """Errors after typer: [{id, offset, line, msg}]."""
     return _post("check", uri, text)["errors"]
+
+
+def scope(uri: str, text: str, offset: int) -> dict:
+    """At the end of a bare identifier: status ok (resolves) | unresolved (members: every name in scope) | none."""
+    return _post("scope", uri, text, offset)

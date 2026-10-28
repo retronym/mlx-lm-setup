@@ -22,3 +22,10 @@ class MultiReaderService(classpath: String, options: List[?]) extends Completion
     driver.readUpTo(u, SourceFile.virtual(u, text), Span(offset)) { (ctx, unit, _) =>
       Answer(unit, offset, t0, System.nanoTime)(using ctx)
     }
+
+  def scope(uri: String, text: String, offset: Int): Completions =
+    val t0 = System.nanoTime
+    val u = URI.create(uri)
+    driver.readUpTo(u, SourceFile.virtual(u, text), Span(offset)) { (ctx, unit, _) =>
+      Answer.scope(unit, offset, t0, System.nanoTime)(using ctx)
+    }

@@ -36,6 +36,8 @@
           vertical-align: 1px; cursor: pointer; white-space: nowrap; }
   .chip.guess { background: var(--maskbg); color: var(--warn); }
   .chip.mask { background: var(--maskbg); color: var(--ink); }
+  .chip.back { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
+  .chip.back s { color: var(--muted); }
   .chip.draft { background: transparent; border: 1px solid var(--draft); color: var(--draft); }
   .members { display: block; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); background: var(--panel); border: 1px dashed var(--line);
              border-radius: 6px; padding: 4px 6px; margin: 2px 0; white-space: normal; }
@@ -52,7 +54,7 @@
   <h1>Compiler-guided decoding</h1>
   <label>Body <select id="task"></select></label>
   <label>Right column <select id="arm">
-    <option value="mask">mask</option><option value="mask+draft" selected>mask + draft</option><option value="draft">draft only</option>
+    <option value="mask">mask</option><option value="mask+draft">mask + draft</option><option value="mask+idents" selected>mask + identifiers</option><option value="draft">draft only</option>
   </select></label>
   <button class="primary" id="go">Run both</button>
   <span class="stats" id="where"></span>
@@ -64,6 +66,7 @@
     <span><span class="tok c">token</span> inside a member name (trie live)</span>
     <span><span class="tok m">token</span> the mask changed the model's choice</span>
     <span><span class="tok d">token</span> drafted from the trie and accepted</span>
+    <span><span class="chip back">↶ <s>name</s> not found</span> identifier taken back, rewritten from the names in scope</span>
   </div>
   <div class="grid">
     <section id="L"><h2>Plain decoding <span class="r"></span></h2><div class="code"></div><div class="stats"></div><div class="verdict"></div></section>
@@ -109,7 +112,7 @@ function run(id, arm) {
       if (e.type === "prompt") r.textContent = `prompt ${e.tokens} tokens · prefilling…`;
       else if (e.type === "trigger") {
         const c = document.createElement("span");
-        const q = e.qualifier.replace(/^.*\./, "").replace(/\[.*$/, "") || e.qualifier;
+        const q = e.qualifier.replace(/\[.*$/, "").replace(/^.*\./, "") || e.qualifier;
         c.className = "chip" + (e.status === "ok" ? "" : " guess");
         c.textContent = e.status === "ok" ? `⚙ ${q} · ${e.members} · ${Math.round(e.ms)} ms` : `⚙ ${e.status}: ${e.qualifier.slice(0, 60)} · no mask`;
         c.title = e.qualifier;
@@ -121,6 +124,14 @@ function run(id, arm) {
         };
         add(c);
       } else if (e.type === "mask") pendingMask = e;
+      else if (e.type === "backtrack") {
+        const toks = [...out.querySelectorAll(".tok")].slice(-e.drop_tokens);
+        if (toks.length) { let n = toks[0]; while (n) { const nx = n.nextSibling; n.remove(); n = nx; } }
+        ntok -= e.drop_tokens;
+        const c = document.createElement("span"); c.className = "chip back";
+        c.innerHTML = `↶ <s>${esc(e.name)}</s> not found · ${e.scope} in scope · ${Math.round(e.ms)} ms`;
+        c.title = "taken back: " + JSON.stringify(e.dropped); add(c);
+      }
       else if (e.type === "draft") {
         const c = document.createElement("span"); c.className = "chip draft"; c.textContent = "draft " + e.tokens.map(t => JSON.stringify(t)).join(" ");
         c.dataset.draft = "1"; add(c);
@@ -139,7 +150,8 @@ function run(id, arm) {
         out.classList.remove("cursor");
         s.querySelector(".stats").textContent =
           `${st.tokens} tokens in ${st.steps + 1} forward passes · decode ${st.decode_s.toFixed(1)} s of which compiler ${(st.compiler_ms / 1000).toFixed(1)} s · ` +
-          `${st.triggers} compiler calls · ${st.interventions} mask interventions · drafts ${st.accepted}/${st.drafted} accepted` + (st.hit_max ? " · hit max tokens" : "");
+          `${st.triggers} selection calls · ${st.interventions} mask interventions · drafts ${st.accepted}/${st.drafted} accepted` +
+          (st.ident_checks ? ` · ${st.ident_checks} identifiers resolved, ${st.backtracks} taken back` : "") + (st.hit_max ? " · hit max tokens" : "");
         s.querySelector(".verdict").textContent = "typechecking…";
       } else if (e.type === "check") {
         const v = s.querySelector(".verdict");
