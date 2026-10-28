@@ -88,7 +88,7 @@ Greedy decoding, same prompt in every arm (assistant turn pre-filled up to the d
 | typecheck and retry (≤2) | 32 | 135 | 28 | 28 | 10 | 69 | 20271 | 20143 | 378 |
 
 - The selection mask removes 81% of not-a-member errors (32 → 6) at 506 compiler calls (~0.4 s per body); identifier checks remove 61% of term not-found errors (54 → 21) with 1200 checks and 22 take-backs, none of them forward references. Neither reduces the number of bodies with errors much (35 → 30): what is left is type mismatches and wrong-but-existing names, and a forced name raises "other" errors (96 → 112).
-- Retry fixes more of the other errors (96 → 69) but leaves most name errors (82 of 86 not-a-member and term not-found remain at least once), costs 2.6× the tokens and 2.6× the wall time. Mask + identifiers is the cheaper way to clean names; the combination (mask + identifiers, then retry) is the obvious next arm.
+- Retry fixes more of the other errors (96 → 69) and name errors less (not-a-member + term not-found 86 → 56, against 86 → 27 with mask + identifiers), and costs 2.6× the tokens and 2.6× the wall time. Mask + identifiers is the cheaper way to clean names; the combination (mask + identifiers, then retry) is the obvious next arm.
 - Drafts: 189 of 223 drafted tokens accepted (85%), 3.5% fewer forward passes than mask, no wall-clock gain (verify passes of several tokens cost more on the MoE). Greedy mask + drafts should equal mask; it differs on some bodies because a batched verify pass is not bit-identical to sequential decoding (near-ties flip).
 - Runaways (greedy repetition loops, cut by the loop detector) are ~9 bodies in every arm.
 
