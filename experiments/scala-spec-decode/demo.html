@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compiler-guided decoding</title>
+<style>
+  :root { --bg: #fafaf9; --panel: #fff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --accent: #0369a1; --bad: #dc2626; --warn: #d97706; --good: #15803d;
+          --chip: #e0f2fe; --chipink: #075985; --maskbg: #fef3c7; --draft: #16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151413; --panel: #1c1a19; --ink: #f5f5f4; --muted: #a8a29e; --line: #2e2b29; --accent: #38bdf8; --bad: #f87171; --warn: #fbbf24; --good: #4ade80;
+            --chip: #0c4a6e; --chipink: #bae6fd; --maskbg: #78350f; --draft: #4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0 8px 0 0; font-weight: 650; }
+  label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 5px 16px; }
+  main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0; font-weight: 600; display: flex; gap: 10px; align-items: center; }
+  h2 .r { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; font-variant-numeric: tabular-nums; }
+  .code { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.55 ui-monospace, Menlo, monospace; background: var(--bg); border: 1px solid var(--line);
+          border-radius: 6px; padding: 8px 10px; overflow: auto; max-height: 70vh; }
+  .ctx { color: var(--muted); }
+  .hdr { color: var(--ink); font-weight: 600; }
+  .tok.c { text-decoration: underline dotted var(--accent); text-underline-offset: 3px; }
+  .tok.d { color: var(--draft); text-decoration: underline solid var(--draft); text-underline-offset: 3px; }
+  .tok.m { background: var(--maskbg); border-radius: 3px; }
+  .chip { display: inline-block; font: 11px/1.3 system-ui, sans-serif; background: var(--chip); color: var(--chipink); border-radius: 9px; padding: 1px 7px; margin: 0 3px;
+          vertical-align: 1px; cursor: pointer; white-space: nowrap; }
+  .chip.guess { background: var(--maskbg); color: var(--warn); }
+  .chip.mask { background: var(--maskbg); color: var(--ink); }
+  .chip.back { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
+  .chip.back s { color: var(--muted); }
+  .chip.draft { background: transparent; border: 1px solid var(--draft); color: var(--draft); }
+  .members { display: block; font: 11px/1.4 ui-monospace, Menlo, monospace; color: var(--muted); background: var(--panel); border: 1px dashed var(--line);
+             border-radius: 6px; padding: 4px 6px; margin: 2px 0; white-space: normal; }
+  .stats { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .verdict { font-size: 13px; } .verdict.ok { color: var(--good); } .verdict.bad { color: var(--bad); }
+  .verdict ul { margin: 4px 0 0; padding-left: 18px; font: 12px/1.45 ui-monospace, Menlo, monospace; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+  details summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+  .cursor::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; } @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Compiler-guided decoding</h1>
+  <label>Body <select id="task"></select></label>
+  <label>Right column <select id="arm">
+    <option value="mask">mask</option><option value="mask+draft">mask + draft</option><option value="mask+idents" selected>mask + identifiers</option><option value="draft">draft only</option>
+  </select></label>
+  <button class="primary" id="go">Run both</button>
+  <span class="stats" id="where"></span>
+</header>
+<main>
+  <div class="legend">
+    <span><span class="chip">⚙ Type · members · ms</span> the compiler was asked at a <code>.</code></span>
+    <span><span class="chip guess">⚙ guessing</span> qualifier did not type: no mask</span>
+    <span><span class="tok c">token</span> inside a member name (trie live)</span>
+    <span><span class="tok m">token</span> the mask changed the model's choice</span>
+    <span><span class="tok d">token</span> drafted from the trie and accepted</span>
+    <span><span class="chip back">↶ <s>name</s> not found</span> identifier taken back, rewritten from the names in scope</span>
+  </div>
+  <div class="grid">
+    <section id="L"><h2>Plain decoding <span class="r"></span></h2><div class="code"></div><div class="stats"></div><div class="verdict"></div></section>
+    <section id="R"><h2><span class="t">With the compiler</span> <span class="r"></span></h2><div class="code"></div><div class="stats"></div><div class="verdict"></div></section>
+  </div>
+  <section><details><summary>Original body (held out)</summary><div class="code" id="orig"></div></details></section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => s.replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+let ctx = null;
+
+async function init() {
+  const tasks = await (await fetch("/api/tasks")).json();
+  $("#task").innerHTML = tasks.map(t => `<option value="${t.id}">${t.id} · ${esc(t.name)} · ${esc(t.file)} (${t.lines} lines)</option>`).join("");
+  const pick = new URLSearchParams(location.hash.slice(1)).get("id");
+  if (pick) $("#task").value = pick;
+  await load();
+}
+async function load() {
+  ctx = await (await fetch("/api/context?id=" + $("#task").value)).json();
+  $("#where").textContent = ctx.file;
+  $("#orig").innerHTML = `<span class="ctx">${esc(ctx.before)}\n</span><span class="hdr">${esc(ctx.header)}</span>${esc(ctx.orig)}`;
+  for (const id of ["#L", "#R"]) reset(id);
+  location.hash = "id=" + ctx.id;
+}
+function reset(id) {
+  const s = $(id);
+  s.querySelector(".code").innerHTML = `<span class="ctx">${esc(ctx.before)}\n</span><span class="hdr">${esc(ctx.header)}</span><span class="out"></span>`;
+  s.querySelector(".stats").textContent = ""; s.querySelector(".verdict").innerHTML = ""; s.querySelector(".r").textContent = "";
+}
+
+function run(id, arm) {
+  return new Promise(resolve => {
+    reset(id);
+    const s = $(id), code = s.querySelector(".code"), out = s.querySelector(".out"), r = s.querySelector(".r");
+    out.classList.add("cursor");
+    let pendingMask = null, ntok = 0, t0 = performance.now();
+    const add = el => { out.appendChild(el); code.scrollTop = code.scrollHeight; };
+    const es = new EventSource(`/api/run?id=${ctx.id}&arm=${encodeURIComponent(arm)}`);
+    es.onmessage = m => {
+      const e = JSON.parse(m.data);
+      if (e.type === "prompt") r.textContent = `prompt ${e.tokens} tokens · prefilling…`;
+      else if (e.type === "trigger") {
+        const c = document.createElement("span");
+        const q = e.qualifier.replace(/\[.*$/, "").replace(/^.*\./, "") || e.qualifier;
+        c.className = "chip" + (e.status === "ok" ? "" : " guess");
+        c.textContent = e.status === "ok" ? `⚙ ${q} · ${e.members} · ${Math.round(e.ms)} ms` : `⚙ ${e.status}: ${e.qualifier.slice(0, 60)} · no mask`;
+        c.title = e.qualifier;
+        c.onclick = () => {
+          if (c.nextSibling && c.nextSibling.classList && c.nextSibling.classList.contains("members")) { c.nextSibling.remove(); return; }
+          const l = document.createElement("span"); l.className = "members";
+          l.textContent = e.sample.join("  ") + (e.members > e.sample.length ? `  … ${e.members - e.sample.length} more` : "");
+          c.after(l);
+        };
+        add(c);
+      } else if (e.type === "mask") pendingMask = e;
+      else if (e.type === "backtrack") {
+        const toks = [...out.querySelectorAll(".tok")].slice(-e.drop_tokens);
+        if (toks.length) { let n = toks[0]; while (n) { const nx = n.nextSibling; n.remove(); n = nx; } }
+        ntok -= e.drop_tokens;
+        const c = document.createElement("span"); c.className = "chip back";
+        c.innerHTML = `↶ <s>${esc(e.name)}</s> not found · ${e.scope} in scope · ${Math.round(e.ms)} ms`;
+        c.title = "taken back: " + JSON.stringify(e.dropped); add(c);
+      }
+      else if (e.type === "draft") {
+        const c = document.createElement("span"); c.className = "chip draft"; c.textContent = "draft " + e.tokens.map(t => JSON.stringify(t)).join(" ");
+        c.dataset.draft = "1"; add(c);
+      } else if (e.type === "verify") {
+        const chips = out.querySelectorAll("[data-draft]"); const c = chips[chips.length - 1];
+        if (c) { c.textContent += ` → ${e.accepted}/${e.of}`; delete c.dataset.draft; }
+      } else if (e.type === "token") {
+        ntok++;
+        const t = document.createElement("span");
+        t.className = "tok" + (e.drafted ? " d" : "") + (e.constrained ? " c" : "");
+        if (pendingMask) { t.classList.add("m"); t.title = `model wanted ${JSON.stringify(pendingMask.raw)}; mask chose ${JSON.stringify(pendingMask.chosen)}`; pendingMask = null; }
+        t.textContent = e.text; add(t);
+        r.textContent = `${ntok} tokens · ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+      } else if (e.type === "done") {
+        const st = e.stats;
+        out.classList.remove("cursor");
+        s.querySelector(".stats").textContent =
+          `${st.tokens} tokens in ${st.steps + 1} forward passes · decode ${st.decode_s.toFixed(1)} s of which compiler ${(st.compiler_ms / 1000).toFixed(1)} s · ` +
+          `${st.triggers} selection calls · ${st.interventions} mask interventions · drafts ${st.accepted}/${st.drafted} accepted` +
+          (st.ident_checks ? ` · ${st.ident_checks} identifiers resolved, ${st.backtracks} taken back` : "") + (st.hit_max ? " · hit max tokens" : "");
+        s.querySelector(".verdict").textContent = "typechecking…";
+      } else if (e.type === "check") {
+        const v = s.querySelector(".verdict");
+        if (!e.errors.length) { v.className = "verdict ok"; v.textContent = "✓ body typechecks"; }
+        else { v.className = "verdict bad"; v.innerHTML = `✗ ${e.errors.length} error(s) in the body<ul>` + e.errors.map(x => `<li>${esc(x.id)} (body line ${x.line}): ${esc(x.msg.split("\n")[0])}</li>`).join("") + "</ul>"; }
+        es.close(); resolve();
+      } else if (e.type === "error") { s.querySelector(".verdict").textContent = e.msg; es.close(); resolve(); }
+    };
+    es.onerror = () => { es.close(); resolve(); };
+  });
+}
+
+$("#task").onchange = load;
+window.addEventListener("hashchange", () => {
+  const id = new URLSearchParams(location.hash.slice(1)).get("id");
+  if (id && ctx && id !== ctx.id) { $("#task").value = id; load(); }
+});
+$("#go").onclick = async () => {
+  $("#go").disabled = true;
+  $("#R .t").textContent = "With the compiler: " + $("#arm").value;
+  await run("#L", "plain");
+  await run("#R", $("#arm").value);
+  $("#go").disabled = false;
+};
+init();
+</script>
+</body>
+</html>
