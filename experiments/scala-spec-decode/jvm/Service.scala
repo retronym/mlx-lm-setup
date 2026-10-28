@@ -139,7 +139,7 @@ object Service:
       try
         val req = ujson.read(ex.getRequestBody.readAllBytes())
         reply(ex, 200, f(req("uri").str, req("text").str, req("offset").num.toInt).toJson.render())
-      catch case e: Exception =>
+      catch case e: Throwable =>                                   // an assertion in the compiler must not kill the thread
         e.printStackTrace()
         reply(ex, 500, ujson.Obj("error" -> e.toString).render())
     server.createContext("/complete", ex => endpoint(svc.complete)(ex))
@@ -150,7 +150,9 @@ object Service:
         val req = ujson.read(ex.getRequestBody.readAllBytes())
         val errs = svc.check(req("uri").str, req("text").str)
         reply(ex, 200, ujson.Obj("errors" -> ujson.Arr.from(errs.map(e => ujson.Obj("id" -> e.id, "offset" -> e.offset, "line" -> e.line, "msg" -> e.msg)))).render())
-      catch case e: Exception => reply(ex, 500, ujson.Obj("error" -> e.toString).render()))
+      catch case e: Throwable =>
+        e.printStackTrace()
+        reply(ex, 500, ujson.Obj("error" -> e.toString).render()))
     server.createContext("/healthz", ex => reply(ex, 200, """{"status":"ok"}"""))
     server.start()
     println(s"compiler service on 127.0.0.1:$port")

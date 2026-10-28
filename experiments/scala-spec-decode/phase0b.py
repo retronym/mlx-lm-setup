@@ -22,8 +22,10 @@ def tool(*args, out):
                         capture_output=True, text=True, check=True).stdout.strip().splitlines()[-1]
     with open(out, "w") as fh:
         subprocess.run(["timeout", "3600", "scala-cli", "run", "-q", "--server=false", "--java-home", JAVA_HOME,
-                        os.path.join(HERE, "jvm", "Tool.scala"), "--", *args],
+                        os.path.join(HERE, "jvm"), "--main-class", "Tool", "--", *args],
                        env={**os.environ, "CP": cp}, stdout=fh, check=True)
+    if os.path.getsize(out) == 0:
+        raise RuntimeError(f"jvm/Tool.scala {args[0]} printed nothing (did it compile?)")
 
 
 def jsonl(path):

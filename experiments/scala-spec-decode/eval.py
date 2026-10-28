@@ -29,6 +29,7 @@ def body_errors(task, body, check):
 def run_arm(D, task, arm, log):
     import compiler_client
     t0 = time.time()
+    f0 = len(compiler_client.failures)
     events = collections.Counter()
     on = lambda ev: events.update([ev["type"]])
     body, st = D.generate(task, on_event=on, **ARMS[arm])
@@ -44,6 +45,7 @@ def run_arm(D, task, arm, log):
     tot = {k: sum(a.get(k, 0) for a in attempts) for k in ("tokens", "steps", "triggers", "interventions", "drafted", "accepted", "compiler_ms",
                                                           "decode_s", "prefill_s", "ident_checks", "backtracks", "forward_refs")}
     tot["rejected"] = [n for a in attempts for n in a.get("rejected", [])]
+    tot["service_failures"] = len(compiler_client.failures) - f0
     return {"id": task["id"], "arm": arm, "body": body, "attempts": len(attempts), "hit_max": attempts[-1]["hit_max"], "wall_s": time.time() - t0, **tot}
 
 
