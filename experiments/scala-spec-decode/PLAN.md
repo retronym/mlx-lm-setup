@@ -1,0 +1,51 @@
+# Plan: Scala 3 compiler completions in a local model's decoding
+
+## Problem
+
+A local code model (Qwen3-Coder-30B-A3B on mlx-lm) spends one decode step per token, including the tokens of member names that a compiler could have told it. The multi-reader presentation compiler (retronym/scala3#84) answers completions in about 1 ms on a warm session, cheap enough to sit inside a decoding loop. Two uses:
+
+- **Drafts (lossless).** Once the model's first token of a selected name is in the compiler's completion trie, draft the rest of the name and verify it in one forward pass, as in retrieval-style speculative decoding (REST, prompt lookup). New angle versus prior art: the drafts come from types, and chain (`a.b.c`) without re-typing.
+- **Mask (lossy, validating).** Restrict logits to the trie at a selection, as in monitor-guided decoding (Agrawal et al., NeurIPS 2023) and type-constrained decoding (Mündler et al., PLDI 2025). Never where the compiler is guessing (error-typed, `Dynamic`, unresolved qualifier).
+
+Lesson from elsewhere: measure the ceiling before building. Phase 0 is a go/no-go.
+
+## Phases
+
+| Phase | What | Status |
+|---|---|---|
+| 0a | Ceiling on drafts: share of Qwen3-Coder tokens inside a selected name after its first token, per hop of a chain; scala3 `compiler/src` and Qwen-written Scala | DONE (see results) |
+| 0b | Value of masking: Qwen3-Coder writes held-out method bodies in scala3; share of compile errors that are not-a-member / not-found | DONE (see results) |
+| — | **Stop for Jason's go/no-go** | TODO |
+| 1 | Compiler service (JVM, stock `scala3-presentation-compiler`): completions at an offset in an edited buffer; members of a selection prefix's type; one interface so retronym/scala3#84 can back it later | TODO, pending go |
+| 2 | Decoding loop on mlx-lm: trie of completions, linear drafts verified in one pass with KV rollback; optional mask; chained hops from member info; measure acceptance, tok/s, errors per body on the 0b bodies | TODO, pending go |
+
+## Phase 0 method
+
+- `ceiling.py`: tokenises with Qwen3-Coder's tokenizer (offsets), masks comments and literals, finds `.name` lexically. A selection's drafted tokens = tokens overlapping the name minus the first one (the model's choice). Qwen's BPE usually glues the `.` to the start of the name (`.symbol`, `.is`+`Class`), so the first token is often the whole name. Step ceiling = N / (N − drafted), assuming a verify pass costs one decode step.
+- `qwen_sample.py`: 40 varied Scala 3 prompts to the gateway's `qwen3-coder`, code blocks saved for `ceiling.py`.
+- `phase0b.py` + `jvm/Tool.scala`: parse scala3 `compiler/src` with a stock 3.10.1-RC1 compiler, sample member defs with 3–25 line bodies (≤2 per file, seed 1), keep those whose original body typechecks against the 3.10.1-RC1 jar (the checkout is ahead of it), ask Qwen3-Coder (gateway chat, temperature 0.2) for the body given the file header plus the 150 lines before the `=`, splice, typecheck to typer with the compiler's own flags (`-Yexplicit-nulls` etc.), count distinct errors inside the body by `ErrorMessageID`. Maskable = `NotAMemberID`, `MissingIdentID`.
+
+## Results
+
+### 0a: draft ceiling — small
+
+Qwen's BPE glues the `.` to the name (`.symbol`, `.owner`, `.is`+`Class`): in 92% of selections the first token carries the dot, and 43% of selected names are a single token, so there is nothing left to draft.
+
+| Corpus | Tokens | Selections | Drafted (oracle) | Step ceiling |
+|---|---|---|---|---|
+| scala3 `compiler/src` (572 files) | 2.27 M | 120.7 k | 4.38% of tokens (7.05% of code tokens) | ×1.046 |
+| — excluding import/package | | | 4.10% | ×1.043 |
+| Qwen3-Coder-written Scala 3 (40 prompts) | 23.8 k | 1.1 k | 1.10% | ×1.011 |
+
+Per hop (scala3, share of all tokens): hop 1 2.89%, hop 2 0.64%, hop 3 0.19%, hop 4+ 0.22%, first selection after `)`/`]` 0.17%. Chained hops are a quarter of the pool.
+
+Realistic linear drafts (`realistic.py`, typed selections in 78 scala3 files, every 6th): drafting to the longest common prefix of the qualifier's member names that match the model's first token covers 0.71% of tokens (×1.007), 30% of the oracle on the same typed selections (2.36%) and about 19% of the lexical oracle on those files (3.76%; the gap is mostly extension methods and type selections, which are not `Select`s on a member). The first token leaves one candidate in 47% of selections, median 2 candidates.
+
+For comparison, all identifiers (scope completions too, including definitions, which cannot be drafted) would be 16.5% of tokens, ×1.20 oracle.
+
+Verdict: drafts from selections alone cannot pay for the machinery; a verify pass of k tokens on an MoE also costs more than one decode step, so the real gain would be below ×1.01.
+
+## Future work
+
+- Tree drafts / tree attention; multi-threaded compiler access (out of scope for now).
+- Scope completions (identifiers not after a `.`): a bigger pool than selections, see 0a.
