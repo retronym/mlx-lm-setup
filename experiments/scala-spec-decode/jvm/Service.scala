@@ -1,7 +1,8 @@
-// Phase 1: a long-lived compiler service for the decoding loop, on a stock Scala 3 InteractiveDriver.
+// Phase 1: a long-lived compiler service for the decoding loop, on a Scala 3 InteractiveDriver (stock, or retronym/scala3#84).
 //
 //   POST /complete {"uri", "text", "offset"}  members selectable at `offset`, which sits right after a `.` in `text`
 //   POST /members  {"uri", "text", "offset"}  members of the type of the expression that ends at `offset` (no `.` needed)
+//   POST /check    {"uri", "text"}            errors after typer: [{id, offset, line, msg}], for the typecheck-and-retry baseline
 //   GET  /healthz
 //
 // Answers carry a status: "ok" (the qualifier typed, the list is the truth), "guessing" (error-typed or Dynamic qualifier: callers
@@ -27,25 +28,28 @@ trait CompletionService:
   def complete(uri: String, text: String, offset: Int): Completions
   def members(uri: String, text: String, offset: Int): Completions =
     complete(uri, text.substring(0, offset) + "." + text.substring(offset), offset + 1)
+  def check(uri: String, text: String): List[Error]
+
+case class Error(id: String, offset: Int, line: Int, msg: String)
 
 case class Member(name: String, kind: String, paramless: Boolean)
 case class Completions(status: String, qualifier: String, members: List[Member], typeMs: Long, totalMs: Long):
   def toJson: ujson.Value = ujson.Obj(
-    "status" -> status, "qualifier" -> qualifier, "typeMs" -> typeMs, "totalMs" -> totalMs,
+    "status" -> status, "qualifier" -> qualifier, "typeMs" -> typeMs.toDouble, "totalMs" -> totalMs.toDouble,
     "members" -> ujson.Arr.from(members.map(m => ujson.Obj("name" -> m.name, "kind" -> m.kind, "paramless" -> m.paramless))))
 
-class StockService(classpath: String, options: List[String]) extends CompletionService:
-  private val driver = InteractiveDriver(List("-classpath", classpath, "-color:never") ++ options, CachedLogicalPackage.none)
+/** The completion answer at `offset`, from a typed unit (shared by both back ends). */
+object Answer:
+  def errors(diags: List[dotty.tools.dotc.reporting.Diagnostic])(using Context): List[Error] =
+    diags.filter(_.level == dotty.tools.dotc.interfaces.Diagnostic.ERROR).map { d =>
+      val id = try d.msg.errorId.toString catch case _: Exception => "?"
+      Error(id, if d.pos.exists then d.pos.point else -1, if d.pos.exists then d.pos.line else -1, d.msg.message.linesIterator.take(3).mkString("\n"))
+    }
 
-  def complete(uri: String, text: String, offset: Int): Completions =
-    val t0 = System.nanoTime
-    val u = URI.create(uri)
-    driver.run(u, text)
-    val t1 = System.nanoTime
-    given ctx: Context = driver.currentCtx.fresh.setCompilationUnit(driver.compilationUnits(u))   // Completion reads the unit's tree
-    val source = driver.openedFiles(u)
-    val pos = SourcePosition(source, Span(offset))
-    val path = Interactive.pathTo(driver.openedTrees(u), pos)
+  def apply(unit: dotty.tools.dotc.CompilationUnit, offset: Int, t0: Long, t1: Long)(using c0: Context): Completions =
+    given ctx: Context = c0.fresh.setCompilationUnit(unit)          // Completion reads the unit's tree
+    val pos = SourcePosition(unit.source, Span(offset))
+    val path = Interactive.pathTo(unit.tpdTree, pos.span)
     val qual = path.collectFirst { case tpd.Select(q, _) if q.span.exists && q.span.end <= offset => q }
     def done(status: String, q: String, ms: List[Member]) =
       Completions(status, q, ms, (t1 - t0) / 1000000, (System.nanoTime - t0) / 1000000)
@@ -70,10 +74,30 @@ class StockService(classpath: String, options: List[String]) extends CompletionS
           }.distinctBy(_.name)
           done("ok", qt.show, ms)
 
+/** Stock 3.10.1-RC1: every request types the whole buffer. */
+class StockService(classpath: String, options: List[String]) extends CompletionService:
+  private val driver = InteractiveDriver(List("-classpath", classpath, "-color:never") ++ options, CachedLogicalPackage.none)
+
+  def check(uri: String, text: String): List[Error] =
+    val diags = driver.run(URI.create(uri), text)
+    Answer.errors(diags)(using driver.currentCtx)
+
+  def complete(uri: String, text: String, offset: Int): Completions =
+    val t0 = System.nanoTime
+    val u = URI.create(uri)
+    driver.run(u, text)
+    val t1 = System.nanoTime
+    Answer(driver.compilationUnits(u), offset, t0, t1)(using driver.currentCtx)
+
 object Service:
   def main(args: Array[String]): Unit =
     val port = args.headOption.map(_.toInt).getOrElse(8771)
-    val svc: CompletionService = StockService(sys.env("CP"), Tool.scalacOptions.filterNot(_.startsWith("-Ystop-after")))
+    val options = Tool.scalacOptions.filterNot(_.startsWith("-Ystop-after"))
+    // -Dservice.impl=<class> picks another back end, e.g. MultiReaderService (jvm84/, on a retronym/scala3#84 build)
+    val svc: CompletionService = sys.props.get("service.impl") match
+      case Some(cls) => Class.forName(cls).getConstructor(classOf[String], classOf[List[?]]).newInstance(sys.env("CP"), options).asInstanceOf[CompletionService]
+      case None => StockService(sys.env("CP"), options)
+    println(s"back end: ${svc.getClass.getSimpleName}")
     val server = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
     server.setExecutor(Executors.newSingleThreadExecutor())          // one Run, one reader
     def reply(ex: HttpExchange, code: Int, body: String): Unit =
@@ -91,6 +115,12 @@ object Service:
         reply(ex, 500, ujson.Obj("error" -> e.toString).render())
     server.createContext("/complete", ex => endpoint(svc.complete)(ex))
     server.createContext("/members", ex => endpoint(svc.members)(ex))
+    server.createContext("/check", ex =>
+      try
+        val req = ujson.read(ex.getRequestBody.readAllBytes())
+        val errs = svc.check(req("uri").str, req("text").str)
+        reply(ex, 200, ujson.Obj("errors" -> ujson.Arr.from(errs.map(e => ujson.Obj("id" -> e.id, "offset" -> e.offset, "line" -> e.line, "msg" -> e.msg)))).render())
+      catch case e: Exception => reply(ex, 500, ujson.Obj("error" -> e.toString).render()))
     server.createContext("/healthz", ex => reply(ex, 200, """{"status":"ok"}"""))
     server.start()
     println(s"compiler service on 127.0.0.1:$port")

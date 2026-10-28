@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "scala-decode-demo",
+      "runtimeExecutable": "/opt/homebrew/opt/mlx-lm/libexec/bin/python",
+      "runtimeArgs": ["-u", "experiments/scala-spec-decode/demo.py", "8772"],
+      "port": 8772
+    }
+  ]
+}
