@@ -10,7 +10,9 @@ import java.net.URI
 
 class MultiReaderService(classpath: String, options: List[?]) extends CompletionService:
   private val driver = InteractiveDriver(
-    List("-classpath", classpath, "-color:never", "-Yinteractive-body-edits") ++ options.map(_.toString), CachedLogicalPackage.none)
+    List("-classpath", classpath, "-color:never", "-Yinteractive-body-edits") ++ options.map(_.toString)
+      ++ sys.env.get("SERVICE_EXTRA_OPTIONS").toList.flatMap(_.split(" ").filter(_.nonEmpty)),   // e.g. -Yinteractive-log
+    CachedLogicalPackage.none)
 
   def check(uri: String, text: String): List[Error] =
     val u = URI.create(uri)
