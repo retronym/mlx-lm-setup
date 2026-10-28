@@ -13,8 +13,8 @@ Lesson from elsewhere: measure the ceiling before building. Phase 0 is a go/no-g
 
 | Phase | What | Status |
 |---|---|---|
-| 0a | Ceiling on drafts: share of Qwen3-Coder tokens inside a selected name after its first token, per hop of a chain; scala3 `compiler/src` and Qwen-written Scala | DONE (see results) |
-| 0b | Value of masking: Qwen3-Coder writes held-out method bodies in scala3; share of compile errors that are not-a-member / not-found | DONE (see results) |
+| 0a | Ceiling on drafts: share of Qwen3-Coder tokens inside a selected name after its first token, per hop of a chain; scala3 `compiler/src` and Qwen-written Scala | DONE: small (×1.046 oracle) |
+| 0b | Value of masking: Qwen3-Coder writes held-out method bodies in scala3; share of compile errors that are not-a-member / not-found | DONE: large (71% of errors) |
 | — | **Stop for Jason's go/no-go** | TODO |
 | 1 | Compiler service (JVM, stock `scala3-presentation-compiler`): completions at an offset in an edited buffer; members of a selection prefix's type; one interface so retronym/scala3#84 can back it later | TODO, pending go |
 | 2 | Decoding loop on mlx-lm: trie of completions, linear drafts verified in one pass with KV rollback; optional mask; chained hops from member info; measure acceptance, tok/s, errors per body on the 0b bodies | TODO, pending go |
@@ -44,6 +44,34 @@ Realistic linear drafts (`realistic.py`, typed selections in 78 scala3 files, ev
 For comparison, all identifiers (scope completions too, including definitions, which cannot be drafted) would be 16.5% of tokens, ×1.20 oracle.
 
 Verdict: drafts from selections alone cannot pay for the machinery; a verify pass of k tokens on an MoE also costs more than one decode step, so the real gain would be below ×1.01.
+
+### 0b: value of masking — large
+
+100 held-out bodies (from 130 sampled; 30 dropped because the original body already has errors against 3.10.1-RC1). The chat model often repeats the signature, nests a fence or runs on into further members; `clean_gen` strips those before splicing.
+
+| Group | Bodies | Note |
+|---|---|---|
+| Runaway | 16 | hit 1200 tokens, mostly repetition loops; an own decoding loop would stop at the dedent |
+| Syntax | 5 | parse/indentation errors or new errors outside the body |
+| Well-formed | 79 | 33 with errors in the body (42%), 72 distinct errors |
+
+On the 79 well-formed bodies:
+
+| Error | Errors | Bodies |
+|---|---|---|
+| `MissingIdentID` (Not found: x) | 27 | 9 |
+| `NotAMemberID` (x is not a member of T) | 24 | 16 |
+| `TypeMismatchID` | 5 | 5 |
+| missing given `Context`, reassignment to val, missing argument, wrong unapply arity, others | 16 | 11 |
+
+Not-a-member / not-found are 51 of 72 errors (71%), occur in 22 of the 33 bodies with errors, and are the only kind in 19 of them (24% of well-formed bodies). The selection mask alone (Phase 2b, `NotAMemberID`) touches 16 bodies, and is the only error in 12 (15% of well-formed bodies). `MissingIdentID` needs a scope mask at identifier starts (harder: new binding names must stay free), and is the only error in 4 bodies. Typical errors are plausible-sounding hallucinated members: `sym.denotation`, `sym.isTypeParameter`, `tp.nonEmpty`, `defTree.annotations`, `aliasType`.
+
+These are upper bounds: a mask removes the bad name but cannot guarantee that the forced alternative typechecks or means the right thing.
+
+### Go/no-go
+
+- Drafts: no-go as a speed-up (oracle ×1.04 on scala3, ×1.01 on Qwen-written code; member-based linear drafts ×1.007).
+- Mask: worth building. Phase 2 should lead with the selection mask (b) and measure errors per body, with drafts as a by-product of the same trie rather than the goal. The baseline it must beat is generate → typecheck → feed the error back → retry.
 
 ## Future work
 

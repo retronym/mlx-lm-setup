@@ -61,9 +61,44 @@ def ask(prefix: str, name: str) -> tuple[str, dict]:
     return (m.group(1) if m else text), d.get("usage", {})
 
 
+MEMBER_START = re.compile(r"\s*(def|val|var|lazy|override|private|protected|final|inline|given|@|class|object|trait|case class|end\b|/\*\*|//)")
+
+
+def clean_gen(gen: str, name: str) -> str:
+    """The chat model often repeats the signature, nests a fence, or runs on into further members: keep only the body."""
+    gen = re.sub(r"^\s*```\w*\n", "", gen)
+    gen = gen.split("```")[0]
+    m = re.match(r"\s*(?:(?:override|private|protected|final|inline)(?:\[\w+\])?\s+)*def\s+" + re.escape(name) + r"\b", gen)
+    if m:                                                   # drop the repeated signature: up to its `=` at bracket depth 0
+        depth, i = 0, m.end()
+        while i < len(gen):
+            c = gen[i]
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif c == "=" and depth == 0 and gen[i + 1:i + 2] not in ("=", ">") and gen[i - 1] not in "=!<>":
+                gen = gen[i + 1:]
+                break
+            i += 1
+    lines = gen.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if not lines:
+        return ""
+    if len(lines) > 1:                                      # cut where a member-level line follows the body
+        base = min(len(l) - len(l.lstrip()) for l in lines[1:] if l.strip()) if any(l.strip() for l in lines[1:]) else 0
+        for k in range(2, len(lines)):
+            l = lines[k]
+            if l.strip() and len(l) - len(l.lstrip()) < base and MEMBER_START.match(l):
+                lines = lines[:k]
+                break
+    return "\n".join(lines)
+
+
 def splice(src: str, d, gen: str) -> tuple[str, int, int]:
     """Put the generated body after the `=`, re-indented if the model dropped the indentation. Returns text, body start, end."""
-    gen = gen.rstrip()
+    gen = clean_gen(gen, d["name"]).rstrip()
     orig_newline = "\n" in src[d["eq"] + 1:d["rhsStart"]]
     lines = gen.split("\n")
     nonblank = [l for l in lines if l.strip()]
@@ -144,18 +179,24 @@ def main():
             continue
         src = open(d["file"], encoding="utf-8").read()
         gen, usage = ask(prefix_for(src, d), d["name"])
-        text, s, e = splice(src, d, gen)
         os.makedirs(out_dir, exist_ok=True)
-        with open(os.path.join(out_dir, os.path.basename(d["file"])), "w") as fh:
-            fh.write(text)
         with open(meta, "w") as fh:
-            json.dump({**d, "gen": gen, "bodyStart": s, "bodyEnd": e, "usage": usage, "orig": src[d["rhsStart"]:d["rhsEnd"]]}, fh)
+            json.dump({**d, "gen": gen, "usage": usage, "orig": src[d["rhsStart"]:d["rhsEnd"]]}, fh)
         done += 1
         el = time.time() - t0
         print(f"[gen {done}/{len(ok)}] {d['id']} {d['name']} {usage.get('completion_tokens')} tok  elapsed {el:.0f}s  eta {el / done * (len(ok) - done):.0f}s", flush=True)
 
     check_path = os.path.join(W, "check.jsonl")
     metas = [json.load(open(os.path.join(W, "gen", d["id"], "meta.json"))) for d in ok]
+    for m in metas:
+        src = open(m["file"], encoding="utf-8").read()
+        text, m["bodyStart"], m["bodyEnd"] = splice(src, m, m["gen"])
+        path = os.path.join(W, "gen", m["id"], os.path.basename(m["file"]))
+        if not os.path.exists(path) or open(path, encoding="utf-8").read() != text:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            if os.path.exists(check_path):
+                os.remove(check_path)                       # the splice changed: typecheck again
     if not os.path.exists(check_path):
         print(f"typechecking {len(metas)} spliced files ...", flush=True)
         tool("check", *[os.path.join(W, "gen", m["id"], os.path.basename(m["file"])) for m in metas], out=check_path)
@@ -163,41 +204,51 @@ def main():
     report(metas, checks, base)
 
 
+SYNTAX = {"ExpectedStartOfTopLevelDefinitionID", "IllegalStartOfStatementID", "ExpectedTokenButFoundID", "NoExplanationID"}
+
+
 def report(metas, checks, base):
-    kinds, body_err, outside_delta, n_bad, n_all_mask, crashes = collections.Counter(), 0, 0, 0, 0, 0
-    examples = collections.defaultdict(list)
-    per_body = []
+    """Bodies fall in three groups: runaway (hit max_tokens, usually a repetition loop), syntax (parse or indentation errors, or
+    new errors outside the body), well-formed. Name errors are counted on the well-formed ones, where they are not parse fallout."""
+    groups = collections.defaultdict(list)
     for m in metas:
-        c = checks.get(m["id"])
-        if c is None or "crash" in c:
-            crashes += 1
-            continue
-        inb = [e for e in c["errors"] if m["bodyStart"] <= e["offset"] < m["bodyEnd"]]
-        outside = len(c["errors"]) - len(inb) - len(base[m["file"]]["errors"])
-        outside_delta += max(0, outside)
-        # the compiler often reports one error twice (same offset and id); count distinct
-        inb = list({(e["id"], e["offset"]): e for e in inb}.values())
-        for e in inb:
-            kinds[e["id"]] += 1
-            if len(examples[e["id"]]) < 4:
-                examples[e["id"]].append(f"{m['id']} {m['name']}: {e['msg'].splitlines()[0][:140]}")
-        body_err += len(inb)
-        if inb:
-            n_bad += 1
-            if all(e["id"] in MASKABLE for e in inb):
-                n_all_mask += 1
-        per_body.append(len(inb))
-    n = len(per_body)
-    mask = sum(v for k, v in kinds.items() if k in MASKABLE)
-    print(f"\nbodies typechecked: {n} (crashes {crashes})")
-    print(f"bodies with >=1 error in the body: {n_bad} ({n_bad / max(1, n):.0%}); errors in bodies: {body_err}; new errors outside bodies: {outside_delta}")
-    print(f"not-a-member / not-found: {mask} of {body_err} body errors ({mask / max(1, body_err):.0%})")
-    print(f"bodies whose only errors are not-a-member / not-found: {n_all_mask} of {n_bad} bodies with errors")
-    print("\nby error id:")
-    for k, v in kinds.most_common():
-        print(f"  {v:4}  {k}")
-        for ex in examples[k]:
-            print(f"          {ex}")
+        c = checks[m["id"]]
+        inb_all = [e for e in c["errors"] if m["bodyStart"] <= e["offset"] < m["bodyEnd"]]
+        outside = len(c["errors"]) - len(inb_all) - len(base[m["file"]]["errors"])
+        inb = list({(e["id"], e["offset"]): e for e in inb_all}.values())   # the compiler often reports one error twice
+        if m["usage"].get("completion_tokens", 0) >= 1200:
+            g = "runaway"
+        elif outside > 0 or any(e["id"] in SYNTAX for e in inb):
+            g = "syntax"
+        else:
+            g = "well-formed"
+        groups[g].append((m, inb))
+    n = len(metas)
+    print(f"\nbodies: {n}; " + ", ".join(f"{g} {len(v)}" for g, v in groups.items()))
+    for g in ("well-formed", "syntax"):
+        rows = groups[g]
+        kinds, examples = collections.Counter(), collections.defaultdict(list)
+        has = collections.Counter()
+        for m, inb in rows:
+            for e in inb:
+                kinds[e["id"]] += 1
+                if len(examples[e["id"]]) < 3:
+                    examples[e["id"]].append(f"{m['id']} {m['name']}: {e['msg'].splitlines()[0][:130]}")
+            for k in {e["id"] for e in inb}:
+                has[k] += 1
+        bad = [r for r in rows if r[1]]
+        mask_bodies = sum(1 for _, inb in bad if any(e["id"] in MASKABLE for e in inb))
+        only_mask = sum(1 for _, inb in bad if all(e["id"] in MASKABLE for e in inb))
+        tot = sum(kinds.values())
+        mask = sum(v for k, v in kinds.items() if k in MASKABLE)
+        print(f"\n[{g}] {len(rows)} bodies, {len(bad)} with errors, {tot} distinct errors")
+        print(f"  not-a-member / not-found: {mask} of {tot} errors ({mask / max(1, tot):.0%}); "
+              f"in {mask_bodies} of {len(bad)} bodies with errors; the only kind in {only_mask}")
+        print("  by error id (errors, bodies):")
+        for k, v in kinds.most_common():
+            print(f"    {v:4} {has[k]:3}  {k}")
+            for ex in examples[k]:
+                print(f"               {ex}")
 
 
 if __name__ == "__main__":
