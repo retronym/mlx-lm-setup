@@ -1,5 +1,3 @@
-//> using scala 3.10.1-RC1
-//> using dep org.scala-lang::scala3-compiler:3.10.1-RC1
 
 // Phase 0b helper on a stock Scala 3 compiler.
 //   defs  <file>...   method bodies held out for generation, as JSON lines

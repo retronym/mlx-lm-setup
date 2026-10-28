@@ -1,0 +1,96 @@
+// Phase 1: a long-lived compiler service for the decoding loop, on a stock Scala 3 InteractiveDriver.
+//
+//   POST /complete {"uri", "text", "offset"}  members selectable at `offset`, which sits right after a `.` in `text`
+//   POST /members  {"uri", "text", "offset"}  members of the type of the expression that ends at `offset` (no `.` needed)
+//   GET  /healthz
+//
+// Answers carry a status: "ok" (the qualifier typed, the list is the truth), "guessing" (error-typed or Dynamic qualifier: callers
+// must neither draft nor mask), "none" (not a selection). Requests are served one at a time on one thread, so the driver's Run is
+// never shared. Classpath: CP environment variable; port: first argument (default 8771).
+
+import dotty.tools.dotc.ast.tpd
+import dotty.tools.dotc.core.Contexts.*
+import dotty.tools.dotc.core.Symbols.*
+import dotty.tools.dotc.core.Types.*
+import dotty.tools.dotc.core.Flags
+import dotty.tools.dotc.interactive.{CachedLogicalPackage, Completion, Interactive, InteractiveDriver}
+import dotty.tools.dotc.util.SourcePosition
+import dotty.tools.dotc.util.Spans.Span
+
+import com.sun.net.httpserver.{HttpExchange, HttpServer}
+import java.net.{InetSocketAddress, URI}
+import java.util.concurrent.Executors
+
+/** What the decoder needs from a compiler. The stock implementation types the whole buffer per call; the multi-reader
+ *  presentation compiler (retronym/scala3#84) can implement the same interface with targeted typing of the edited body. */
+trait CompletionService:
+  def complete(uri: String, text: String, offset: Int): Completions
+  def members(uri: String, text: String, offset: Int): Completions =
+    complete(uri, text.substring(0, offset) + "." + text.substring(offset), offset + 1)
+
+case class Member(name: String, kind: String, paramless: Boolean)
+case class Completions(status: String, qualifier: String, members: List[Member], typeMs: Long, totalMs: Long):
+  def toJson: ujson.Value = ujson.Obj(
+    "status" -> status, "qualifier" -> qualifier, "typeMs" -> typeMs, "totalMs" -> totalMs,
+    "members" -> ujson.Arr.from(members.map(m => ujson.Obj("name" -> m.name, "kind" -> m.kind, "paramless" -> m.paramless))))
+
+class StockService(classpath: String, options: List[String]) extends CompletionService:
+  private val driver = InteractiveDriver(List("-classpath", classpath, "-color:never") ++ options, CachedLogicalPackage.none)
+
+  def complete(uri: String, text: String, offset: Int): Completions =
+    val t0 = System.nanoTime
+    val u = URI.create(uri)
+    driver.run(u, text)
+    val t1 = System.nanoTime
+    given ctx: Context = driver.currentCtx.fresh.setCompilationUnit(driver.compilationUnits(u))   // Completion reads the unit's tree
+    val source = driver.openedFiles(u)
+    val pos = SourcePosition(source, Span(offset))
+    val path = Interactive.pathTo(driver.openedTrees(u), pos)
+    val qual = path.collectFirst { case tpd.Select(q, _) if q.span.exists && q.span.end <= offset => q }
+    def done(status: String, q: String, ms: List[Member]) =
+      Completions(status, q, ms, (t1 - t0) / 1000000, (System.nanoTime - t0) / 1000000)
+    qual match
+      case None => done("none", "", Nil)
+      case Some(q) =>
+        val qt = q.tpe.widen
+        if !qt.exists || qt.isErroneous || qt.derivesFrom(defn.DynamicClass) then done("guessing", qt.show, Nil)
+        else
+          val (_, items) = Completion.completions(pos)
+          val ms = items.filter(_.symbols.nonEmpty).map { c =>
+            val sym = c.symbols.head
+            val kind =
+              if sym.isType then "type"
+              else if sym.is(Flags.Module) then "object"
+              else if sym.is(Flags.Method) then (if sym.is(Flags.ExtensionMethod) then "extension" else "method")
+              else "value"
+            val paramless = !sym.is(Flags.Method) || (sym.info.stripPoly match
+              case _: MethodType => false
+              case _ => true)
+            Member(c.label, kind, paramless)
+          }.distinctBy(_.name)
+          done("ok", qt.show, ms)
+
+object Service:
+  def main(args: Array[String]): Unit =
+    val port = args.headOption.map(_.toInt).getOrElse(8771)
+    val svc: CompletionService = StockService(sys.env("CP"), Tool.scalacOptions.filterNot(_.startsWith("-Ystop-after")))
+    val server = HttpServer.create(InetSocketAddress("127.0.0.1", port), 0)
+    server.setExecutor(Executors.newSingleThreadExecutor())          // one Run, one reader
+    def reply(ex: HttpExchange, code: Int, body: String): Unit =
+      val bytes = body.getBytes("UTF-8")
+      ex.getResponseHeaders.set("Content-Type", "application/json")
+      ex.sendResponseHeaders(code, bytes.length)
+      ex.getResponseBody.write(bytes)
+      ex.close()
+    def endpoint(f: (String, String, Int) => Completions)(ex: HttpExchange): Unit =
+      try
+        val req = ujson.read(ex.getRequestBody.readAllBytes())
+        reply(ex, 200, f(req("uri").str, req("text").str, req("offset").num.toInt).toJson.render())
+      catch case e: Exception =>
+        e.printStackTrace()
+        reply(ex, 500, ujson.Obj("error" -> e.toString).render())
+    server.createContext("/complete", ex => endpoint(svc.complete)(ex))
+    server.createContext("/members", ex => endpoint(svc.members)(ex))
+    server.createContext("/healthz", ex => reply(ex, 200, """{"status":"ok"}"""))
+    server.start()
+    println(s"compiler service on 127.0.0.1:$port")
